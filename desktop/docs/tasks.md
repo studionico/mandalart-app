@@ -233,10 +233,10 @@
 
 ---
 
-## フェーズ 23: デスクトップ固有機能 ⬜
+## フェーズ 23: デスクトップ固有機能 🔄
 
-- [ ] グローバルショートカット: `Cmd/Ctrl+Shift+M` でウィンドウ表示/非表示
-  - `tauri-plugin-global-shortcut` を使用
+- [x] グローバルショートカット: `Cmd/Ctrl+Shift+M` でウィンドウ表示/非表示
+  - `useGlobalShortcut` hook + `tauri-plugin-global-shortcut`
 - [ ] 画像ファイル D&D: セルへのファイルドロップ → アプリデータディレクトリに保存
   - `tauri-plugin-fs` を使用
   - `src/lib/api/storage.ts` の暫定実装を本実装に置き換え

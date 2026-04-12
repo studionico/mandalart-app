@@ -1,8 +1,11 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import EditorPage from './pages/EditorPage'
+import { useGlobalShortcut } from './hooks/useGlobalShortcut'
 
 export default function App() {
+  useGlobalShortcut()
+
   return (
     <HashRouter>
       <Routes>
