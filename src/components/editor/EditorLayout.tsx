@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEditorStore } from '@/store/editorStore'
 import { useClipboardStore } from '@/store/clipboardStore'
 import { useGrid } from '@/hooks/useGrid'
+import { useSubGrids } from '@/hooks/useSubGrids'
 import { useRealtime } from '@/hooks/useRealtime'
 import { useOffline } from '@/hooks/useOffline'
 import { useUndo } from '@/hooks/useUndo'
@@ -45,6 +46,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const clipboard = useClipboardStore()
 
   const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
+  const { subGrids, reload: reloadSubGrids } = useSubGrids(gridData?.cells ?? [])
   const gridRef = useRef<HTMLDivElement>(null)
 
   // 並列グリッド
@@ -124,7 +126,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     () => reload(),
   )
 
-  const { handleDragStart, handleDrop } = useDragAndDrop(reload)
+  const { handleDragStart, handleDrop } = useDragAndDrop(useCallback(() => {
+    reload()
+    reloadSubGrids()
+  }, [reload, reloadSubGrids]))
 
   // シングルクリック: 掘り下げ or 編集フォールバック
   async function handleCellClick(cell: Cell) {
@@ -354,10 +359,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               />
             )}
             {gridData && viewMode === '9x9' && (
-              <div className="text-center text-sm text-gray-400 py-8">
-                9×9 表示では各サブグリッドをインライン表示
-                <br />（サブグリッドデータの非同期取得は EditorLayout の上位フックで対応）
-              </div>
+              <GridView9x9
+                rootCells={gridData.cells}
+                subGrids={subGrids}
+                childCounts={childCounts}
+                cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
+                onCellClick={handleCellClick}
+                onCellDoubleClick={handleCellDoubleClick}
+                onDragStart={handleDragStart}
+                onDrop={handleDrop}
+                onContextMenu={handleContextMenu}
+              />
             )}
           </div>
 

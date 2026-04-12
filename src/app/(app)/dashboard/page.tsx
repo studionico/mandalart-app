@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import MandalartGrid from '@/components/dashboard/MandalartGrid'
+import SignOutButton from '@/components/auth/SignOutButton'
 import type { Mandalart, Cell } from '@/types'
 
 export default async function DashboardPage() {
@@ -86,9 +86,7 @@ export default async function DashboardPage() {
               + 新規作成
             </button>
           </form>
-          <Link href="/login" className="text-sm text-gray-500 hover:text-gray-700">
-            ログアウト
-          </Link>
+          <SignOutButton />
         </div>
       </header>
 
