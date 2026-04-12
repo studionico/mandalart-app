@@ -1,36 +1,22 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# マンダラート
 
-## Getting Started
+階層的な 3×3 グリッドで思考を展開するデスクトップアプリ。
+各セルをクリックするとさらに 3×3 に掘り下げられる無限階層式の思考ツール。
 
-First, run the development server:
+## 開発
+
+アクティブなコードベースは [`desktop/`](desktop/) 配下の Tauri v2 + Vite + React アプリです。
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd desktop
+npm install
+npm run tauri dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+詳細は [`CLAUDE.md`](CLAUDE.md) および [`desktop/docs/`](desktop/docs/) を参照してください。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## リポジトリ構成
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [`desktop/`](desktop/) — Tauri デスクトップアプリ（現行版）
+- [`_old_web/`](_old_web/) — Next.js + Supabase で試作した初期 web 版（メンテ停止、参照用）
+- [`CLAUDE.md`](CLAUDE.md) — Claude Code 向けプロジェクトガイド
