@@ -15,6 +15,7 @@ import Breadcrumb from './Breadcrumb'
 import ParallelNav from './ParallelNav'
 import CellEditModal from './CellEditModal'
 import SidePanel from './SidePanel'
+import ImportDialog from './ImportDialog'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, createGrid } from '@/lib/api/grids'
@@ -88,6 +89,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   // ストック再読み込みキー
   const [stockReloadKey, setStockReloadKey] = useState(0)
+
+  // インポートダイアログ（コンテキストメニュー「インポート」から起動）
+  const [importTarget, setImportTarget] = useState<{ cellId: string; cellLabel: string } | null>(null)
 
   useEffect(() => {
     setMandalartId(mandalartId)
@@ -428,6 +432,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         setStockReloadKey((k) => k + 1)
         setToast({ message: 'ストックに追加しました', type: 'success' })
         break
+      case 'import':
+        setImportTarget({
+          cellId: cell.id,
+          cellLabel: cell.text || `セル ${cell.position + 1}`,
+        })
+        break
     }
   }
 
@@ -637,11 +647,26 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           >
             ペースト <span className="text-gray-400">⌘V</span>
           </button>
-          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-b-xl">
+          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-gray-50">
             ストックに追加
+          </button>
+          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-b-xl">
+            ここにインポート
           </button>
         </div>
       )}
+
+      {/* インポートダイアログ（セル配下へ） */}
+      <ImportDialog
+        open={importTarget !== null}
+        mode={importTarget ? { kind: 'cell', cellId: importTarget.cellId, cellLabel: importTarget.cellLabel } : { kind: 'new' }}
+        onClose={() => setImportTarget(null)}
+        onComplete={() => {
+          setImportTarget(null)
+          reloadAll()
+          setToast({ message: 'インポートしました', type: 'success' })
+        }}
+      />
 
       {/* タイトル設定ダイアログ */}
       <Modal open={titleDialog} onClose={handleCancelTitle} title="マンダラートのタイトルを設定">

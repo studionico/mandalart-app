@@ -4,6 +4,7 @@ import {
   getMandalarts, createMandalart, deleteMandalart, updateMandalartTitle, duplicateMandalart,
 } from '@/lib/api/mandalarts'
 import { createGrid } from '@/lib/api/grids'
+import ImportDialog from '@/components/editor/ImportDialog'
 import type { Mandalart } from '@/types'
 
 type SortKey = 'updated' | 'title'
@@ -14,6 +15,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('updated')
+  const [importOpen, setImportOpen] = useState(false)
 
   async function load() {
     setMandalarts(await getMandalarts())
@@ -97,13 +99,31 @@ export default function DashboardPage() {
           </select>
         </div>
 
-        <button
-          onClick={handleCreate}
-          className="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shrink-0"
-        >
-          + 新規作成
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setImportOpen(true)}
+            className="text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 hover:border-gray-300 px-3 py-2 rounded-lg transition-colors"
+          >
+            インポート
+          </button>
+          <button
+            onClick={handleCreate}
+            className="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            + 新規作成
+          </button>
+        </div>
       </header>
+
+      <ImportDialog
+        open={importOpen}
+        mode={{ kind: 'new' }}
+        onClose={() => setImportOpen(false)}
+        onComplete={(result) => {
+          setImportOpen(false)
+          if (result.mandalartId) navigate(`/mandalart/${result.mandalartId}`)
+        }}
+      />
 
       <main className="max-w-5xl mx-auto px-6 py-8">
         {loading ? (
