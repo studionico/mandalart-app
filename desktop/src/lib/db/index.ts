@@ -5,6 +5,9 @@ let db: Database | null = null
 export async function getDb(): Promise<Database> {
   if (!db) {
     db = await Database.load('sqlite:mandalart.db')
+    // ON DELETE CASCADE (mandalarts → grids → cells) を機能させる。
+    // 循環 FK は migration 002 で除去済みなので再帰は発生しない。
+    await db.execute('PRAGMA foreign_keys = ON')
   }
   return db
 }

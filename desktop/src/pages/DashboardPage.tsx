@@ -35,9 +35,13 @@ export default function DashboardPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm('このマンダラートを削除しますか？')) return
-    await deleteMandalart(id)
-    setMandalarts((prev) => prev.filter((m) => m.id !== id))
+    try {
+      await deleteMandalart(id)
+      setMandalarts((prev) => prev.filter((m) => m.id !== id))
+    } catch (e) {
+      alert('削除に失敗しました: ' + String(e))
+      console.error('deleteMandalart failed:', e)
+    }
   }
 
   async function handleRename(m: Mandalart) {

@@ -10,7 +10,11 @@ CREATE TABLE IF NOT EXISTS mandalarts (
 CREATE TABLE IF NOT EXISTS grids (
   id             TEXT PRIMARY KEY,
   mandalart_id   TEXT NOT NULL REFERENCES mandalarts(id) ON DELETE CASCADE,
-  parent_cell_id TEXT REFERENCES cells(id) ON DELETE CASCADE,
+  -- NOTE: parent_cell_id には ON DELETE CASCADE を付けない。
+  -- grids.parent_cell_id → cells, cells.grid_id → grids の組み合わせは
+  -- 循環 FK を作り、削除時に "too many levels of trigger recursion" を
+  -- 引き起こす。親セル削除時の子グリッド整理は API 層で明示的に行う。
+  parent_cell_id TEXT REFERENCES cells(id),
   sort_order     INTEGER NOT NULL DEFAULT 0,
   memo           TEXT,
   created_at     TEXT NOT NULL DEFAULT (datetime('now')),

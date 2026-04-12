@@ -30,6 +30,8 @@ export async function updateMandalartTitle(id: string, title: string): Promise<v
 }
 
 export async function deleteMandalart(id: string): Promise<void> {
+  // migration 002 で循環 FK を解消済み。
+  // mandalarts → grids → cells は ON DELETE CASCADE で自動削除される。
   await execute('DELETE FROM mandalarts WHERE id = ?', [id])
 }
 
