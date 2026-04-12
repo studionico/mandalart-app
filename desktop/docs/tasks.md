@@ -200,12 +200,14 @@
 
 ---
 
-## フェーズ 20: Undo / Redo 🔄
+## フェーズ 20: Undo / Redo ✅
 
 - [x] `undoStore.ts` / `useUndo.ts` 実装
 - [x] セル編集の Undo/Redo 登録
 - [x] ⌘Z / ⌘Y（Ctrl+Z / Ctrl+Y）キーボードショートカット実装
-- [ ] D&D 操作の Undo 対応
+- [x] D&D 操作の Undo 対応
+  - SWAP_SUBTREE / SWAP_CONTENT は対称操作（undo = redo = 同じ呼び出し）
+  - COPY_SUBTREE は target の事前状態 + 新規 grid ID を記録し、undo で復元
 
 ---
 

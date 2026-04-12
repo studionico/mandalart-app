@@ -1,22 +1,68 @@
 import { useState, useCallback, useRef } from 'react'
 import type { Cell } from '@/types'
-import { resolveDndAction } from '@/lib/utils/dnd'
+import { resolveDndAction, type DndAction } from '@/lib/utils/dnd'
 import { isCellEmpty } from '@/lib/utils/grid'
 import { swapCellContent, swapCellSubtree, copyCellSubtree } from '@/lib/api/cells'
+import { query, execute, now } from '@/lib/db'
+import type { UndoOperation } from '@/store/undoStore'
 
-async function executeAction(action: ReturnType<typeof resolveDndAction>) {
+export type DndUndoable = UndoOperation & { description: string }
+
+/**
+ * D&D アクションを実行し、Undo/Redo 用のクロージャを返す。
+ * - SWAP_SUBTREE / SWAP_CONTENT は対称操作なので undo = redo = 同じ呼び出し。
+ * - COPY_SUBTREE は target の事前状態 + 新規作成された grid ID を記録し、
+ *   undo でそれらを削除・復元する。
+ */
+async function executeAction(action: DndAction): Promise<DndUndoable | null> {
   switch (action.type) {
-    case 'SWAP_SUBTREE':
+    case 'SWAP_SUBTREE': {
       await swapCellSubtree(action.cellIdA, action.cellIdB)
-      break
-    case 'SWAP_CONTENT':
+      const run = () => swapCellSubtree(action.cellIdA, action.cellIdB)
+      return { description: 'セルのサブツリー入れ替え', undo: run, redo: run }
+    }
+    case 'SWAP_CONTENT': {
       await swapCellContent(action.cellIdA, action.cellIdB)
-      break
-    case 'COPY_SUBTREE':
+      const run = () => swapCellContent(action.cellIdA, action.cellIdB)
+      return { description: 'セル内容の入れ替え', undo: run, redo: run }
+    }
+    case 'COPY_SUBTREE': {
+      const targetBefore = (await query<{ text: string; image_path: string | null; color: string | null }>(
+        'SELECT text, image_path, color FROM cells WHERE id = ?',
+        [action.targetCellId],
+      ))[0]
+      const gridsBefore = await query<{ id: string }>(
+        'SELECT id FROM grids WHERE parent_cell_id = ?',
+        [action.targetCellId],
+      )
+      const beforeIds = new Set(gridsBefore.map((g) => g.id))
+
       await copyCellSubtree(action.sourceCellId, action.targetCellId)
-      break
+
+      const gridsAfter = await query<{ id: string }>(
+        'SELECT id FROM grids WHERE parent_cell_id = ?',
+        [action.targetCellId],
+      )
+      const newGridIds = gridsAfter.filter((g) => !beforeIds.has(g.id)).map((g) => g.id)
+
+      return {
+        description: 'セル階層のコピー',
+        undo: async () => {
+          await execute(
+            'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
+            [targetBefore?.text ?? '', targetBefore?.image_path ?? null, targetBefore?.color ?? null, now(), action.targetCellId],
+          )
+          for (const id of newGridIds) {
+            await execute('DELETE FROM grids WHERE id = ?', [id])
+          }
+        },
+        redo: async () => {
+          await copyCellSubtree(action.sourceCellId, action.targetCellId)
+        },
+      }
+    }
     case 'NOOP':
-      break
+      return null
   }
 }
 
@@ -37,6 +83,7 @@ export function useDragAndDrop(
   onComplete: () => void,
   onStockDrop?: (cellId: string) => void,
   onStockPaste?: (stockItemId: string, targetCellId: string) => void,
+  pushUndo?: (op: DndUndoable) => void,
 ) {
   const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   const [dragOverId, setDragOverId]     = useState<string | null>(null)
@@ -96,7 +143,12 @@ export function useDragAndDrop(
         if (!target) return
         const action = resolveDndAction(src.cell, target)
         if (action.type !== 'NOOP') {
-          executeAction(action).then(() => onComplete()).catch(console.error)
+          executeAction(action)
+            .then((undoable) => {
+              if (undoable && pushUndo) pushUndo(undoable)
+              onComplete()
+            })
+            .catch(console.error)
         }
       } else {
         // ストック → セル: 空セルのみ許可（入れ替えなし）
@@ -109,7 +161,7 @@ export function useDragAndDrop(
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup',   onMouseUp)
-  }, [onComplete, onStockDrop, onStockPaste])
+  }, [onComplete, onStockDrop, onStockPaste, pushUndo])
 
   const handleDragStart = useCallback(
     (cell: Cell) => beginDrag({ kind: 'cell', cell }),

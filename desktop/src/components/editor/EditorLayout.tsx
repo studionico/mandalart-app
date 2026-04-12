@@ -8,7 +8,7 @@ import { useSubGrids } from '@/hooks/useSubGrids'
 import { useRealtime } from '@/hooks/useRealtime'
 import { useOffline } from '@/hooks/useOffline'
 import { useUndo } from '@/hooks/useUndo'
-import { useDragAndDrop } from '@/hooks/useDragAndDrop'
+import { useDragAndDrop, type DndUndoable } from '@/hooks/useDragAndDrop'
 import GridView3x3 from './GridView3x3'
 import GridView9x9 from './GridView9x9'
 import Breadcrumb from './Breadcrumb'
@@ -192,6 +192,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     reloadAll,
     handleStockDrop,
     handleStockPasteDrop,
+    useCallback((op: DndUndoable) => {
+      pushUndo({
+        description: op.description,
+        undo: async () => { await op.undo(); reloadAll() },
+        redo: async () => { await op.redo(); reloadAll() },
+      })
+    }, [pushUndo, reloadAll]),
   )
 
   // クリップボードショートカット用: マウス位置を追跡
