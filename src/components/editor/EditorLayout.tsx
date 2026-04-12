@@ -45,7 +45,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const { isOffline } = useOffline()
   const clipboard = useClipboardStore()
 
-  const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
+  const { data: gridData, error: gridError, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
   const { subGrids, reload: reloadSubGrids } = useSubGrids(gridData?.cells ?? [])
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -81,24 +81,32 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // 初期ロード: ルートグリッドを取得してエディタを初期化
   useEffect(() => {
     async function init() {
-      const roots = await getRootGrids(mandalartId)
-      if (roots.length === 0) return
-      const root = roots[0]
-      setCurrentGrid(root.id)
-      setParallelGrids(roots)
-      setParallelIndex(0)
+      try {
+        const roots = await getRootGrids(mandalartId)
+        if (roots.length === 0) {
+          setToast({ message: 'グリッドが見つかりません', type: 'error' })
+          return
+        }
+        const root = roots[0]
+        setCurrentGrid(root.id)
+        setParallelGrids(roots)
+        setParallelIndex(0)
 
-      // ルートグリッドのセルを取得してパンくず初期化
-      const { data: cells } = await import('@/lib/supabase/client').then(({ createClient }) =>
-        createClient().from('cells').select('*').eq('grid_id', root.id)
-      )
-      resetBreadcrumb({
-        gridId: root.id,
-        cellId: null,
-        label: cells?.find((c: Cell) => c.position === 4)?.text ?? '',
-        cells: cells ?? [],
-        highlightPosition: null,
-      })
+        // ルートグリッドのセルを取得してパンくず初期化
+        const { data: cells } = await import('@/lib/supabase/client').then(({ createClient }) =>
+          createClient().from('cells').select('*').eq('grid_id', root.id)
+        )
+        resetBreadcrumb({
+          gridId: root.id,
+          cellId: null,
+          label: cells?.find((c: Cell) => c.position === 4)?.text ?? '',
+          cells: cells ?? [],
+          highlightPosition: null,
+        })
+      } catch (e) {
+        console.error('EditorLayout init error:', e)
+        setToast({ message: `読み込みエラー: ${(e as Error).message}`, type: 'error' })
+      }
     }
     init()
   }, [mandalartId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -159,8 +167,33 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 空セルはサブグリッドがなければ編集モードへ
       setEditingCell(cell)
     } else {
-      // 入力ありだが子グリッドなし → 新しいサブグリッドを作るか編集するか
-      setEditingCell(cell)
+      // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
+      const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
+
+      // 中央セル（position 4）に親セルのテキストを自動入力
+      const centerCell = newGrid.cells.find((c) => c.position === 4)
+      console.log('centerCell:', centerCell, 'cell.text:', cell.text)
+      if (centerCell && cell.text) {
+        try {
+          const updated = await updateCell(centerCell.id, { text: cell.text })
+          console.log('updateCell result:', updated)
+        } catch (e) {
+          console.error('updateCell error:', e)
+        }
+      }
+
+      setCurrentGrid(newGrid.id)
+      setParallelGrids([newGrid])
+      setParallelIndex(0)
+
+      const currentCells = gridData?.cells ?? []
+      pushBreadcrumb({
+        gridId: newGrid.id,
+        cellId: cell.id,
+        label: cell.text,
+        cells: currentCells,
+        highlightPosition: cell.position,
+      })
     }
   }
 
@@ -346,7 +379,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
           {/* グリッド表示 */}
           <div ref={gridRef} className="w-full max-w-lg">
-            {gridData && viewMode === '3x3' && (
+{gridData && viewMode === '3x3' && (
               <GridView3x3
                 cells={gridData.cells}
                 childCounts={childCounts}

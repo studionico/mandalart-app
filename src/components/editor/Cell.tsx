@@ -52,10 +52,9 @@ export default function Cell({
         relative flex items-center justify-center rounded-lg border transition-all select-none
         ${sizeClasses}
         ${bg}
-        ${isCenter ? 'border-blue-300 font-semibold' : 'border-gray-200'}
-        ${isDisabled ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:brightness-95 active:scale-95'}
+        ${isCenter ? 'border-blue-400 border-2 font-semibold shadow-md' : 'border-gray-300 shadow-sm'}
+        ${isDisabled ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:shadow-md hover:border-gray-400 active:scale-95'}
         ${isCut ? 'opacity-40' : ''}
-        ${!empty && !isDisabled ? 'shadow-sm' : ''}
       `}
       onClick={handleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, cell) } : undefined}

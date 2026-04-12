@@ -24,7 +24,7 @@ export default function GridView3x3({
   const cellMap = new Map(cells.map((c) => [c.position, c]))
 
   return (
-    <div className="grid grid-cols-3 gap-1.5 w-full aspect-square">
+    <div className="grid grid-cols-3 gap-2 w-full aspect-square p-3 bg-gray-100 rounded-2xl shadow-inner">
       {Array.from({ length: 9 }).map((_, i) => {
         const cell = cellMap.get(i)
         if (!cell) return <div key={i} className="rounded-lg bg-gray-100" />

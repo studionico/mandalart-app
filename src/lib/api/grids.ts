@@ -28,7 +28,7 @@ export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
   const supabase = createClient()
   const { data, error } = await supabase
     .from('grids')
-    .select('*, cells(*)')
+    .select('*, cells!cells_grid_id_fkey(*)')
     .eq('id', id)
     .single()
   if (error) throw error
