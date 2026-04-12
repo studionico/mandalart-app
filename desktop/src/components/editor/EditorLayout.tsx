@@ -22,6 +22,7 @@ import { getRootGrids, getChildGrids, createGrid } from '@/lib/api/grids'
 import { updateCell, pasteCell } from '@/lib/api/cells'
 import { getMandalart, updateMandalartTitle, deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
+import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadCSV } from '@/lib/utils/export'
 import { exportToJSON, exportToCSV } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
@@ -173,6 +174,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setToast({ message: 'ストックに追加しました', type: 'success' })
   }, [])
 
+  // 画像ファイルかどうかの簡易判定
+  function isImagePath(p: string): boolean {
+    return /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(p)
+  }
+
   const reloadAll = useCallback(() => {
     reload()
     reloadSubGrids()
@@ -255,6 +261,40 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Tauri ネイティブのファイルドロップイベント
+  // 画像ファイルを受け付け、ドロップ位置のセルに保存 + image_path を更新
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+
+    import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
+      getCurrentWebview().onDragDropEvent(async (event) => {
+        if (event.payload.type !== 'drop') return
+        const { paths, position } = event.payload
+        const imagePaths = paths.filter(isImagePath)
+        if (imagePaths.length === 0) return
+
+        const el = document.elementFromPoint(position.x, position.y)
+        const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
+        const cellId = cellEl?.dataset.cellId
+        if (!cellId) return
+        const cell = dndCellsRef.current.find((c) => c.id === cellId)
+        if (!cell) return
+
+        try {
+          const newPath = await copyImageFromPath(imagePaths[0], cellId)
+          await updateCellLocal(cellId, { image_path: newPath })
+          reloadAll()
+          setToast({ message: '画像を追加しました', type: 'success' })
+        } catch (e) {
+          console.error('image drop failed:', e)
+          setToast({ message: `画像の追加に失敗: ${(e as Error).message}`, type: 'error' })
+        }
+      }).then((u) => { unlisten = u })
+    })
+
+    return () => { unlisten?.() }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // シングルクリック: 掘り下げ or 編集フォールバック
   async function handleCellClick(cell: Cell) {
     // 中央セル（position 4）の特別処理
@@ -307,10 +347,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
 
-      // 中央セル（position 4）に親セルのテキストを自動入力
+      // 中央セル（position 4）に親セルの内容（テキスト / 画像 / 色）を自動入力
       const centerCell = newGrid.cells.find((c) => c.position === 4)
-      if (centerCell && cell.text) {
-        await updateCell(centerCell.id, { text: cell.text })
+      if (centerCell && !isCellEmpty(cell)) {
+        await updateCell(centerCell.id, {
+          text: cell.text,
+          image_path: cell.image_path,
+          color: cell.color,
+        })
       }
 
       setCurrentGrid(newGrid.id)

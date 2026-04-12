@@ -237,9 +237,10 @@
 
 - [x] グローバルショートカット: `Cmd/Ctrl+Shift+M` でウィンドウ表示/非表示
   - `useGlobalShortcut` hook + `tauri-plugin-global-shortcut`
-- [ ] 画像ファイル D&D: セルへのファイルドロップ → アプリデータディレクトリに保存
-  - `tauri-plugin-fs` を使用
-  - `src/lib/api/storage.ts` の暫定実装を本実装に置き換え
+- [x] 画像ファイル D&D: セルへのファイルドロップ → `$APPDATA/images/` に保存
+  - `tauri-plugin-fs` 導入、`storage.ts` を blob URL ベースの本実装に置き換え
+  - `onDragDropEvent` + `elementFromPoint` で drop 先セルを特定
+  - 階層掘り下げ時に親セルの画像 / 色も子グリッド中心セルへ自動コピー
 - [ ] 自動アップデート: GitHub Releases からチェック・適用
   - `tauri-plugin-updater` を有効化（現在コメントアウト中）
   - GitHub Actions でビルド・リリースワークフロー作成

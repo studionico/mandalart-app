@@ -1,6 +1,7 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
 import { getColorClasses } from '@/constants/colors'
+import { getCellImageUrl } from '@/lib/api/storage'
 
 type Props = {
   cell: CellType
@@ -27,6 +28,19 @@ export default function Cell({
   const clickTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag     = useRef(false)
   const { bg, text: textColor } = getColorClasses(cell.color)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!cell.image_path) {
+      setImageUrl(null)
+      return
+    }
+    getCellImageUrl(cell.image_path).then((url) => {
+      if (!cancelled) setImageUrl(url || null)
+    })
+    return () => { cancelled = true }
+  }, [cell.image_path])
 
   function handleMouseDown(e: React.MouseEvent) {
     if (isDisabled || e.button !== 0) return
@@ -87,9 +101,9 @@ export default function Cell({
       onClick={handleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, cell) } : undefined}
     >
-      {cell.image_path && (
+      {imageUrl && (
         <div className="absolute inset-0 rounded-lg overflow-hidden">
-          <img src={`/api/image?path=${encodeURIComponent(cell.image_path)}`} alt="" className="w-full h-full object-cover opacity-60" />
+          <img src={imageUrl} alt="" className="w-full h-full object-cover opacity-60" />
         </div>
       )}
 

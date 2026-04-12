@@ -1,26 +1,87 @@
-// デスクトップ版: 画像はローカルファイルシステムに保存
-// image_path はアプリデータディレクトリ内の相対パスとして保存
+import {
+  writeFile, readFile, remove, mkdir, exists, BaseDirectory,
+} from '@tauri-apps/plugin-fs'
 
+// AppData 配下の画像保存ディレクトリ（BaseDirectory.AppData からの相対）
+const IMAGES_SUBDIR = 'images'
+
+// 読み込み済み image_path → blob URL のキャッシュ
+// （DB に複数セルが同じ image_path を持つ場合があるので軽量キャッシュ）
+const urlCache = new Map<string, string>()
+
+async function ensureImagesDir(): Promise<void> {
+  if (!(await exists(IMAGES_SUBDIR, { baseDir: BaseDirectory.AppData }))) {
+    await mkdir(IMAGES_SUBDIR, { baseDir: BaseDirectory.AppData, recursive: true })
+  }
+}
+
+function pickExtension(name: string): string {
+  const dot = name.lastIndexOf('.')
+  if (dot === -1) return 'png'
+  return name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
+}
+
+async function copyBytesToAppData(bytes: Uint8Array, cellId: string, ext: string): Promise<string> {
+  await ensureImagesDir()
+  const name = `${cellId}-${Date.now()}.${ext}`
+  const relPath = `${IMAGES_SUBDIR}/${name}`
+  await writeFile(relPath, bytes, { baseDir: BaseDirectory.AppData })
+  return relPath
+}
+
+/**
+ * ブラウザの File オブジェクト（CellEditModal のファイル選択）を AppData へコピー。
+ */
 export async function uploadCellImage(
   _userId: string,
   _mandalartId: string,
   cellId: string,
-  file: File
+  file: File,
 ): Promise<string> {
-  // TODO: Tauri fs プラグインでローカル保存を実装
-  // 現在は DataURL をパスとして使用（暫定）
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(`local:${cellId}:${file.name}`)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const ext = pickExtension(file.name)
+  return copyBytesToAppData(bytes, cellId, ext)
 }
 
+/**
+ * Tauri のネイティブ drag-drop で取得した絶対パスを AppData へコピー。
+ */
+export async function copyImageFromPath(absolutePath: string, cellId: string): Promise<string> {
+  const bytes = await readFile(absolutePath)
+  const ext = pickExtension(absolutePath)
+  return copyBytesToAppData(bytes, cellId, ext)
+}
+
+/**
+ * image_path（AppData からの相対パス）を blob URL に変換して <img src> で表示できるようにする。
+ */
 export async function getCellImageUrl(path: string): Promise<string> {
-  return path
+  if (!path) return ''
+  const cached = urlCache.get(path)
+  if (cached) return cached
+
+  try {
+    const bytes = await readFile(path, { baseDir: BaseDirectory.AppData })
+    const blob = new Blob([new Uint8Array(bytes)])
+    const url = URL.createObjectURL(blob)
+    urlCache.set(path, url)
+    return url
+  } catch (e) {
+    console.warn('getCellImageUrl failed:', path, e)
+    return ''
+  }
 }
 
-export async function deleteCellImage(_path: string): Promise<void> {
-  // TODO: ローカルファイル削除
+export async function deleteCellImage(path: string): Promise<void> {
+  if (!path) return
+  const cached = urlCache.get(path)
+  if (cached) {
+    URL.revokeObjectURL(cached)
+    urlCache.delete(path)
+  }
+  try {
+    await remove(path, { baseDir: BaseDirectory.AppData })
+  } catch (e) {
+    console.warn('deleteCellImage failed:', path, e)
+  }
 }
