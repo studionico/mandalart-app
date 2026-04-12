@@ -241,12 +241,12 @@
   - `tauri-plugin-fs` 導入、`storage.ts` を blob URL ベースの本実装に置き換え
   - `onDragDropEvent` + `elementFromPoint` で drop 先セルを特定
   - 階層掘り下げ時に親セルの画像 / 色も子グリッド中心セルへ自動コピー
-- [x] 自動アップデート: GitHub Releases からチェック・適用（スキャフォールド完了）
+- [x] 自動アップデート: GitHub Releases からチェック・適用（**エンドツーエンド動作確認済み**）
   - `tauri-plugin-updater` / `tauri-plugin-process` 有効化
   - `useAppUpdate` hook + `UpdateDialog` (起動時チェック・進捗表示・再起動)
-  - `.github/workflows/release.yml` (tauri-action, Apple Silicon / Intel / Linux / Windows)
-  - **手動セットアップ必要**: 署名鍵生成、GitHub Secrets 登録、最初のタグ push
-  - 手順は [`docs/updater-setup.md`](./updater-setup.md) を参照
+  - `.github/workflows/release.yml` (tauri-action@v0.6.2, Apple Silicon / Intel / Linux / Windows マトリクス)
+  - 署名鍵生成 → GitHub Secrets 登録 → タグ push → 自動ビルド → 自動アップデート完了
+  - セットアップ手順とトラブルシューティングは [`docs/updater-setup.md`](./updater-setup.md) を参照
 
 ---
 
