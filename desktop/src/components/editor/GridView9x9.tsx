@@ -1,4 +1,3 @@
-
 import type { Cell, Grid } from '@/types'
 import CellComponent from './Cell'
 import { getCenterCell, isCellEmpty } from '@/lib/utils/grid'
@@ -6,24 +5,25 @@ import { getCenterCell, isCellEmpty } from '@/lib/utils/grid'
 type SubGrid = {
   grid: Grid
   cells: Cell[]
-  parentPosition: number  // ルートグリッド内の position
+  parentPosition: number
 }
 
 type Props = {
   rootCells: Cell[]
-  subGrids: Map<string, SubGrid>   // cellId → SubGrid
+  subGrids: Map<string, SubGrid>
   childCounts: Map<string, number>
   cutCellId: string | null
+  dragSourceId?: string | null
+  dragOverId?: string | null
   onCellClick: (cell: Cell) => void
   onCellDoubleClick: (cell: Cell) => void
   onDragStart?: (cell: Cell) => void
-  onDrop?: (target: Cell) => void
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
 }
 
 export default function GridView9x9({
-  rootCells, subGrids, childCounts, cutCellId,
-  onCellClick, onCellDoubleClick, onDragStart, onDrop, onContextMenu,
+  rootCells, subGrids, childCounts, cutCellId, dragSourceId, dragOverId,
+  onCellClick, onCellDoubleClick, onDragStart, onContextMenu,
 }: Props) {
   const rootCellMap = new Map(rootCells.map((c) => [c.position, c]))
   const rootCenter = getCenterCell(rootCells)
@@ -71,18 +71,18 @@ export default function GridView9x9({
                     isCenter={isSubCenter}
                     isDisabled={isDisabled}
                     isCut={cell.id === cutCellId}
+                    isDragSource={cell.id === dragSourceId}
+                    isDragOver={cell.id === dragOverId}
                     childCount={childCounts.get(cell.id) ?? 0}
                     onClick={onCellClick}
                     onDoubleClick={onCellDoubleClick}
                     onDragStart={onDragStart}
-                    onDrop={onDrop}
                     onContextMenu={onContextMenu}
                     size="small"
                   />
                 )
               }
 
-              // サブグリッドなし：ルートセルをセンターに表示、他は空
               if (innerPos === 4) {
                 return (
                   <CellComponent
@@ -91,11 +91,12 @@ export default function GridView9x9({
                     isCenter={isRootCenter}
                     isDisabled={!isRootCenter && rootCenterEmpty}
                     isCut={rootCell.id === cutCellId}
+                    isDragSource={rootCell.id === dragSourceId}
+                    isDragOver={rootCell.id === dragOverId}
                     childCount={childCounts.get(rootCell.id) ?? 0}
                     onClick={onCellClick}
                     onDoubleClick={onCellDoubleClick}
                     onDragStart={onDragStart}
-                    onDrop={onDrop}
                     onContextMenu={onContextMenu}
                     size="small"
                   />

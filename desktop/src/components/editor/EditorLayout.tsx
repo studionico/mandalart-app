@@ -1,5 +1,5 @@
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
 import { useClipboardStore } from '@/store/clipboardStore'
@@ -86,6 +86,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // エクスポートメニュー
   const [exportMenu, setExportMenu] = useState(false)
 
+  // ストック再読み込みキー
+  const [stockReloadKey, setStockReloadKey] = useState(0)
+
   useEffect(() => {
     setMandalartId(mandalartId)
     setIsMobile(window.matchMedia('(max-width: 768px)').matches)
@@ -149,10 +152,31 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     () => reload(),
   )
 
-  const { handleDragStart, handleDrop } = useDragAndDrop(useCallback(() => {
-    reload()
-    reloadSubGrids()
-  }, [reload, reloadSubGrids]))
+  // D&D のドロップ先解決に使う全セル（3x3ではルート、9x9ではルート+サブを平坦化）
+  const dndCells = useMemo<Cell[]>(() => {
+    if (!gridData) return []
+    if (viewMode === '9x9') {
+      const flat: Cell[] = [...gridData.cells]
+      subGrids.forEach((sub) => flat.push(...sub.cells))
+      return flat
+    }
+    return gridData.cells
+  }, [gridData, subGrids, viewMode])
+
+  const handleStockDrop = useCallback(async (cellId: string) => {
+    await addToStock(cellId)
+    setStockReloadKey((k) => k + 1)
+    setToast({ message: 'ストックに追加しました', type: 'success' })
+  }, [])
+
+  const { dragSourceId, dragOverId, isOverStock, isDragging, handleDragStart } = useDragAndDrop(
+    dndCells,
+    useCallback(() => {
+      reload()
+      reloadSubGrids()
+    }, [reload, reloadSubGrids]),
+    handleStockDrop,
+  )
 
   // シングルクリック: 掘り下げ or 編集フォールバック
   async function handleCellClick(cell: Cell) {
@@ -435,10 +459,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   cells={gridData.cells}
                   childCounts={childCounts}
                   cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
+                  dragSourceId={dragSourceId}
+                  dragOverId={dragOverId}
                   onCellClick={handleCellClick}
                   onCellDoubleClick={handleCellDoubleClick}
                   onDragStart={handleDragStart}
-                  onDrop={handleDrop}
                   onContextMenu={handleContextMenu}
                 />
               )}
@@ -448,10 +473,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   subGrids={subGrids}
                   childCounts={childCounts}
                   cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
+                  dragSourceId={dragSourceId}
+                  dragOverId={dragOverId}
                   onCellClick={handleCellClick}
                   onCellDoubleClick={handleCellDoubleClick}
                   onDragStart={handleDragStart}
-                  onDrop={handleDrop}
                   onContextMenu={handleContextMenu}
                 />
               )}
@@ -475,6 +501,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             gridId={currentGridId}
             gridMemo={gridData?.memo ?? null}
             onStockPaste={handleStockPaste}
+            isDragging={isDragging}
+            isOverStock={isOverStock}
+            stockReloadKey={stockReloadKey}
           />
         </div>
       </div>

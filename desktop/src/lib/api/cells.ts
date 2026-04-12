@@ -31,21 +31,45 @@ export async function swapCellContent(cellIdA: string, cellIdB: string): Promise
 }
 
 export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void> {
-  const tempId = '00000000-0000-0000-0000-000000000000'
+  // 一時IDを使わず、子グリッドIDを先に取得してから付け替える（FK制約回避）
+  const gridsOfA = await query<{ id: string }>('SELECT id FROM grids WHERE parent_cell_id = ?', [cellIdA])
+  const gridsOfB = await query<{ id: string }>('SELECT id FROM grids WHERE parent_cell_id = ?', [cellIdB])
   const ts = now()
-  await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE parent_cell_id=?', [tempId, ts, cellIdA])
-  await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE parent_cell_id=?', [cellIdA, ts, cellIdB])
-  await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE parent_cell_id=?', [cellIdB, ts, tempId])
+  for (const g of gridsOfA) {
+    await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdB, ts, g.id])
+  }
+  for (const g of gridsOfB) {
+    await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdA, ts, g.id])
+  }
   await swapCellContent(cellIdA, cellIdB)
 }
 
 export async function copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void> {
-  const sourceGrids = await query<{ id: string; memo: string | null; sort_order: number }>(
-    'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ?', [sourceCellId]
+  const srcs = await query<Cell>('SELECT * FROM cells WHERE id = ?', [sourceCellId])
+  const src = srcs[0]
+  if (!src) return
+
+  // 1) ソース側の子グリッドを複製（ターゲット更新より前に実行して
+  //    スナップショットがターゲットの空状態を含むようにする）
+  const childGrids = await query<{ id: string; sort_order: number }>(
+    'SELECT id, sort_order FROM grids WHERE parent_cell_id = ?', [sourceCellId]
   )
-  for (const sg of sourceGrids) {
-    await copyGridRecursive(sg.id, targetCellId, sg.sort_order)
+  for (const cg of childGrids) {
+    await copyGridRecursive(cg.id, targetCellId, cg.sort_order)
   }
+
+  // 2) 中心セルで子グリッドを持たない場合、
+  //    「その中心セルがテーマとしているグリッド自体」を subtree として複製する。
+  //    （中央セルの階層 = このグリッドの 8 周辺セル + それ以下、という UX 解釈）
+  if (src.position === 4 && childGrids.length === 0) {
+    await copyGridRecursive(src.grid_id, targetCellId, 0)
+  }
+
+  // 3) 最後にターゲットのコンテンツを上書き
+  await execute(
+    'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
+    [src.text, src.image_path, src.color, now(), targetCellId]
+  )
 }
 
 async function copyGridRecursive(
@@ -53,27 +77,38 @@ async function copyGridRecursive(
   newParentCellId: string,
   sortOrder: number
 ): Promise<string> {
+  // ソース側の状態を INSERT 前にスナップショットする。
+  // （新しく作ったグリッドを子として拾ってしまう無限再帰を防ぐため）
   const grids = await query<{ mandalart_id: string; memo: string | null }>(
     'SELECT mandalart_id, memo FROM grids WHERE id = ?', [sourceGridId]
   )
   const sg = grids[0]
+  const sourceCells = await query<Cell>(
+    'SELECT * FROM cells WHERE grid_id = ? ORDER BY position', [sourceGridId]
+  )
+  const childGridsPerCell = new Map<string, { id: string; sort_order: number }[]>()
+  for (const sc of sourceCells) {
+    const cgs = await query<{ id: string; sort_order: number }>(
+      'SELECT id, sort_order FROM grids WHERE parent_cell_id = ?', [sc.id]
+    )
+    childGridsPerCell.set(sc.id, cgs)
+  }
+
+  // 新しいグリッドとセルを挿入
   const newGridId = generateId()
   const ts = now()
   await execute(
     'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
     [newGridId, sg.mandalart_id, newParentCellId, sortOrder, sg.memo, ts, ts]
   )
-  const sourceCells = await query<Cell>('SELECT * FROM cells WHERE grid_id = ? ORDER BY position', [sourceGridId])
   for (const sc of sourceCells) {
     const newCellId = generateId()
     await execute(
       'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
       [newCellId, newGridId, sc.position, sc.text, sc.image_path, sc.color, ts, ts]
     )
-    const childGrids = await query<{ id: string; sort_order: number }>(
-      'SELECT id, sort_order FROM grids WHERE parent_cell_id = ?', [sc.id]
-    )
-    for (const cg of childGrids) {
+    const cgs = childGridsPerCell.get(sc.id) ?? []
+    for (const cg of cgs) {
       await copyGridRecursive(cg.id, newCellId, cg.sort_order)
     }
   }

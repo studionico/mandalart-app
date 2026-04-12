@@ -1,5 +1,4 @@
-
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import MemoTab from './MemoTab'
 import StockTab from './StockTab'
 import type { StockItem } from '@/types'
@@ -10,10 +9,20 @@ type Props = {
   gridId: string | null
   gridMemo: string | null
   onStockPaste: (item: StockItem) => void
+  isDragging?: boolean
+  isOverStock?: boolean
+  stockReloadKey?: number
 }
 
-export default function SidePanel({ gridId, gridMemo, onStockPaste }: Props) {
+export default function SidePanel({
+  gridId, gridMemo, onStockPaste, isDragging, isOverStock, stockReloadKey,
+}: Props) {
   const [tab, setTab] = useState<Tab>('memo')
+
+  // ドラッグ開始時にストックタブへ自動切替（ドロップゾーンを見せるため）
+  useEffect(() => {
+    if (isDragging) setTab('stock')
+  }, [isDragging])
 
   return (
     <div className="flex flex-col h-full border-l border-gray-200 bg-white">
@@ -36,7 +45,7 @@ export default function SidePanel({ gridId, gridMemo, onStockPaste }: Props) {
         {tab === 'memo' ? (
           <MemoTab gridId={gridId} initialMemo={gridMemo} />
         ) : (
-          <StockTab onPaste={onStockPaste} />
+          <StockTab onPaste={onStockPaste} isOverStock={isOverStock} reloadKey={stockReloadKey} />
         )}
       </div>
     </div>
