@@ -18,7 +18,7 @@ import SidePanel from './SidePanel'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, createGrid } from '@/lib/api/grids'
-import { updateCell } from '@/lib/api/cells'
+import { updateCell, pasteCell } from '@/lib/api/cells'
 import { getMandalart, updateMandalartTitle, deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadCSV } from '@/lib/utils/export'
@@ -169,14 +169,80 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setToast({ message: 'ストックに追加しました', type: 'success' })
   }, [])
 
-  const { dragSourceId, dragOverId, isOverStock, isDragging, handleDragStart } = useDragAndDrop(
+  const reloadAll = useCallback(() => {
+    reload()
+    reloadSubGrids()
+  }, [reload, reloadSubGrids])
+
+  const handleStockPasteDrop = useCallback(async (stockItemId: string, targetCellId: string) => {
+    try {
+      await pasteFromStock(stockItemId, targetCellId)
+      reloadAll()
+      setToast({ message: 'ストックからペーストしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [reloadAll])
+
+  const {
+    dragSourceId, dragOverId, isOverStock, isDragging,
+    handleDragStart, handleStockItemDragStart,
+  } = useDragAndDrop(
     dndCells,
-    useCallback(() => {
-      reload()
-      reloadSubGrids()
-    }, [reload, reloadSubGrids]),
+    reloadAll,
     handleStockDrop,
+    handleStockPasteDrop,
   )
+
+  // クリップボードショートカット用: マウス位置を追跡
+  const mousePosRef = useRef({ x: 0, y: 0 })
+  const dndCellsRef = useRef<Cell[]>(dndCells)
+  dndCellsRef.current = dndCells
+  // 最新の handlePaste を保持（useEffect の []-deps クロージャ越しでも最新参照を使うため）
+  const handlePasteRef = useRef<(target: Cell) => Promise<void>>(async () => {})
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      mousePosRef.current = { x: e.clientX, y: e.clientY }
+    }
+    function getHoveredCell(): Cell | null {
+      const { x, y } = mousePosRef.current
+      const el = document.elementFromPoint(x, y)
+      const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
+      const id = cellEl?.dataset.cellId
+      if (!id) return null
+      return dndCellsRef.current.find((c) => c.id === id) ?? null
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      // 入力中はテキスト編集側の ⌘X/C/V を優先
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (e.key === 'c' || e.key === 'x') {
+        const cell = getHoveredCell()
+        if (!cell || isCellEmpty(cell)) return
+        e.preventDefault()
+        const mode = e.key === 'x' ? 'cut' : 'copy'
+        useClipboardStore.getState().set(mode, cell.id)
+        setToast({ message: mode === 'cut' ? 'カットしました' : 'コピーしました', type: 'info' })
+      } else if (e.key === 'v') {
+        const cell = getHoveredCell()
+        if (!cell) return
+        const cb = useClipboardStore.getState()
+        if (!cb.sourceCellId || !cb.mode) return
+        e.preventDefault()
+        handlePasteRef.current(cell)
+      }
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // シングルクリック: 掘り下げ or 編集フォールバック
   async function handleCellClick(cell: Cell) {
@@ -339,20 +405,42 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setContextMenu(null)
 
     switch (action) {
-      case 'copy': {
-        clipboard.set('copy', cell.id, { cell: { text: cell.text, image_path: cell.image_path, color: cell.color }, children: [] })
+      case 'copy':
+        clipboard.set('copy', cell.id)
+        setToast({ message: 'コピーしました', type: 'info' })
         break
-      }
       case 'cut':
-        clipboard.set('cut', cell.id, { cell: { text: cell.text, image_path: cell.image_path, color: cell.color }, children: [] })
+        clipboard.set('cut', cell.id)
         setToast({ message: 'カットしました', type: 'info' })
+        break
+      case 'paste':
+        await handlePaste(cell)
         break
       case 'stock':
         await addToStock(cell.id)
+        setStockReloadKey((k) => k + 1)
         setToast({ message: 'ストックに追加しました', type: 'success' })
         break
     }
   }
+
+  async function handlePaste(target: Cell) {
+    if (!clipboard.sourceCellId || !clipboard.mode) {
+      setToast({ message: 'クリップボードが空です', type: 'info' })
+      return
+    }
+    if (clipboard.sourceCellId === target.id) return
+    try {
+      await pasteCell(clipboard.sourceCellId, target.id, clipboard.mode)
+      if (clipboard.mode === 'cut') clipboard.clear()
+      reload()
+      reloadSubGrids()
+      setToast({ message: 'ペーストしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }
+  handlePasteRef.current = handlePaste
 
   async function handleStockPaste(item: StockItem) {
     if (!editingCell) {
@@ -504,6 +592,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             isDragging={isDragging}
             isOverStock={isOverStock}
             stockReloadKey={stockReloadKey}
+            onStockItemDragStart={handleStockItemDragStart}
+            dragSourceId={dragSourceId}
           />
         </div>
       </div>
@@ -532,6 +622,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           </button>
           <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-gray-50 flex justify-between">
             コピー <span className="text-gray-400">⌘C</span>
+          </button>
+          <button
+            onClick={() => handleContextAction('paste')}
+            disabled={!clipboard.sourceCellId}
+            className="w-full text-left px-4 py-2 hover:bg-gray-50 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            ペースト <span className="text-gray-400">⌘V</span>
           </button>
           <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-b-xl">
             ストックに追加

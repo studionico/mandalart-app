@@ -44,6 +44,28 @@ export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise
   await swapCellContent(cellIdA, cellIdB)
 }
 
+/**
+ * クリップボード（カット/コピー）からのペースト。
+ * copyCellSubtree で内容と子グリッドを複製し、mode='cut' のときは source を空にする。
+ */
+export async function pasteCell(
+  sourceCellId: string,
+  targetCellId: string,
+  mode: 'cut' | 'copy',
+): Promise<void> {
+  if (sourceCellId === targetCellId) return
+  await copyCellSubtree(sourceCellId, targetCellId)
+
+  if (mode === 'cut') {
+    const ts = now()
+    await execute(
+      'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
+      ['', null, null, ts, sourceCellId],
+    )
+    await execute('DELETE FROM grids WHERE parent_cell_id = ?', [sourceCellId])
+  }
+}
+
 export async function copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void> {
   const srcs = await query<Cell>('SELECT * FROM cells WHERE id = ?', [sourceCellId])
   const src = srcs[0]

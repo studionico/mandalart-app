@@ -10,7 +10,7 @@ import { uploadCellImage, getCellImageUrl, deleteCellImage } from '@/lib/api/sto
 
 type Props = {
   cell: Cell | null
-  allCells: Cell[]
+  allCells?: Cell[]
   userId: string
   mandalartId: string
   onSave: (cellId: string, params: { text: string; image_path: string | null; color: string | null }) => Promise<void>
@@ -20,7 +20,7 @@ type Props = {
 }
 
 export default function CellEditModal({
-  cell, allCells, userId, mandalartId, onSave, onClose, onNavigate, isMobile,
+  cell, userId, mandalartId, onSave, onClose, onNavigate, isMobile,
 }: Props) {
   const [text, setText] = useState('')
   const [imagePath, setImagePath] = useState<string | null>(null)

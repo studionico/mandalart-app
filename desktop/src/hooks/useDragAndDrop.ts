@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import type { Cell } from '@/types'
 import { resolveDndAction } from '@/lib/utils/dnd'
+import { isCellEmpty } from '@/lib/utils/grid'
 import { swapCellContent, swapCellSubtree, copyCellSubtree } from '@/lib/api/cells'
 
 async function executeAction(action: ReturnType<typeof resolveDndAction>) {
@@ -19,37 +20,49 @@ async function executeAction(action: ReturnType<typeof resolveDndAction>) {
   }
 }
 
+type DragSource =
+  | { kind: 'cell'; cell: Cell }
+  | { kind: 'stock'; itemId: string }
+
 /**
  * HTML5 DnD の代わりに mousedown/mousemove/mouseup で D&D を実装。
  * Tauri の WebKit では HTML5 DnD の drop イベントが信頼できないため。
+ *
+ * サポートするソース:
+ *  - セル → セル（同一 / 跨ぎ） / ストック
+ *  - ストックアイテム → セル
  */
 export function useDragAndDrop(
   cells: Cell[],
   onComplete: () => void,
   onStockDrop?: (cellId: string) => void,
+  onStockPaste?: (stockItemId: string, targetCellId: string) => void,
 ) {
   const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   const [dragOverId, setDragOverId]     = useState<string | null>(null)
   const [isOverStock, setIsOverStock]   = useState(false)
-  const dragSourceRef = useRef<Cell | null>(null)
-  const cellsRef      = useRef<Cell[]>(cells)
+  const sourceRef = useRef<DragSource | null>(null)
+  const cellsRef  = useRef<Cell[]>(cells)
   cellsRef.current = cells
 
-  /**
-   * Cell の onMouseDown から呼ばれる。
-   * ドラッグ開始後、グローバルの mousemove / mouseup を監視して
-   * ドロップ先を elementFromPoint で特定する。
-   */
-  const handleDragStart = useCallback((cell: Cell) => {
-    dragSourceRef.current = cell
-    setDragSourceId(cell.id)
+  const beginDrag = useCallback((source: DragSource) => {
+    sourceRef.current = source
+    setDragSourceId(source.kind === 'cell' ? source.cell.id : `stock:${source.itemId}`)
     document.body.style.cursor = 'grabbing'
 
     function onMouseMove(e: MouseEvent) {
-      const el       = document.elementFromPoint(e.clientX, e.clientY)
-      const cellEl   = el?.closest('[data-cell-id]') as HTMLElement | null
-      const stockEl  = el?.closest('[data-stock-drop]') as HTMLElement | null
-      setDragOverId(cellEl?.dataset.cellId ?? null)
+      const el      = document.elementFromPoint(e.clientX, e.clientY)
+      const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
+      const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
+      let overCellId: string | null = cellEl?.dataset.cellId ?? null
+
+      // ストック → セル: 空セルのみ有効なドロップ先としてハイライト
+      if (sourceRef.current?.kind === 'stock' && overCellId) {
+        const t = cellsRef.current.find((c) => c.id === overCellId)
+        if (!t || !isCellEmpty(t)) overCellId = null
+      }
+
+      setDragOverId(overCellId)
       setIsOverStock(!!stockEl)
     }
 
@@ -58,37 +71,54 @@ export function useDragAndDrop(
       document.removeEventListener('mouseup', onMouseUp)
       document.body.style.cursor = ''
 
-      const source = dragSourceRef.current
-      dragSourceRef.current = null
+      const src = sourceRef.current
+      sourceRef.current = null
       setDragSourceId(null)
       setDragOverId(null)
       setIsOverStock(false)
 
-      if (!source) return
+      if (!src) return
 
       const el      = document.elementFromPoint(e.clientX, e.clientY)
       const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
-      if (stockEl) {
-        onStockDrop?.(source.id)
-        return
-      }
+      const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
+      const targetId = cellEl?.dataset.cellId ?? null
 
-      const cellEl   = el?.closest('[data-cell-id]') as HTMLElement | null
-      const targetId = cellEl?.dataset.cellId
-      if (!targetId || targetId === source.id) return
-
-      const target = cellsRef.current.find(c => c.id === targetId)
-      if (!target) return
-
-      const action = resolveDndAction(source, target)
-      if (action.type !== 'NOOP') {
-        executeAction(action).then(() => onComplete()).catch(console.error)
+      if (src.kind === 'cell') {
+        // ストックドロップゾーン
+        if (stockEl) {
+          onStockDrop?.(src.cell.id)
+          return
+        }
+        // セル間 D&D
+        if (!targetId || targetId === src.cell.id) return
+        const target = cellsRef.current.find((c) => c.id === targetId)
+        if (!target) return
+        const action = resolveDndAction(src.cell, target)
+        if (action.type !== 'NOOP') {
+          executeAction(action).then(() => onComplete()).catch(console.error)
+        }
+      } else {
+        // ストック → セル: 空セルのみ許可（入れ替えなし）
+        if (!targetId) return
+        const target = cellsRef.current.find((c) => c.id === targetId)
+        if (!target || !isCellEmpty(target)) return
+        onStockPaste?.(src.itemId, targetId)
       }
     }
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup',   onMouseUp)
-  }, [onComplete, onStockDrop])
+  }, [onComplete, onStockDrop, onStockPaste])
+
+  const handleDragStart = useCallback(
+    (cell: Cell) => beginDrag({ kind: 'cell', cell }),
+    [beginDrag],
+  )
+  const handleStockItemDragStart = useCallback(
+    (itemId: string) => beginDrag({ kind: 'stock', itemId }),
+    [beginDrag],
+  )
 
   return {
     dragSourceId,
@@ -96,5 +126,6 @@ export function useDragAndDrop(
     isOverStock,
     isDragging: dragSourceId !== null,
     handleDragStart,
+    handleStockItemDragStart,
   }
 }

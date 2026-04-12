@@ -12,10 +12,13 @@ type Props = {
   isDragging?: boolean
   isOverStock?: boolean
   stockReloadKey?: number
+  onStockItemDragStart?: (itemId: string) => void
+  dragSourceId?: string | null
 }
 
 export default function SidePanel({
   gridId, gridMemo, onStockPaste, isDragging, isOverStock, stockReloadKey,
+  onStockItemDragStart, dragSourceId,
 }: Props) {
   const [tab, setTab] = useState<Tab>('memo')
 
@@ -45,7 +48,13 @@ export default function SidePanel({
         {tab === 'memo' ? (
           <MemoTab gridId={gridId} initialMemo={gridMemo} />
         ) : (
-          <StockTab onPaste={onStockPaste} isOverStock={isOverStock} reloadKey={stockReloadKey} />
+          <StockTab
+            onPaste={onStockPaste}
+            isOverStock={isOverStock}
+            reloadKey={stockReloadKey}
+            onItemDragStart={onStockItemDragStart}
+            dragSourceId={dragSourceId}
+          />
         )}
       </div>
     </div>

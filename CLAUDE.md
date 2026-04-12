@@ -101,6 +101,12 @@ Server Components are used only for auth checks and metadata. All editor logic i
 | Peripheral (has content) | Center | Swap content only |
 | Peripheral (empty) | Center | No-op |
 
+**Stock rules** (`src/lib/api/stock.ts`)
+- Cell → stock (`addToStock`): snapshot includes the full subtree.
+  - Peripheral cell: its child grids
+  - Center cell: the grid it belongs to (8 peripherals + their descendants) — mirrors the "center cell's subtree = the grid it is the theme of" interpretation used by `copyCellSubtree`
+- Stock → cell (`pasteFromStock`): **empty target cells only, no swap semantics**. Applies snapshot content + recursively inserts `GridSnapshot` children. Stock items are not consumed on paste.
+
 **Empty-data rules**
 - New mandalart: held as draft in UI; saved to DB only on first confirmed input
 - When all cells in a grid become empty → auto-delete that grid (with Undo toast)
