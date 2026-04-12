@@ -4,7 +4,11 @@ import {
   getMandalarts, createMandalart, deleteMandalart, updateMandalartTitle, duplicateMandalart,
 } from '@/lib/api/mandalarts'
 import { createGrid } from '@/lib/api/grids'
+import { signOut } from '@/lib/api/auth'
 import ImportDialog from '@/components/editor/ImportDialog'
+import AuthDialog from '@/components/AuthDialog'
+import { useAuthStore } from '@/store/authStore'
+import { useSync } from '@/hooks/useSync'
 import type { Mandalart } from '@/types'
 
 type SortKey = 'updated' | 'title'
@@ -16,13 +20,17 @@ export default function DashboardPage() {
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('updated')
   const [importOpen, setImportOpen] = useState(false)
+  const [authOpen, setAuthOpen] = useState(false)
+
+  const user = useAuthStore((s) => s.user)
+  const { status: syncStatus, lastSync, error: syncError, sync, reloadKey } = useSync()
 
   async function load() {
     setMandalarts(await getMandalarts())
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [reloadKey])
 
   async function handleCreate() {
     try {
@@ -100,6 +108,30 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {user ? (
+            <div className="flex items-center gap-2">
+              <SyncIndicator
+                status={syncStatus}
+                lastSync={lastSync}
+                error={syncError}
+                onSync={sync}
+              />
+              <button
+                onClick={async () => { await signOut() }}
+                className="text-xs text-gray-500 hover:text-gray-700"
+                title={user.email ?? ''}
+              >
+                サインアウト
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAuthOpen(true)}
+              className="text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 hover:border-gray-300 px-3 py-2 rounded-lg transition-colors"
+            >
+              サインイン
+            </button>
+          )}
           <button
             onClick={() => setImportOpen(true)}
             className="text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 hover:border-gray-300 px-3 py-2 rounded-lg transition-colors"
@@ -114,6 +146,8 @@ export default function DashboardPage() {
           </button>
         </div>
       </header>
+
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
 
       <ImportDialog
         open={importOpen}
@@ -181,4 +215,39 @@ export default function DashboardPage() {
       </main>
     </div>
   )
+}
+
+function SyncIndicator({
+  status, lastSync, error, onSync,
+}: {
+  status: 'idle' | 'syncing' | 'error' | 'offline'
+  lastSync: Date | null
+  error: string | null
+  onSync: () => void
+}) {
+  const label =
+    status === 'syncing' ? '同期中...' :
+    status === 'error' ? `同期エラー` :
+    lastSync ? `${formatTime(lastSync)} 同期済み` :
+    '未同期'
+
+  const colorClass =
+    status === 'syncing' ? 'text-blue-500' :
+    status === 'error' ? 'text-red-500' :
+    'text-gray-500'
+
+  return (
+    <button
+      onClick={onSync}
+      disabled={status === 'syncing'}
+      title={error ?? '今すぐ同期'}
+      className={`text-xs ${colorClass} border border-gray-200 rounded-lg px-2 py-1.5 hover:bg-gray-50 disabled:opacity-50`}
+    >
+      ⟳ {label}
+    </button>
+  )
+}
+
+function formatTime(d: Date): string {
+  return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
 }

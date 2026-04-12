@@ -258,14 +258,21 @@
 
 ---
 
-## フェーズ 25: クラウド同期（オプション）⬜
+## フェーズ 25: クラウド同期 ✅
 
-- [ ] Supabase Auth 連携（メール / Google / GitHub）
-- [ ] `src/lib/sync/push.ts`（ローカル → Supabase）
-- [ ] `src/lib/sync/pull.ts`（Supabase → ローカル）
-- [ ] 競合解決（updated_at 比較）
-- [ ] 同期タイミング: 起動時・保存時・手動ボタン
-- [ ] `src/lib/realtime.ts` の本実装（単一ユーザー複数デバイス同期）
+- [x] Supabase Auth 連携（メール + Google + GitHub OAuth）
+  - PKCE フロー、`tauri-plugin-deep-link` で `mandalart://auth/callback` を受け取り `exchangeCodeForSession`
+  - `useAuthBootstrap` hook で起動時セッション復元 + `onAuthStateChange` 購読
+  - `AuthDialog` (signin / signup / OAuth ボタン)、`authStore` (Zustand)
+- [x] `src/lib/sync/push.ts`（ローカル → Supabase upsert）
+  - `synced_at IS NULL OR synced_at < updated_at` で dirty 判定
+- [x] `src/lib/sync/pull.ts`（Supabase → ローカル upsert）
+  - 行ごとに `updated_at` を比較し、クラウドが新しければローカルを上書き
+- [x] 競合解決（updated_at last-write-wins）
+- [x] 同期タイミング: サインイン時に初回フル同期、`useSync` の手動 sync ボタン、Realtime push 受信時
+- [x] `src/lib/realtime.ts` の本実装（postgres_changes 全テーブル購読、ローカル DB に反映）
+- [x] UI 統合: ダッシュボードヘッダーにサインイン / サインアウト / 同期ステータスインジケータ
+- 既知の制限（MVP スコープ外）: 削除の同期（ローカル削除はクラウドに伝播しない）、user_id バインディングは単一ユーザー前提
 
 ---
 

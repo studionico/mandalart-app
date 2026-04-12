@@ -4,9 +4,11 @@ import EditorPage from './pages/EditorPage'
 import UpdateDialog from './components/UpdateDialog'
 import { useGlobalShortcut } from './hooks/useGlobalShortcut'
 import { useAppUpdate } from './hooks/useAppUpdate'
+import { useAuthBootstrap } from './hooks/useAuthBootstrap'
 
 export default function App() {
   useGlobalShortcut()
+  useAuthBootstrap()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   return (

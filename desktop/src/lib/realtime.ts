@@ -1,22 +1,118 @@
-// デスクトップ版: Realtime は不要（単一デバイス）
+import { supabase } from '@/lib/supabase/client'
+import { execute, query } from '@/lib/db'
 import type { Cell, Grid } from '@/types'
 
-export function subscribeToCells(
-  _mandalartId: string,
-  _onInsert: (c: Cell) => void,
-  _onUpdate: (c: Cell) => void,
+type CloudCell = Cell
+type CloudGrid = Grid
+
+/**
+ * Supabase Realtime: 別デバイスでの変更を購読する
+ *
+ * RLS により、自分の所有するレコードの変更だけが届く（postgres_changes）。
+ * 受信したペイロードを直接ローカル DB に upsert し、UI 側に変更を通知する。
+ */
+export function subscribeRemoteChanges(
+  onChange: () => void,
 ): () => void {
-  return () => {}
+  const channel = supabase.channel('mandalart-sync')
+
+  // mandalarts は今のところ delete だけで自動削除がないので、UI のリストの整合性のために購読する
+  channel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'mandalarts' },
+    async (payload) => {
+      await applyMandalartChange(payload)
+      onChange()
+    },
+  )
+
+  channel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'grids' },
+    async (payload) => {
+      await applyGridChange(payload)
+      onChange()
+    },
+  )
+
+  channel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'cells' },
+    async (payload) => {
+      await applyCellChange(payload)
+      onChange()
+    },
+  )
+
+  channel.subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
+  }
 }
 
-export function subscribeToGrids(
-  _mandalartId: string,
-  _onInsert: (g: Grid) => void,
-  _onUpdate: (g: Grid) => void,
-): () => void {
-  return () => {}
+async function applyMandalartChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
+  if (payload.eventType === 'DELETE') {
+    const id = payload.old.id as string
+    if (id) await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+    return
+  }
+  const m = payload.new as { id: string; title: string; created_at: string; updated_at: string }
+  if (!m.id) return
+  const local = await query<{ updated_at: string }>('SELECT updated_at FROM mandalarts WHERE id = ?', [m.id])
+  if (local.length === 0) {
+    await execute(
+      'INSERT INTO mandalarts (id, title, created_at, updated_at, synced_at) VALUES (?,?,?,?,?)',
+      [m.id, m.title, m.created_at, m.updated_at, m.updated_at],
+    )
+  } else if (m.updated_at > local[0].updated_at) {
+    await execute(
+      'UPDATE mandalarts SET title=?, updated_at=?, synced_at=? WHERE id=?',
+      [m.title, m.updated_at, m.updated_at, m.id],
+    )
+  }
 }
 
-export function unsubscribe(_sub: () => void): void {
-  _sub()
+async function applyGridChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
+  if (payload.eventType === 'DELETE') {
+    const id = payload.old.id as string
+    if (id) await execute('DELETE FROM grids WHERE id = ?', [id])
+    return
+  }
+  const g = payload.new as CloudGrid
+  if (!g.id) return
+  const local = await query<{ updated_at: string }>('SELECT updated_at FROM grids WHERE id = ?', [g.id])
+  if (local.length === 0) {
+    await execute(
+      'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at, synced_at) VALUES (?,?,?,?,?,?,?,?)',
+      [g.id, g.mandalart_id, g.parent_cell_id, g.sort_order, g.memo, g.created_at, g.updated_at, g.updated_at],
+    )
+  } else if (g.updated_at > local[0].updated_at) {
+    await execute(
+      'UPDATE grids SET mandalart_id=?, parent_cell_id=?, sort_order=?, memo=?, updated_at=?, synced_at=? WHERE id=?',
+      [g.mandalart_id, g.parent_cell_id, g.sort_order, g.memo, g.updated_at, g.updated_at, g.id],
+    )
+  }
+}
+
+async function applyCellChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
+  if (payload.eventType === 'DELETE') {
+    const id = payload.old.id as string
+    if (id) await execute('DELETE FROM cells WHERE id = ?', [id])
+    return
+  }
+  const c = payload.new as CloudCell
+  if (!c.id) return
+  const local = await query<{ updated_at: string }>('SELECT updated_at FROM cells WHERE id = ?', [c.id])
+  if (local.length === 0) {
+    await execute(
+      'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [c.id, c.grid_id, c.position, c.text, c.image_path, c.color, c.created_at, c.updated_at, c.updated_at],
+    )
+  } else if (c.updated_at > local[0].updated_at) {
+    await execute(
+      'UPDATE cells SET grid_id=?, position=?, text=?, image_path=?, color=?, updated_at=?, synced_at=? WHERE id=?',
+      [c.grid_id, c.position, c.text, c.image_path, c.color, c.updated_at, c.updated_at, c.id],
+    )
+  }
 }

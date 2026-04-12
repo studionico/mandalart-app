@@ -46,7 +46,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const { isOffline } = useOffline()
   const clipboard = useClipboardStore()
 
-  const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
+  const { data: gridData, reload, updateCell: updateCellLocal } = useGrid(currentGridId)
   const { subGrids, reload: reloadSubGrids } = useSubGrids(gridData?.cells ?? [])
   const gridRef = useRef<HTMLDivElement>(null)
   const gridAreaRef = useRef<HTMLDivElement>(null)
@@ -148,14 +148,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     loadChildCounts()
   }, [gridData])
 
-  // Realtime
-  useRealtime(
-    mandalartId,
-    (cell) => refreshCell(cell),
-    (cell) => refreshCell(cell),
-    () => reload(),
-    () => reload(),
-  )
+  // Realtime: 別デバイスでの変更が来たらローカルを再読み込み
+  useRealtime(useCallback(() => {
+    reload()
+    reloadSubGrids()
+  }, [reload, reloadSubGrids]))
 
   // D&D のドロップ先解決に使う全セル（3x3ではルート、9x9ではルート+サブを平坦化）
   const dndCells = useMemo<Cell[]>(() => {

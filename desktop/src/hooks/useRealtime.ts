@@ -1,24 +1,18 @@
-
 import { useEffect } from 'react'
-import { subscribeToCells, subscribeToGrids, unsubscribe } from '@/lib/realtime'
-import type { Cell, Grid } from '@/types'
+import { subscribeRemoteChanges } from '@/lib/realtime'
+import { useAuthStore } from '@/store/authStore'
 
-export function useRealtime(
-  mandalartId: string | null,
-  onCellUpdate: (cell: Cell) => void,
-  onCellInsert: (cell: Cell) => void,
-  _onCellDelete: (cellId: string) => void,
-  onGridChange: (grid: Grid) => void,
-) {
+/**
+ * 認証済みのときだけ Supabase Realtime を購読し、変更があれば onChange を呼ぶ。
+ * 旧 API (subscribeToCells / subscribeToGrids 個別購読) は廃止され、
+ * 単一の subscribeRemoteChanges で全テーブルを購読する。
+ */
+export function useRealtime(onChange: () => void) {
+  const user = useAuthStore((s) => s.user)
+
   useEffect(() => {
-    if (!mandalartId) return
-
-    const cellChannel = subscribeToCells(mandalartId, onCellInsert, onCellUpdate)
-    const gridChannel = subscribeToGrids(mandalartId, onGridChange, onGridChange)
-
-    return () => {
-      unsubscribe(cellChannel)
-      unsubscribe(gridChannel)
-    }
-  }, [mandalartId]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!user) return
+    const unsubscribe = subscribeRemoteChanges(onChange)
+    return () => { unsubscribe() }
+  }, [user, onChange])
 }
