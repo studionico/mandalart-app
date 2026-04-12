@@ -37,6 +37,12 @@
   "plugins": {
     "sql": {
       "preloadConnections": ["sqlite:mandalart.db"]
+    },
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/studionico/mandalart-app/releases/latest/download/latest.json"
+      ]
     }
   }
 }
