@@ -1,0 +1,30 @@
+-- 開発用シードデータ（Supabase Auth でユーザー作成後に実行）
+-- ユーザー ID を実際の auth.users.id に書き換えて使用すること
+
+-- DO $$
+-- DECLARE
+--   test_user_id uuid := 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
+--   mandalart_id uuid;
+--   root_grid_id uuid;
+--   center_cell_id uuid;
+-- BEGIN
+--   INSERT INTO mandalarts (user_id, title)
+--   VALUES (test_user_id, 'サンプル目標')
+--   RETURNING id INTO mandalart_id;
+--
+--   INSERT INTO grids (mandalart_id, parent_cell_id, sort_order)
+--   VALUES (mandalart_id, NULL, 0)
+--   RETURNING id INTO root_grid_id;
+--
+--   INSERT INTO cells (grid_id, position, text)
+--   VALUES
+--     (root_grid_id, 4, '健康'),
+--     (root_grid_id, 0, ''),
+--     (root_grid_id, 1, ''),
+--     (root_grid_id, 2, ''),
+--     (root_grid_id, 3, ''),
+--     (root_grid_id, 5, ''),
+--     (root_grid_id, 6, ''),
+--     (root_grid_id, 7, ''),
+--     (root_grid_id, 8, '');
+-- END $$;
