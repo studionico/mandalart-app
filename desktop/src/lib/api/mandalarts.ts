@@ -53,11 +53,73 @@ export async function deleteMandalart(id: string): Promise<void> {
   )
 }
 
-export async function searchMandalarts(q: string): Promise<Mandalart[]> {
-  const like = `%${q}%`
+/**
+ * ソフトデリートされているマンダラートの一覧を取得する。
+ * 削除日時の新しい順。
+ */
+export async function getDeletedMandalarts(): Promise<Mandalart[]> {
   return query<Mandalart>(
-    'SELECT * FROM mandalarts WHERE title LIKE ? AND deleted_at IS NULL ORDER BY updated_at DESC',
-    [like]
+    'SELECT * FROM mandalarts WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+  )
+}
+
+/**
+ * ゴミ箱からの復元: deleted_at を NULL に戻し、配下の grids / cells も同時に復元する。
+ * updated_at を更新して同期で cloud に反映されるようにする。
+ */
+export async function restoreMandalart(id: string): Promise<void> {
+  const ts = now()
+  await execute(
+    'UPDATE cells SET deleted_at = NULL, updated_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
+    [ts, id],
+  )
+  await execute(
+    'UPDATE grids SET deleted_at = NULL, updated_at = ? WHERE mandalart_id = ?',
+    [ts, id],
+  )
+  await execute(
+    'UPDATE mandalarts SET deleted_at = NULL, updated_at = ? WHERE id = ?',
+    [ts, id],
+  )
+}
+
+/**
+ * 完全削除（物理削除）。ゴミ箱から元に戻せなくなる。
+ * ローカル DB から cells / grids / mandalarts を順に実際の DELETE で消す。
+ */
+export async function permanentDeleteMandalart(id: string): Promise<void> {
+  await execute(
+    'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
+    [id],
+  )
+  await execute('DELETE FROM grids WHERE mandalart_id = ?', [id])
+  await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+}
+
+/**
+ * タイトルおよびセル本文を対象とした全文検索。
+ * マンダラートのタイトル、もしくは配下のいずれかのセルの text に一致するものを返す。
+ * LIKE の特殊文字 (%, _, \) はエスケープする。
+ */
+export async function searchMandalarts(q: string): Promise<Mandalart[]> {
+  const trimmed = q.trim()
+  if (!trimmed) {
+    return getMandalarts()
+  }
+  // バックスラッシュ → %, _ の順でエスケープ
+  const escaped = trimmed
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_')
+  const like = `%${escaped}%`
+  return query<Mandalart>(
+    `SELECT DISTINCT m.* FROM mandalarts m
+     LEFT JOIN grids g ON g.mandalart_id = m.id AND g.deleted_at IS NULL
+     LEFT JOIN cells c ON c.grid_id = g.id AND c.deleted_at IS NULL
+     WHERE m.deleted_at IS NULL
+       AND (m.title LIKE ? ESCAPE '\\' OR c.text LIKE ? ESCAPE '\\')
+     ORDER BY m.updated_at DESC`,
+    [like, like],
   )
 }
 

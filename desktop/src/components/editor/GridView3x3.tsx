@@ -30,10 +30,10 @@ export default function GridView3x3({
   const cellMap = new Map(cells.map((c) => [c.position, c]))
 
   return (
-    <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full p-3 bg-gray-100 rounded-2xl shadow-inner">
+    <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full p-3 bg-gray-100 dark:bg-gray-900 rounded-2xl shadow-inner">
       {Array.from({ length: 9 }).map((_, i) => {
         const cell = cellMap.get(i)
-        if (!cell) return <div key={i} className="rounded-lg bg-gray-100" />
+        if (!cell) return <div key={i} className="rounded-lg bg-gray-100 dark:bg-gray-900" />
 
         const isCenter   = i === 4
         const isDisabled = !isCenter && centerEmpty

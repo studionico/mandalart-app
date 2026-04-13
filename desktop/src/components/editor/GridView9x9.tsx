@@ -44,9 +44,9 @@ export default function GridView9x9({
 
         if (!rootCell) {
           return (
-            <div key={outerPos} className="grid grid-cols-3 grid-rows-3 gap-0.5 p-1 min-h-0 min-w-0 bg-gray-50 rounded-xl border border-gray-200">
+            <div key={outerPos} className="grid grid-cols-3 grid-rows-3 gap-0.5 p-1 min-h-0 min-w-0 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
               {Array.from({ length: 9 }).map((_, k) => (
-                <div key={k} className="aspect-square rounded bg-gray-100" />
+                <div key={k} className="aspect-square rounded bg-gray-100 dark:bg-gray-900" />
               ))}
             </div>
           )
@@ -61,13 +61,13 @@ export default function GridView9x9({
           <div
             key={outerPos}
             className={`grid grid-cols-3 grid-rows-3 gap-0.5 p-1 min-h-0 min-w-0 rounded-xl border ${
-              isRootCenter ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-gray-50'
+              isRootCenter ? 'border-blue-300 bg-blue-50 dark:border-blue-600 dark:bg-blue-950/40' : 'border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900'
             }`}
           >
             {Array.from({ length: 9 }).map((_, innerPos) => {
               if (subCellMap) {
                 const cell = subCellMap.get(innerPos)
-                if (!cell) return <div key={innerPos} className="aspect-square rounded bg-gray-100" />
+                if (!cell) return <div key={innerPos} className="aspect-square rounded bg-gray-100 dark:bg-gray-900" />
                 const isSubCenter = innerPos === 4
                 const isDisabled = !isSubCenter && subCenterEmpty
 
@@ -119,7 +119,7 @@ export default function GridView9x9({
                   />
                 )
               }
-              return <div key={innerPos} className="aspect-square rounded bg-gray-100" />
+              return <div key={innerPos} className="aspect-square rounded bg-gray-100 dark:bg-gray-900" />
             })}
           </div>
         )

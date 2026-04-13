@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getMandalarts, createMandalart, deleteMandalart, updateMandalartTitle, duplicateMandalart,
+  searchMandalarts,
 } from '@/lib/api/mandalarts'
 import { createGrid } from '@/lib/api/grids'
 import { signOut } from '@/lib/api/auth'
 import ImportDialog from '@/components/editor/ImportDialog'
 import AuthDialog from '@/components/AuthDialog'
+import TrashDialog from '@/components/dashboard/TrashDialog'
+import ThemeToggle from '@/components/ThemeToggle'
 import { useAuthStore } from '@/store/authStore'
 import { useSync } from '@/hooks/useSync'
 import type { Mandalart } from '@/types'
@@ -21,16 +24,26 @@ export default function DashboardPage() {
   const [sortKey, setSortKey] = useState<SortKey>('updated')
   const [importOpen, setImportOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
+  const [trashOpen, setTrashOpen] = useState(false)
 
   const user = useAuthStore((s) => s.user)
   const { status: syncStatus, lastSync, error: syncError, sync, reloadKey } = useSync()
 
   async function load() {
-    setMandalarts(await getMandalarts())
-    setLoading(false)
+    setLoading(true)
+    try {
+      const data = query.trim() ? await searchMandalarts(query) : await getMandalarts()
+      setMandalarts(data)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { load() }, [reloadKey])
+  // 起動時 / 同期 / クエリ変更時に debounce して再取得
+  useEffect(() => {
+    const t = setTimeout(() => { load() }, query.trim() ? 200 : 0)
+    return () => clearTimeout(t)
+  }, [query, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleCreate() {
     try {
@@ -70,23 +83,20 @@ export default function DashboardPage() {
     }
   }
 
+  // 絞り込みはサーバ側 (searchMandalarts) で行うので、ここではソートのみ
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const filtered = q
-      ? mandalarts.filter((m) => (m.title || '').toLowerCase().includes(q))
-      : mandalarts
-    const sorted = [...filtered].sort((a, b) => {
+    const sorted = [...mandalarts].sort((a, b) => {
       if (sortKey === 'title') {
         return (a.title || '無題').localeCompare(b.title || '無題', 'ja')
       }
       return b.updated_at.localeCompare(a.updated_at)
     })
     return sorted
-  }, [mandalarts, query, sortKey])
+  }, [mandalarts, sortKey])
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between gap-4">
         <h1 className="text-lg font-bold shrink-0">マンダラート</h1>
 
         <div className="flex-1 flex items-center gap-2 max-w-xl">
@@ -94,13 +104,13 @@ export default function DashboardPage() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="タイトルで検索..."
-            className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="タイトル・セル本文で検索..."
+            className="flex-1 text-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+            className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
           >
             <option value="updated">更新日順</option>
             <option value="title">タイトル順</option>
@@ -108,6 +118,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <ThemeToggle />
           {user ? (
             <div className="flex items-center gap-2">
               <SyncIndicator
@@ -118,7 +129,7 @@ export default function DashboardPage() {
               />
               <button
                 onClick={async () => { await signOut() }}
-                className="text-xs text-gray-500 hover:text-gray-700"
+                className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                 title={user.email ?? ''}
               >
                 サインアウト
@@ -127,14 +138,21 @@ export default function DashboardPage() {
           ) : (
             <button
               onClick={() => setAuthOpen(true)}
-              className="text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 hover:border-gray-300 px-3 py-2 rounded-lg transition-colors"
+              className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors"
             >
               サインイン
             </button>
           )}
           <button
+            onClick={() => setTrashOpen(true)}
+            className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors"
+            title="削除済みの復元 / 完全削除"
+          >
+            ゴミ箱
+          </button>
+          <button
             onClick={() => setImportOpen(true)}
-            className="text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 hover:border-gray-300 px-3 py-2 rounded-lg transition-colors"
+            className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors"
           >
             インポート
           </button>
@@ -148,6 +166,11 @@ export default function DashboardPage() {
       </header>
 
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
+      <TrashDialog
+        open={trashOpen}
+        onClose={() => setTrashOpen(false)}
+        onChange={load}
+      />
 
       <ImportDialog
         open={importOpen}
@@ -161,14 +184,14 @@ export default function DashboardPage() {
 
       <main className="max-w-5xl mx-auto px-6 py-8">
         {loading ? (
-          <p className="text-gray-400">読み込み中...</p>
-        ) : mandalarts.length === 0 ? (
-          <div className="text-center py-20 text-gray-400">
+          <p className="text-gray-400 dark:text-gray-500">読み込み中...</p>
+        ) : !query.trim() && mandalarts.length === 0 ? (
+          <div className="text-center py-20 text-gray-400 dark:text-gray-500">
             <p className="text-lg mb-2">まだマンダラートがありません</p>
             <p className="text-sm">「+ 新規作成」から始めましょう</p>
           </div>
         ) : visible.length === 0 ? (
-          <div className="text-center py-20 text-gray-400">
+          <div className="text-center py-20 text-gray-400 dark:text-gray-500">
             <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
           </div>
         ) : (
@@ -176,34 +199,34 @@ export default function DashboardPage() {
             {visible.map((m) => (
               <div
                 key={m.id}
-                className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow cursor-pointer group"
+                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 hover:shadow-md transition-shadow cursor-pointer group"
                 onClick={() => navigate(`/mandalart/${m.id}`)}
               >
-                <div className="aspect-square bg-gray-100 rounded-lg mb-3 grid grid-cols-3 gap-0.5 p-1.5">
+                <div className="aspect-square bg-gray-100 dark:bg-gray-800 rounded-lg mb-3 grid grid-cols-3 gap-0.5 p-1.5">
                   {Array.from({ length: 9 }).map((_, i) => (
-                    <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-200' : 'bg-white border border-gray-200'}`} />
+                    <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-200 dark:bg-blue-900' : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700'}`} />
                   ))}
                 </div>
-                <p className="text-sm font-medium text-gray-800 truncate">{m.title || '無題'}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{m.title || '無題'}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                   {new Date(m.updated_at).toLocaleDateString('ja-JP')}
                 </p>
                 <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRename(m) }}
-                    className="text-xs text-gray-500 hover:text-gray-700"
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                   >
                     リネーム
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDuplicate(m) }}
-                    className="text-xs text-gray-500 hover:text-gray-700"
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                   >
                     複製
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(m.id) }}
-                    className="text-xs text-red-400 hover:text-red-600"
+                    className="text-xs text-red-400 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300"
                   >
                     削除
                   </button>
@@ -234,14 +257,14 @@ function SyncIndicator({
   const colorClass =
     status === 'syncing' ? 'text-blue-500' :
     status === 'error' ? 'text-red-500' :
-    'text-gray-500'
+    'text-gray-500 dark:text-gray-400'
 
   return (
     <button
       onClick={onSync}
       disabled={status === 'syncing'}
       title={error ?? '今すぐ同期'}
-      className={`text-xs ${colorClass} border border-gray-200 rounded-lg px-2 py-1.5 hover:bg-gray-50 disabled:opacity-50`}
+      className={`text-xs ${colorClass} border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50`}
     >
       ⟳ {label}
     </button>

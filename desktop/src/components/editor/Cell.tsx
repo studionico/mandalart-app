@@ -162,8 +162,8 @@ export default function Cell({
         transition-shadow transition-colors
         ${sizeClasses}
         ${bg}
-        ${isCenter ? 'border-blue-400 border-2 font-semibold shadow-md' : 'border-gray-300 shadow-sm'}
-        ${isDisabled ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:shadow-md hover:border-gray-400'}
+        ${isCenter ? 'border-blue-400 dark:border-blue-500 border-2 font-semibold shadow-md' : 'border-gray-300 dark:border-gray-700 shadow-sm'}
+        ${isDisabled ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:shadow-md hover:border-gray-400 dark:hover:border-gray-500'}
         ${isCut || isDragSource ? 'opacity-40' : ''}
         ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         ${isInlineEditing ? 'ring-2 ring-blue-500' : ''}
@@ -207,7 +207,7 @@ export default function Cell({
           type="button"
           onClick={(e) => { e.stopPropagation(); onOpenModal(cell) }}
           onMouseDown={(e) => e.stopPropagation()}
-          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white/80 border border-gray-200 text-gray-500 text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white hover:text-gray-700 z-20"
+          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white/80 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 z-20"
           title="詳細編集 (色 / 画像 / 長文)"
         >
           ⋯

@@ -16,6 +16,7 @@ import ParallelNav from './ParallelNav'
 import CellEditModal from './CellEditModal'
 import SidePanel from './SidePanel'
 import ImportDialog from './ImportDialog'
+import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, createGrid } from '@/lib/api/grids'
@@ -576,7 +577,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 overflow-hidden">
       {/* オフラインインジケーター */}
       {isOffline && (
         <div className="bg-yellow-500 text-white text-xs text-center py-1">
@@ -585,14 +586,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       )}
 
       {/* ヘッダー */}
-      <header className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 shrink-0">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center gap-2 shrink-0">
         <Breadcrumb onHome={handleNavigateHome} />
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          <ThemeToggle />
+
           {/* 文字サイズ (-10 〜 +10、各段 ×1.1) */}
-          <div className="flex items-stretch rounded-lg border border-gray-200 overflow-hidden text-xs">
+          <div className="flex items-stretch rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs">
             <button
               onClick={() => bumpFontLevel(-1)}
-              className="px-2 py-1.5 hover:bg-gray-50 text-gray-600 disabled:opacity-30"
+              className="px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-30"
               disabled={fontLevel <= -10}
               title="文字を小さく"
             >
@@ -600,14 +603,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             </button>
             <button
               onClick={() => resetFontLevel()}
-              className="px-2 py-1.5 hover:bg-gray-50 text-gray-600 border-x border-gray-200 min-w-[3.5rem] text-center tabular-nums"
+              className="px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 border-x border-gray-200 dark:border-gray-700 min-w-[3.5rem] text-center tabular-nums"
               title={`100% にリセット (現在 level ${fontLevel >= 0 ? '+' : ''}${fontLevel})`}
             >
               {(fontScale * 100).toFixed(0)}%
             </button>
             <button
               onClick={() => bumpFontLevel(1)}
-              className="px-2 py-1.5 hover:bg-gray-50 text-gray-600 disabled:opacity-30"
+              className="px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-30"
               disabled={fontLevel >= 20}
               title="文字を大きく"
             >
@@ -621,7 +624,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
-                className={`px-3 py-1.5 transition-colors ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-600'}`}
+                className={`px-3 py-1.5 transition-colors ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
               >
                 {mode}
               </button>
@@ -634,12 +637,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               エクスポート ▾
             </Button>
             {exportMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-[120px]">
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 min-w-[120px]">
                 {['png', 'pdf', 'json', 'csv'].map((fmt) => (
                   <button
                     key={fmt}
                     onClick={() => handleExport(fmt as 'png' | 'pdf' | 'json' | 'csv')}
-                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl uppercase"
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 first:rounded-t-xl last:rounded-b-xl uppercase"
                   >
                     {fmt}
                   </button>
@@ -714,7 +717,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           <div className="flex justify-center py-2 shrink-0">
             <button
               onClick={handleAddParallel}
-              className="text-sm text-gray-500 hover:text-blue-600 border border-dashed border-gray-300 hover:border-blue-400 px-4 py-2 rounded-lg transition-colors"
+              className="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 border border-dashed border-gray-300 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 px-4 py-2 rounded-lg transition-colors"
             >
               + 新しいグリッドを追加
             </button>
@@ -751,27 +754,27 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       {/* コンテキストメニュー */}
       {contextMenu && (
         <div
-          className="fixed bg-white border border-gray-200 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
+          className="fixed bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseLeave={() => setContextMenu(null)}
         >
-          <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-t-xl flex justify-between">
-            カット <span className="text-gray-400">⌘X</span>
+          <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-t-xl flex justify-between">
+            カット <span className="text-gray-400 dark:text-gray-500">⌘X</span>
           </button>
-          <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-gray-50 flex justify-between">
-            コピー <span className="text-gray-400">⌘C</span>
+          <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between">
+            コピー <span className="text-gray-400 dark:text-gray-500">⌘C</span>
           </button>
           <button
             onClick={() => handleContextAction('paste')}
             disabled={!clipboard.sourceCellId}
-            className="w-full text-left px-4 py-2 hover:bg-gray-50 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
+            className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            ペースト <span className="text-gray-400">⌘V</span>
+            ペースト <span className="text-gray-400 dark:text-gray-500">⌘V</span>
           </button>
-          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-gray-50">
+          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800">
             ストックに追加
           </button>
-          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-b-xl">
+          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-b-xl">
             ここにインポート
           </button>
         </div>
@@ -797,7 +800,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           value={titleValue}
           onChange={(e) => setTitleValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTitle() }}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="タイトル"
         />
         <div className="flex justify-end gap-2">

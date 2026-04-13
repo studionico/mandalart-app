@@ -1,1 +1,4 @@
 @import "tailwindcss";
+
+/* Tailwind v4: クラスベースのダークモードを有効化 (<html class="dark">) */
+@custom-variant dark (&:where(.dark, .dark *));

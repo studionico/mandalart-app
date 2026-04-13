@@ -5,10 +5,12 @@ import UpdateDialog from './components/UpdateDialog'
 import { useGlobalShortcut } from './hooks/useGlobalShortcut'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import { useAuthBootstrap } from './hooks/useAuthBootstrap'
+import { useTheme } from './hooks/useTheme'
 
 export default function App() {
   useGlobalShortcut()
   useAuthBootstrap()
+  useTheme()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   return (
