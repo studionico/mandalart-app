@@ -21,7 +21,7 @@ import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, createGrid } from '@/lib/api/grids'
 import { updateCell, pasteCell } from '@/lib/api/cells'
-import { getMandalart, updateMandalartTitle, deleteMandalart } from '@/lib/api/mandalarts'
+import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadCSV } from '@/lib/utils/export'
@@ -29,7 +29,6 @@ import { exportToJSON, exportToCSV } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
 import { nextTabPosition } from '@/constants/tabOrder'
 import type { Cell, Grid, StockItem } from '@/types'
-import Modal from '@/components/ui/Modal'
 
 type Props = {
   mandalartId: string
@@ -87,9 +86,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'error' | 'success'; action?: { label: string; onClick: () => void } } | null>(null)
 
   // タイトルダイアログ
-  const [titleDialog, setTitleDialog] = useState(false)
-  const [titleValue, setTitleValue] = useState('')
-  const [savedTitle, setSavedTitle] = useState('')
 
   // エクスポートメニュー
   const [exportMenu, setExportMenu] = useState(false)
@@ -109,9 +105,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   useEffect(() => {
     async function init() {
       try {
-        const m = await getMandalart(mandalartId)
-        setSavedTitle(m?.title ?? '')
-
         const roots = await getRootGrids(mandalartId)
         if (roots.length === 0) {
           setToast({ message: 'グリッドが見つかりません', type: 'error' })
@@ -447,31 +440,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       navigate('/dashboard')
       return
     }
-
-    // タイトルが既に設定済みならそのままダッシュボードへ
-    if (savedTitle.trim()) {
-      navigate('/dashboard')
-      return
-    }
-
-    // タイトル未設定なら設定ダイアログを表示
-    const center = getCenterCell(gridData?.cells ?? [])
-    setTitleValue(center?.text ?? '')
-    setTitleDialog(true)
-  }
-
-  async function handleSaveTitle() {
-    if (titleValue.trim()) {
-      await updateMandalartTitle(mandalartId, titleValue.trim())
-      setSavedTitle(titleValue.trim())
-    }
-    setTitleDialog(false)
+    // タイトルは root 中心セルの自動キャッシュなので、別途ダイアログは出さない
     navigate('/dashboard')
-  }
-
-  function handleCancelTitle() {
-    // ダイアログを閉じてエディタに留まる
-    setTitleDialog(false)
   }
 
   // 並列ナビゲーション
@@ -791,23 +761,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           setToast({ message: 'インポートしました', type: 'success' })
         }}
       />
-
-      {/* タイトル設定ダイアログ */}
-      <Modal open={titleDialog} onClose={handleCancelTitle} title="マンダラートのタイトルを設定">
-        <p className="text-sm text-gray-500 mb-3">後からダッシュボードで変更できます</p>
-        <input
-          type="text"
-          value={titleValue}
-          onChange={(e) => setTitleValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTitle() }}
-          className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="タイトル"
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={handleCancelTitle}>キャンセル</Button>
-          <Button onClick={handleSaveTitle}>保存してホームへ</Button>
-        </div>
-      </Modal>
 
       {/* トースト */}
       {toast && (

@@ -125,7 +125,8 @@ export async function searchMandalarts(q: string): Promise<Mandalart[]> {
 
 /**
  * マンダラートを丸ごと複製する。
- * タイトルには「 のコピー」を付加し、全グリッド・セルを新しい ID で再帰的に複製する。
+ * 全グリッド・セルを新しい ID で再帰的に複製する。
+ * タイトルはソースのまま (updateCell 経由の auto-sync に任せる)。
  */
 export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const src = await getMandalart(sourceId)
@@ -133,10 +134,9 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
 
   const newId = generateId()
   const ts = now()
-  const newTitle = src.title ? `${src.title} のコピー` : 'コピー'
   await execute(
     'INSERT INTO mandalarts (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)',
-    [newId, newTitle, ts, ts],
+    [newId, src.title, ts, ts],
   )
 
   // ルートグリッドを複製（parent_cell_id IS NULL）
@@ -148,7 +148,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     await cloneGridRecursive(g.id, newId, null, g.sort_order, g.memo)
   }
 
-  return { id: newId, title: newTitle, created_at: ts, updated_at: ts, user_id: '' }
+  return { id: newId, title: src.title, created_at: ts, updated_at: ts, user_id: '' }
 }
 
 /**

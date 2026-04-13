@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  getMandalarts, createMandalart, deleteMandalart, updateMandalartTitle, duplicateMandalart,
+  getMandalarts, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts,
 } from '@/lib/api/mandalarts'
 import { createGrid } from '@/lib/api/grids'
@@ -73,13 +73,6 @@ export default function DashboardPage() {
       alert('削除に失敗しました: ' + String(e))
       console.error('deleteMandalart failed:', e)
     }
-  }
-
-  async function handleRename(m: Mandalart) {
-    const title = window.prompt('タイトルを入力', m.title)
-    if (title === null) return
-    await updateMandalartTitle(m.id, title)
-    setMandalarts((prev) => prev.map((x) => x.id === m.id ? { ...x, title } : x))
   }
 
   async function handleDuplicate(m: Mandalart) {
@@ -203,40 +196,41 @@ export default function DashboardPage() {
             <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {visible.map((m) => (
               <div
                 key={m.id}
-                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 hover:shadow-md transition-shadow cursor-pointer group"
+                className="relative aspect-square bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
                 onClick={() => navigate(`/mandalart/${m.id}`)}
+                title={m.title || '無題'}
               >
-                <div className="aspect-square bg-gray-100 dark:bg-gray-800 rounded-lg mb-3 grid grid-cols-3 gap-0.5 p-1.5">
-                  {Array.from({ length: 9 }).map((_, i) => (
-                    <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-200 dark:bg-blue-900' : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700'}`} />
-                  ))}
+                <div
+                  className="w-full h-full flex items-center justify-center p-3 text-center break-all text-[11px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
+                  style={{ alignItems: 'safe center' }}
+                >
+                  <span className="line-clamp-[12] whitespace-pre-wrap">
+                    {m.title || '無題'}
+                  </span>
                 </div>
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{m.title || '無題'}</p>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                {/* 更新日: hover 時のみ下部にうっすら表示 */}
+                <div className="absolute bottom-1 left-2 right-2 text-[9px] text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
                   {new Date(m.updated_at).toLocaleDateString('ja-JP')}
-                </p>
-                <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleRename(m) }}
-                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                  >
-                    リネーム
-                  </button>
+                </div>
+                {/* アクション: hover 時に右上 */}
+                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDuplicate(m) }}
-                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center justify-center"
+                    title="複製"
                   >
-                    複製
+                    ⧉
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(m.id) }}
-                    className="text-xs text-red-400 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300"
+                    className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
+                    title="削除"
                   >
-                    削除
+                    ×
                   </button>
                 </div>
               </div>

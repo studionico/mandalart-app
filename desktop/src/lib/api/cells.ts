@@ -10,14 +10,35 @@ export async function updateCell(
   if (params.text !== undefined) { fields.push('text = ?'); values.push(params.text) }
   if (params.image_path !== undefined) { fields.push('image_path = ?'); values.push(params.image_path) }
   if (params.color !== undefined) { fields.push('color = ?'); values.push(params.color) }
-  fields.push('updated_at = ?'); values.push(now())
+  const ts = now()
+  fields.push('updated_at = ?'); values.push(ts)
   values.push(id)
   await execute(`UPDATE cells SET ${fields.join(', ')} WHERE id = ?`, values)
   const rows = await query<Cell>(
     'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
     [id],
   )
-  return rows[0]
+  const cell = rows[0]
+
+  // ルートグリッド (parent_cell_id IS NULL, sort_order = 0) の中心セル (position 4)
+  // が更新されたら、mandalarts.title をそのテキストにミラーする。
+  // title は「ルート中心セルのキャッシュ」として扱い、
+  // ダッシュボードの表示 / 検索 / ソートに使う。
+  if (cell && cell.position === 4 && params.text !== undefined) {
+    const grids = await query<{ mandalart_id: string; parent_cell_id: string | null; sort_order: number }>(
+      'SELECT mandalart_id, parent_cell_id, sort_order FROM grids WHERE id = ?',
+      [cell.grid_id],
+    )
+    const grid = grids[0]
+    if (grid && grid.parent_cell_id === null && grid.sort_order === 0) {
+      await execute(
+        'UPDATE mandalarts SET title = ?, updated_at = ? WHERE id = ?',
+        [params.text, ts, grid.mandalart_id],
+      )
+    }
+  }
+
+  return cell
 }
 
 export async function swapCellContent(cellIdA: string, cellIdB: string): Promise<void> {
