@@ -280,20 +280,30 @@
 
 ---
 
-## フェーズ 26: ビルド・配布 ⬜
+## フェーズ 26: ビルド・配布 ✅
 
-- [ ] GitHub Actions ワークフロー作成
-  - macOS: `.dmg` 生成
-  - Windows: `.msi` / `.exe` 生成
-- [ ] GitHub Releases への自動アップロード
-- [ ] updater エンドポイントを GitHub Releases に設定
-- [ ] コードサイニング設定（macOS / Windows）
+- [x] GitHub Actions ワークフロー作成 (`.github/workflows/release.yml`)
+  - macOS: `.dmg` (Apple Silicon + Intel)
+  - Windows: `.msi` / `.exe`
+  - Linux: `.AppImage` / `.deb` / `.rpm`
+- [x] GitHub Releases への自動アップロード (tauri-action)
+- [x] updater エンドポイント (`latest.json`) を GitHub Releases に設定
+- [ ] **コードサイニング（macOS / Windows）** — 有料証明書が必要、将来対応
+  - macOS: Apple Developer Program ($99/年)
+  - Windows: EV コードサイニング証明書 ($200-400/年)
+  - 現状は未署名配布。macOS は `xattr -cr`、Windows は SmartScreen「詳細情報 → 実行」で起動可能
 
 ---
 
 ## バグ・改善TODO
 
 - [x] `swapCellSubtree` の一時 UUID を廃止（child grid ID を事前取得する方式に変更）
-- [ ] 画像アップロードの本実装（Tauri fs プラグインによるローカル保存）
+- [x] 画像アップロードの本実装（`tauri-plugin-fs` + `$APPDATA/images/`、フェーズ23 で完了）
 - [ ] `try/catch` エラーハンドリングを各 API 関数に追加
 - [ ] `handleCreate` の try/catch を保持（エラー表示用）
+
+---
+
+## 全フェーズ完了
+
+26 フェーズの MVP スコープはすべて実装・動作確認済み。未対応は有料証明書が必要なコードサイニングのみ。
