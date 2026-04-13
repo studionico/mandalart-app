@@ -16,33 +16,58 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   // dirty 判定は deleted_at の有無によらず一律 synced_at < updated_at で行う。
   // soft delete で deleted_at を立てたときも updated_at を進めているので自然に dirty 扱いされる。
 
+  // エラーを 1 箇所にまとめて最後に投げる。途中で 1 行失敗しても他の行は進められるように
+  // per-row upsert で処理する。
+  const failures: { table: string; id: string; message: string; code?: string }[] = []
+
+  async function upsertOne(
+    table: string,
+    id: string,
+    row: Record<string, unknown>,
+    onSuccess: () => Promise<void>,
+  ): Promise<boolean> {
+    const { error } = await (supabase.from(table) as unknown as {
+      upsert: (r: Record<string, unknown>) => Promise<{ error: { message: string; code?: string } | null }>
+    }).upsert(row)
+    if (error) {
+      console.error(`[push] ${table} upsert failed`, { id, row, error })
+      failures.push({
+        table,
+        id,
+        message: error.message,
+        code: (error as { code?: string }).code,
+      })
+      return false
+    }
+    await onSuccess()
+    return true
+  }
+
   // 1. mandalarts
   const dirtyMandalarts = await query<Mandalart>(
     'SELECT * FROM mandalarts WHERE synced_at IS NULL OR synced_at < updated_at',
   )
-  if (dirtyMandalarts.length > 0) {
-    const rows = dirtyMandalarts.map((m) => ({
+  for (const m of dirtyMandalarts) {
+    const ok = await upsertOne('mandalarts', m.id, {
       id: m.id,
       user_id: userId,
       title: m.title,
       created_at: m.created_at,
       updated_at: m.updated_at,
       deleted_at: m.deleted_at ?? null,
-    }))
-    const { error } = await supabase.from('mandalarts').upsert(rows)
-    if (error) throw error
-    for (const m of dirtyMandalarts) {
+    }, async () => {
       await execute('UPDATE mandalarts SET synced_at = ? WHERE id = ?', [m.updated_at, m.id])
-    }
-    mCount = dirtyMandalarts.length
+      mCount++
+    })
+    if (!ok) continue
   }
 
   // 2. grids
   const dirtyGrids = await query<Grid>(
     'SELECT * FROM grids WHERE synced_at IS NULL OR synced_at < updated_at',
   )
-  if (dirtyGrids.length > 0) {
-    const rows = dirtyGrids.map((g) => ({
+  for (const g of dirtyGrids) {
+    const ok = await upsertOne('grids', g.id, {
       id: g.id,
       mandalart_id: g.mandalart_id,
       parent_cell_id: g.parent_cell_id,
@@ -51,21 +76,19 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       created_at: g.created_at,
       updated_at: g.updated_at,
       deleted_at: g.deleted_at ?? null,
-    }))
-    const { error } = await supabase.from('grids').upsert(rows)
-    if (error) throw error
-    for (const g of dirtyGrids) {
+    }, async () => {
       await execute('UPDATE grids SET synced_at = ? WHERE id = ?', [g.updated_at, g.id])
-    }
-    gCount = dirtyGrids.length
+      gCount++
+    })
+    if (!ok) continue
   }
 
   // 3. cells
   const dirtyCells = await query<Cell>(
     'SELECT * FROM cells WHERE synced_at IS NULL OR synced_at < updated_at',
   )
-  if (dirtyCells.length > 0) {
-    const rows = dirtyCells.map((c) => ({
+  for (const c of dirtyCells) {
+    const ok = await upsertOne('cells', c.id, {
       id: c.id,
       grid_id: c.grid_id,
       position: c.position,
@@ -75,13 +98,20 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       created_at: c.created_at,
       updated_at: c.updated_at,
       deleted_at: c.deleted_at ?? null,
-    }))
-    const { error } = await supabase.from('cells').upsert(rows)
-    if (error) throw error
-    for (const c of dirtyCells) {
+    }, async () => {
       await execute('UPDATE cells SET synced_at = ? WHERE id = ?', [c.updated_at, c.id])
-    }
-    cCount = dirtyCells.length
+      cCount++
+    })
+    if (!ok) continue
+  }
+
+  if (failures.length > 0) {
+    // 失敗行の要約をまとめて 1 つの Error にして投げる (useSync の catch で表示される)
+    const first = failures[0]
+    const summary = `${failures.length} 行の push が失敗: ${first.table} id=${first.id} (${first.code ?? '?'}) ${first.message}${failures.length > 1 ? ` ほか ${failures.length - 1} 件` : ''}`
+    const err = new Error(summary)
+    ;(err as Error & { failures?: typeof failures }).failures = failures
+    throw err
   }
 
   return { mandalarts: mCount, grids: gCount, cells: cCount }
