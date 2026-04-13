@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client'
 import { useAuthStore } from '@/store/authStore'
 import { handleDeepLink } from '@/lib/api/auth'
 
@@ -14,6 +14,13 @@ export function useAuthBootstrap() {
   const setLoading = useAuthStore((s) => s.setLoading)
 
   useEffect(() => {
+    // Supabase 未設定 (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 欠損) の場合は
+    // ローカル専用モードとして何もしない
+    if (!isSupabaseConfigured) {
+      setLoading(false)
+      return
+    }
+
     let unlistenDeepLink: (() => void) | undefined
 
     async function init() {
