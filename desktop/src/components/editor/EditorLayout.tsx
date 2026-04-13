@@ -26,6 +26,7 @@ import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadCSV } from '@/lib/utils/export'
 import { exportToJSON, exportToCSV } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
+import { nextTabPosition } from '@/constants/tabOrder'
 import type { Cell, Grid, StockItem } from '@/types'
 import Modal from '@/components/ui/Modal'
 
@@ -37,9 +38,10 @@ type Props = {
 export default function EditorLayout({ mandalartId, userId }: Props) {
   const navigate = useNavigate()
   const {
-    currentGridId, viewMode, breadcrumb,
+    currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
     setMandalartId, setCurrentGrid, setViewMode,
     pushBreadcrumb, popBreadcrumbTo, resetBreadcrumb,
+    bumpFontLevel, resetFontLevel,
   } = useEditorStore()
 
   const { push: pushUndo } = useUndo()
@@ -70,9 +72,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
 
-  // セル編集モーダル
+  // セル編集モーダル (詳細編集 ⋯ ボタンから起動)
   const [editingCell, setEditingCell] = useState<Cell | null>(null)
   const [isMobile, setIsMobile] = useState(false)
+
+  // インライン編集中のセル ID (textarea を表示するセル)
+  const [inlineEditingCellId, setInlineEditingCellId] = useState<string | null>(null)
 
   // コンテキストメニュー
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; cell: Cell } | null>(null)
@@ -292,24 +297,24 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     return () => { unlisten?.() }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // シングルクリック: 掘り下げ or 編集フォールバック
-  async function handleCellClick(cell: Cell) {
+  // ダブルクリック: ドリル / 親グリッドへ戻る / ホームへ
+  async function handleCellDrill(cell: Cell) {
+    // インライン編集中なら抜けてから処理
+    setInlineEditingCellId(null)
+
     // 中央セル（position 4）の特別処理
     if (cell.position === 4) {
       if (breadcrumb.length <= 1) {
         // ルートグリッドの中心セル（入力あり）→ ホームへ
         if (!isCellEmpty(cell)) {
           handleNavigateHome()
-        } else {
-          // ルートグリッドの中心セル（空）→ 編集モード
-          setEditingCell(cell)
         }
+        // 空ならドリル先がないので何もしない（編集はインラインで行う）
       } else {
         // サブグリッドの中心セル → 親グリッドに戻る
         const parent = breadcrumb[breadcrumb.length - 2]
         if (parent) {
-          // 親レベルの並列グリッドを取得
-          const parentCellId = parent.cellId  // 親グリッドに入るときにクリックしたセル
+          const parentCellId = parent.cellId
           const siblings = parentCellId ? await getChildGrids(parentCellId) : await getRootGrids(mandalartId)
           const siblingIdx = siblings.findIndex((g) => g.id === parent.gridId)
           setCurrentGrid(parent.gridId)
@@ -337,14 +342,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: currentCells,
         highlightPosition: cell.position,
       })
-    } else if (isCellEmpty(cell)) {
-      // 空セルはサブグリッドがなければ編集モードへ
-      setEditingCell(cell)
-    } else {
+    } else if (!isCellEmpty(cell)) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
 
-      // 中央セル（position 4）に親セルの内容（テキスト / 画像 / 色）を自動入力
       const centerCell = newGrid.cells.find((c) => c.position === 4)
       if (centerCell && !isCellEmpty(cell)) {
         await updateCell(centerCell.id, {
@@ -367,10 +368,49 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         highlightPosition: cell.position,
       })
     }
+    // 空セルでドリルしようとしても何もしない (編集はインラインで)
   }
 
-  function handleCellDoubleClick(cell: Cell) {
+  // セル右上 ⋯ ボタンから呼び出される詳細編集モーダル
+  function handleCellOpenModal(cell: Cell) {
+    setInlineEditingCellId(null)
     setEditingCell(cell)
+  }
+
+  // インライン編集の開始 (シングルクリック)
+  function handleCellStartInlineEdit(cell: Cell) {
+    setInlineEditingCellId(cell.id)
+  }
+
+  // インライン編集の確定 (blur / Esc / Tab / Cmd+Enter)
+  async function handleCellCommitInlineEdit(cell: Cell, text: string) {
+    setInlineEditingCellId(null)
+    if (text === cell.text) return
+    await handleSaveCell(cell.id, {
+      text,
+      image_path: cell.image_path,
+      color: cell.color,
+    })
+  }
+
+  // Tab キーでの次のセルへの移動
+  // currentText: 直前にコミットしたテキスト（DB 反映前の状態を見る必要があるため引数で受け取る）
+  function handleCellInlineNavigate(currentPosition: number, currentText: string, reverse: boolean) {
+    const cells = gridData?.cells ?? []
+    // gridData は更新前なので、今 commit したテキストで上書きしたバーチャル配列で判定する
+    const updatedCells = cells.map((c) =>
+      c.position === currentPosition ? { ...c, text: currentText } : c
+    )
+    const center = getCenterCell(updatedCells)
+    const centerEmpty = !center || isCellEmpty(center)
+    const nextPos = nextTabPosition(currentPosition, reverse)
+    // 中心が空のときは周辺セル無効なので留まる
+    if (centerEmpty && nextPos !== 4) {
+      setInlineEditingCellId(updatedCells.find((c) => c.position === 4)?.id ?? null)
+      return
+    }
+    const next = updatedCells.find((c) => c.position === nextPos)
+    if (next) setInlineEditingCellId(next.id)
   }
 
   async function handleSaveCell(cellId: string, params: { text: string; image_path: string | null; color: string | null }) {
@@ -545,6 +585,33 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       <header className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 shrink-0">
         <Breadcrumb onHome={handleNavigateHome} />
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          {/* 文字サイズ (-10 〜 +10、各段 ×1.1) */}
+          <div className="flex items-stretch rounded-lg border border-gray-200 overflow-hidden text-xs">
+            <button
+              onClick={() => bumpFontLevel(-1)}
+              className="px-2 py-1.5 hover:bg-gray-50 text-gray-600 disabled:opacity-30"
+              disabled={fontLevel <= -10}
+              title="文字を小さく"
+            >
+              A−
+            </button>
+            <button
+              onClick={() => resetFontLevel()}
+              className="px-2 py-1.5 hover:bg-gray-50 text-gray-600 border-x border-gray-200 min-w-[3.5rem] text-center tabular-nums"
+              title={`100% にリセット (現在 level ${fontLevel >= 0 ? '+' : ''}${fontLevel})`}
+            >
+              {(fontScale * 100).toFixed(0)}%
+            </button>
+            <button
+              onClick={() => bumpFontLevel(1)}
+              className="px-2 py-1.5 hover:bg-gray-50 text-gray-600 disabled:opacity-30"
+              disabled={fontLevel >= 20}
+              title="文字を大きく"
+            >
+              A＋
+            </button>
+          </div>
+
           {/* 表示モード切替 */}
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
             {(['3x3', '9x9'] as const).map((mode) => (
@@ -607,8 +674,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
                   dragSourceId={dragSourceId}
                   dragOverId={dragOverId}
-                  onCellClick={handleCellClick}
-                  onCellDoubleClick={handleCellDoubleClick}
+                  fontScale={fontScale}
+                  inlineEditingCellId={inlineEditingCellId}
+                  onStartInlineEdit={handleCellStartInlineEdit}
+                  onCommitInlineEdit={handleCellCommitInlineEdit}
+                  onInlineNavigate={handleCellInlineNavigate}
+                  onDrill={handleCellDrill}
+                  onOpenModal={handleCellOpenModal}
                   onDragStart={handleDragStart}
                   onContextMenu={handleContextMenu}
                 />
@@ -621,8 +693,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
                   dragSourceId={dragSourceId}
                   dragOverId={dragOverId}
-                  onCellClick={handleCellClick}
-                  onCellDoubleClick={handleCellDoubleClick}
+                  fontScale={fontScale}
+                  inlineEditingCellId={inlineEditingCellId}
+                  onStartInlineEdit={handleCellStartInlineEdit}
+                  onCommitInlineEdit={handleCellCommitInlineEdit}
+                  onInlineNavigate={handleCellInlineNavigate}
+                  onDrill={handleCellDrill}
+                  onOpenModal={handleCellOpenModal}
                   onDragStart={handleDragStart}
                   onContextMenu={handleContextMenu}
                 />
