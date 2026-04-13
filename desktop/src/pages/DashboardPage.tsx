@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getMandalarts, createMandalart, deleteMandalart, updateMandalartTitle, duplicateMandalart,
@@ -19,7 +19,8 @@ type SortKey = 'updated' | 'title'
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [mandalarts, setMandalarts] = useState<Mandalart[]>([])
-  const [loading, setLoading] = useState(true)
+  // 初回ロードが完了したかどうか (初回のみ「読み込み中...」を表示するため)
+  const [initialLoaded, setInitialLoaded] = useState(false)
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('updated')
   const [importOpen, setImportOpen] = useState(false)
@@ -29,21 +30,28 @@ export default function DashboardPage() {
   const user = useAuthStore((s) => s.user)
   const { status: syncStatus, lastSync, error: syncError, sync, reloadKey } = useSync()
 
-  async function load() {
-    setLoading(true)
+  // 再取得中の古いレスポンスで UI が上書きされるのを防ぐ
+  const loadSeqRef = useRef(0)
+
+  const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     try {
       const data = query.trim() ? await searchMandalarts(query) : await getMandalarts()
+      // 後続のリクエストが走っていたら、古い結果は破棄する
+      if (seq !== loadSeqRef.current) return
       setMandalarts(data)
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setInitialLoaded(true)
     }
-  }
+  }, [query])
 
-  // 起動時 / 同期 / クエリ変更時に debounce して再取得
+  // クエリ変更 / 同期完了 / Realtime 受信時に debounce して再取得
+  // debounce を入れることで Realtime が連鎖発火したときのリマウント祭りを防ぐ。
   useEffect(() => {
-    const t = setTimeout(() => { load() }, query.trim() ? 200 : 0)
+    const delay = query.trim() ? 200 : 150
+    const t = setTimeout(() => { load() }, delay)
     return () => clearTimeout(t)
-  }, [query, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, reloadKey, load])
 
   async function handleCreate() {
     try {
@@ -183,7 +191,7 @@ export default function DashboardPage() {
       />
 
       <main className="max-w-5xl mx-auto px-6 py-8">
-        {loading ? (
+        {!initialLoaded ? (
           <p className="text-gray-400 dark:text-gray-500">読み込み中...</p>
         ) : !query.trim() && mandalarts.length === 0 ? (
           <div className="text-center py-20 text-gray-400 dark:text-gray-500">

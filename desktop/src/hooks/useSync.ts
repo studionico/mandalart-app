@@ -48,12 +48,22 @@ export function useSync() {
   }, [user, sync])
 
   // Realtime subscription (サインイン中のみ)
+  // 自分自身の push による postgres_changes イベントも戻ってくるので、
+  // 連続発火を 300ms 内で 1 回に間引いて reloadKey の雪崩を防ぐ。
   useEffect(() => {
     if (!user) return
+    let pending: ReturnType<typeof setTimeout> | null = null
     const unsubscribe = subscribeRemoteChanges(() => {
-      setReloadKey((k) => k + 1)
+      if (pending) return
+      pending = setTimeout(() => {
+        pending = null
+        setReloadKey((k) => k + 1)
+      }, 300)
     })
-    return () => { unsubscribe() }
+    return () => {
+      if (pending) clearTimeout(pending)
+      unsubscribe()
+    }
   }, [user])
 
   return { status, lastSync, error, stats, sync, reloadKey }
