@@ -196,19 +196,19 @@ export default function DashboardPage() {
             <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+          <div className="grid gap-3 grid-cols-[repeat(auto-fill,130px)]">
             {visible.map((m) => (
               <div
                 key={m.id}
-                className="relative aspect-square bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+                className="relative w-[130px] h-[130px] bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
                 onClick={() => navigate(`/mandalart/${m.id}`)}
                 title={m.title || '無題'}
               >
                 <div
-                  className="w-full h-full flex items-center justify-center p-3 text-center break-all text-[11px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
+                  className="w-full h-full flex items-center justify-center p-3 text-center break-all text-[14px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
                   style={{ alignItems: 'safe center' }}
                 >
-                  <span className="line-clamp-[12] whitespace-pre-wrap">
+                  <span className="line-clamp-6 whitespace-pre-wrap">
                     {m.title || '無題'}
                   </span>
                 </div>
