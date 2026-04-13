@@ -6,6 +6,21 @@ type ParsedNode = {
   children: ParsedNode[]
 }
 
+/**
+ * 行の先頭にある箇条書き記号を除去する。
+ * 対応:
+ *  - Unicode の bullet 系: ・ • ◦ ▪ ▫ ○ ● ◆ ◇ ■ □ ★ ☆
+ *  - ASCII の list marker: `- `, `* `, `+ ` (Markdown 形式)
+ *  - 番号リスト: `1. `, `1) ` など (半角数字 + . or ) + 空白)
+ * 末尾の空白も合わせて削ぎ、後続のテキストだけを返す。
+ */
+function stripBulletMarker(text: string): string {
+  return text.replace(
+    /^([・•◦▪▫○●◆◇■□★☆]|[-*+](?=\s)|\d+[.)](?=\s))\s*/,
+    '',
+  )
+}
+
 /** インデントテキスト（スペース・タブ）をパース */
 function parseIndentText(text: string): ParsedNode[] {
   const lines = text.split('\n').filter((l) => l.trim() !== '')
@@ -14,7 +29,8 @@ function parseIndentText(text: string): ParsedNode[] {
 
   for (const line of lines) {
     const indent = line.search(/\S/)
-    const content = line.trim()
+    const content = stripBulletMarker(line.trim())
+    if (!content) continue  // 箇条書き記号だけの行はスキップ
     const node: ParsedNode = { text: content, children: [] }
 
     while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
@@ -44,7 +60,8 @@ function parseMarkdown(text: string): ParsedNode[] {
     if (!match) continue
 
     const level = match[1].length
-    const content = match[2].trim()
+    const content = stripBulletMarker(match[2].trim())
+    if (!content) continue
     const node: ParsedNode = { text: content, children: [] }
 
     while (stack.length > 0 && stack[stack.length - 1].level >= level) {

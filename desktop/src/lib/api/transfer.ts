@@ -142,5 +142,17 @@ export async function importIntoCell(cellId: string, snapshot: GridSnapshot): Pr
   const grid = grids[0]
   if (!grid) throw new Error('Grid not found')
 
+  // インポート先セルの内容を、スナップショットのルート (position 4) と同期させる。
+  // 「親セルの text = 子グリッドの中心セルの text」というマンダラートの規約を
+  // インポート時にも保つため。ルートが空のときは target を上書きしない。
+  const root = snapshot.cells.find((c) => c.position === 4)
+  if (root && (root.text.trim() || root.image_path || root.color)) {
+    const ts = now()
+    await execute(
+      'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
+      [root.text, root.image_path, root.color, ts, cellId],
+    )
+  }
+
   await importIntoGrid(snapshot, grid.mandalart_id, cellId, 0)
 }
