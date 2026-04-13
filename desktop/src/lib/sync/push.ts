@@ -1,12 +1,10 @@
-import { query, execute, now } from '@/lib/db'
+import { query, execute } from '@/lib/db'
 import { supabase } from '@/lib/supabase/client'
 import type { Cell, Grid, Mandalart } from '@/types'
 
 /**
  * 未同期 (synced_at が NULL or updated_at < synced_at) のローカル行を Supabase にアップサートする。
- * 一方向 (ローカル → クラウド)。削除は MVP では対象外。
- *
- * 戻り値: 同期した行数
+ * 一方向 (ローカル → クラウド)。deleted_at を含むので soft delete も正しく伝播する。
  */
 export async function pushAll(userId: string): Promise<{ mandalarts: number; grids: number; cells: number }> {
   if (!userId) throw new Error('Not signed in')
@@ -14,6 +12,9 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   let mCount = 0
   let gCount = 0
   let cCount = 0
+
+  // dirty 判定は deleted_at の有無によらず一律 synced_at < updated_at で行う。
+  // soft delete で deleted_at を立てたときも updated_at を進めているので自然に dirty 扱いされる。
 
   // 1. mandalarts
   const dirtyMandalarts = await query<Mandalart>(
@@ -26,6 +27,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       title: m.title,
       created_at: m.created_at,
       updated_at: m.updated_at,
+      deleted_at: m.deleted_at ?? null,
     }))
     const { error } = await supabase.from('mandalarts').upsert(rows)
     if (error) throw error
@@ -48,6 +50,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       memo: g.memo,
       created_at: g.created_at,
       updated_at: g.updated_at,
+      deleted_at: g.deleted_at ?? null,
     }))
     const { error } = await supabase.from('grids').upsert(rows)
     if (error) throw error
@@ -71,6 +74,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       color: c.color,
       created_at: c.created_at,
       updated_at: c.updated_at,
+      deleted_at: c.deleted_at ?? null,
     }))
     const { error } = await supabase.from('cells').upsert(rows)
     if (error) throw error
@@ -80,9 +84,5 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     cCount = dirtyCells.length
   }
 
-  // updated_at が古いままだと差分検出のたびに同じ行を push してしまうので、
-  // 何も dirty が無かった場合の noop も含めて呼び出し元で活用しやすいよう
-  // 戻り値で件数を返す
-  void now
   return { mandalarts: mCount, grids: gCount, cells: cCount }
 }

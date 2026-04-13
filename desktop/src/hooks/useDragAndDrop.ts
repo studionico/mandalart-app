@@ -28,11 +28,11 @@ async function executeAction(action: DndAction): Promise<DndUndoable | null> {
     }
     case 'COPY_SUBTREE': {
       const targetBefore = (await query<{ text: string; image_path: string | null; color: string | null }>(
-        'SELECT text, image_path, color FROM cells WHERE id = ?',
+        'SELECT text, image_path, color FROM cells WHERE id = ? AND deleted_at IS NULL',
         [action.targetCellId],
       ))[0]
       const gridsBefore = await query<{ id: string }>(
-        'SELECT id FROM grids WHERE parent_cell_id = ?',
+        'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
         [action.targetCellId],
       )
       const beforeIds = new Set(gridsBefore.map((g) => g.id))
@@ -40,7 +40,7 @@ async function executeAction(action: DndAction): Promise<DndUndoable | null> {
       await copyCellSubtree(action.sourceCellId, action.targetCellId)
 
       const gridsAfter = await query<{ id: string }>(
-        'SELECT id FROM grids WHERE parent_cell_id = ?',
+        'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
         [action.targetCellId],
       )
       const newGridIds = gridsAfter.filter((g) => !beforeIds.has(g.id)).map((g) => g.id)

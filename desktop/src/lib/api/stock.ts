@@ -36,12 +36,12 @@ export async function pasteFromStock(stockItemId: string, targetCellId: string):
 
   // ターゲットの所属マンダラート ID を取得
   const targetCells = await query<{ grid_id: string }>(
-    'SELECT grid_id FROM cells WHERE id = ?', [targetCellId]
+    'SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL', [targetCellId]
   )
   const targetGrid = targetCells[0]
   if (!targetGrid) return
   const grids = await query<{ mandalart_id: string }>(
-    'SELECT mandalart_id FROM grids WHERE id = ?', [targetGrid.grid_id]
+    'SELECT mandalart_id FROM grids WHERE id = ? AND deleted_at IS NULL', [targetGrid.grid_id]
   )
   const mandalartId = grids[0]?.mandalart_id
   if (!mandalartId) return
@@ -94,7 +94,7 @@ async function insertGridSnapshot(
 
 async function buildCellSnapshot(cellId: string): Promise<CellSnapshot> {
   const cells = await query<Pick<Cell, 'text' | 'image_path' | 'color' | 'position' | 'grid_id'>>(
-    'SELECT text, image_path, color, position, grid_id FROM cells WHERE id = ?',
+    'SELECT text, image_path, color, position, grid_id FROM cells WHERE id = ? AND deleted_at IS NULL',
     [cellId],
   )
   const c = cells[0]
@@ -103,19 +103,16 @@ async function buildCellSnapshot(cellId: string): Promise<CellSnapshot> {
   const children: GridSnapshot[] = []
 
   if (c.position === 4) {
-    // 中心セル: 所属するグリッド自体（8 周辺セル + サブツリー）を subtree として保存。
-    // copyCellSubtree の中心セル扱いと同じ解釈。
     const grids = await query<{ memo: string | null; sort_order: number }>(
-      'SELECT memo, sort_order FROM grids WHERE id = ?',
+      'SELECT memo, sort_order FROM grids WHERE id = ? AND deleted_at IS NULL',
       [c.grid_id],
     )
     if (grids[0]) {
       children.push(await buildGridSnapshot(c.grid_id, grids[0].memo, grids[0].sort_order))
     }
   } else {
-    // 周辺セル: このセルの子グリッド群を subtree として保存
     const childGrids = await query<{ id: string; memo: string | null; sort_order: number }>(
-      'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ? ORDER BY sort_order',
+      'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
       [cellId],
     )
     for (const g of childGrids) {
@@ -135,7 +132,7 @@ async function buildGridSnapshot(
   sortOrder: number,
 ): Promise<GridSnapshot> {
   const gridCells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? ORDER BY position',
+    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
     [gridId],
   )
   const cellSnaps = gridCells.map((c) => ({
@@ -148,7 +145,7 @@ async function buildGridSnapshot(
   const children: GridSnapshot[] = []
   for (const sc of gridCells) {
     const sub = await query<{ id: string; memo: string | null; sort_order: number }>(
-      'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ? ORDER BY sort_order',
+      'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
       [sc.id],
     )
     for (const subGrid of sub) {

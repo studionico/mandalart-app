@@ -66,6 +66,18 @@ ALTER TABLE grids DROP CONSTRAINT grids_parent_cell_id_fkey;
 
 `parent_cell_id` カラム自体は残り、引き続き UUID として `cells.id` を指しますが、参照整合性は API レイヤで明示的に管理します。
 
+### 必須スキーマ変更: ソフトデリート用の `deleted_at` カラム
+
+削除のオフライン対応と複数デバイス間伝播のため、3 テーブルすべてに `deleted_at` カラムを追加してください。UI と API 層は `WHERE deleted_at IS NULL` で論理削除された行を隠し、同期は updated_at last-write-wins でクラウドに反映します。
+
+```sql
+ALTER TABLE mandalarts ADD COLUMN deleted_at timestamptz;
+ALTER TABLE grids      ADD COLUMN deleted_at timestamptz;
+ALTER TABLE cells      ADD COLUMN deleted_at timestamptz;
+```
+
+ローカル側は migration 002 で自動追加されます (`rm ~/Library/Application\ Support/jp.mandalart.app/mandalart.db` で DB を作り直した場合は 001 + 002 が連続実行されます)。
+
 ---
 
 ## ステップ 4: Auth 設定
@@ -155,12 +167,6 @@ SELECT tablename FROM pg_publication_tables WHERE pubname = 'supabase_realtime';
 ---
 
 ## 既知の制限（MVP スコープ外）
-
-### 削除の同期
-
-ローカルで削除したマンダラート / グリッド / セルはクラウドに伝播しません。逆に Supabase 側で削除した行を Realtime が通知した場合はアプリ側で反映されます（`subscribeRemoteChanges` の DELETE ハンドラ）。
-
-本実装には「tombstone テーブル」または「soft delete（`deleted_at` カラム追加）」が必要です。
 
 ### マルチユーザー対応
 

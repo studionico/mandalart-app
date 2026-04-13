@@ -27,7 +27,15 @@ export function useSync() {
       setStatus('idle')
       setReloadKey((k) => k + 1)
     } catch (e) {
-      setError((e as Error).message)
+      // Supabase の error は plain object でも来るので、複数経路で文字列化
+      console.error('[sync] error:', e)
+      const msg =
+        e instanceof Error ? e.message :
+        (e && typeof e === 'object' && 'message' in e && (e as { message: unknown }).message)
+          ? String((e as { message: unknown }).message) :
+        typeof e === 'string' ? e :
+        JSON.stringify(e) || 'unknown sync error'
+      setError(msg)
       setStatus('error')
     } finally {
       inflight.current = false

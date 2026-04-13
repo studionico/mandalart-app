@@ -272,7 +272,10 @@
 - [x] 同期タイミング: サインイン時に初回フル同期、`useSync` の手動 sync ボタン、Realtime push 受信時
 - [x] `src/lib/realtime.ts` の本実装（postgres_changes 全テーブル購読、ローカル DB に反映）
 - [x] UI 統合: ダッシュボードヘッダーにサインイン / サインアウト / 同期ステータスインジケータ
-- 既知の制限（MVP スコープ外）: 削除の同期（ローカル削除はクラウドに伝播しない）、user_id バインディングは単一ユーザー前提
+- [x] ソフトデリート実装（`deleted_at` カラム + API 層フィルタ + sync 層 upsert）
+  - ローカル migration 002 で列追加、クラウド側は `ALTER TABLE ADD COLUMN deleted_at timestamptz` を手動実行
+  - オフライン削除 → 次回同期で cloud に伝播、別デバイス pull で自動的に不可視化
+- 既知の制限: user_id バインディングは単一ユーザー前提
 - セットアップ手順とトラブルシューティングは [`docs/cloud-sync-setup.md`](./cloud-sync-setup.md) 参照
 
 ---

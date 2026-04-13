@@ -13,14 +13,17 @@ export async function updateCell(
   fields.push('updated_at = ?'); values.push(now())
   values.push(id)
   await execute(`UPDATE cells SET ${fields.join(', ')} WHERE id = ?`, values)
-  const rows = await query<Cell>('SELECT * FROM cells WHERE id = ?', [id])
+  const rows = await query<Cell>(
+    'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [id],
+  )
   return rows[0]
 }
 
 export async function swapCellContent(cellIdA: string, cellIdB: string): Promise<void> {
   const [a, b] = await Promise.all([
-    query<Cell>('SELECT * FROM cells WHERE id = ?', [cellIdA]),
-    query<Cell>('SELECT * FROM cells WHERE id = ?', [cellIdB]),
+    query<Cell>('SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL', [cellIdA]),
+    query<Cell>('SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL', [cellIdB]),
   ])
   const ca = a[0]; const cb = b[0]
   const ts = now()
@@ -31,9 +34,15 @@ export async function swapCellContent(cellIdA: string, cellIdB: string): Promise
 }
 
 export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void> {
-  // 一時IDを使わず、子グリッドIDを先に取得してから付け替える（FK制約回避）
-  const gridsOfA = await query<{ id: string }>('SELECT id FROM grids WHERE parent_cell_id = ?', [cellIdA])
-  const gridsOfB = await query<{ id: string }>('SELECT id FROM grids WHERE parent_cell_id = ?', [cellIdB])
+  // 子グリッド ID を先に取得してから付け替える（循環 FK 回避）
+  const gridsOfA = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [cellIdA],
+  )
+  const gridsOfB = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [cellIdB],
+  )
   const ts = now()
   for (const g of gridsOfA) {
     await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdB, ts, g.id])
@@ -47,6 +56,7 @@ export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise
 /**
  * クリップボード（カット/コピー）からのペースト。
  * copyCellSubtree で内容と子グリッドを複製し、mode='cut' のときは source を空にする。
+ * cut 時の子グリッド整理はソフトデリート（deleted_at 設定）。
  */
 export async function pasteCell(
   sourceCellId: string,
@@ -62,19 +72,31 @@ export async function pasteCell(
       'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
       ['', null, null, ts, sourceCellId],
     )
-    await execute('DELETE FROM grids WHERE parent_cell_id = ?', [sourceCellId])
+    // source の子グリッドを再帰的に論理削除
+    const childGrids = await query<{ id: string }>(
+      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+      [sourceCellId],
+    )
+    for (const cg of childGrids) {
+      const { deleteGrid } = await import('./grids')
+      await deleteGrid(cg.id)
+    }
   }
 }
 
 export async function copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void> {
-  const srcs = await query<Cell>('SELECT * FROM cells WHERE id = ?', [sourceCellId])
+  const srcs = await query<Cell>(
+    'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [sourceCellId],
+  )
   const src = srcs[0]
   if (!src) return
 
   // 1) ソース側の子グリッドを複製（ターゲット更新より前に実行して
   //    スナップショットがターゲットの空状態を含むようにする）
   const childGrids = await query<{ id: string; sort_order: number }>(
-    'SELECT id, sort_order FROM grids WHERE parent_cell_id = ?', [sourceCellId]
+    'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [sourceCellId],
   )
   for (const cg of childGrids) {
     await copyGridRecursive(cg.id, targetCellId, cg.sort_order)
@@ -82,7 +104,6 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
 
   // 2) 中心セルで子グリッドを持たない場合、
   //    「その中心セルがテーマとしているグリッド自体」を subtree として複製する。
-  //    （中央セルの階層 = このグリッドの 8 周辺セル + それ以下、という UX 解釈）
   if (src.position === 4 && childGrids.length === 0) {
     await copyGridRecursive(src.grid_id, targetCellId, 0)
   }
@@ -100,18 +121,20 @@ async function copyGridRecursive(
   sortOrder: number
 ): Promise<string> {
   // ソース側の状態を INSERT 前にスナップショットする。
-  // （新しく作ったグリッドを子として拾ってしまう無限再帰を防ぐため）
   const grids = await query<{ mandalart_id: string; memo: string | null }>(
-    'SELECT mandalart_id, memo FROM grids WHERE id = ?', [sourceGridId]
+    'SELECT mandalart_id, memo FROM grids WHERE id = ? AND deleted_at IS NULL',
+    [sourceGridId],
   )
   const sg = grids[0]
   const sourceCells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? ORDER BY position', [sourceGridId]
+    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
+    [sourceGridId],
   )
   const childGridsPerCell = new Map<string, { id: string; sort_order: number }[]>()
   for (const sc of sourceCells) {
     const cgs = await query<{ id: string; sort_order: number }>(
-      'SELECT id, sort_order FROM grids WHERE parent_cell_id = ?', [sc.id]
+      'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+      [sc.id],
     )
     childGridsPerCell.set(sc.id, cgs)
   }

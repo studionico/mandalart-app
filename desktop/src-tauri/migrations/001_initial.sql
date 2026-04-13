@@ -7,14 +7,18 @@ CREATE TABLE IF NOT EXISTS mandalarts (
   remote_id   TEXT
 );
 
+-- NOTE: ローカルスキーマでは FK 制約を一切張らない。
+-- 理由:
+--  1. grids.parent_cell_id → cells と cells.grid_id → grids の組み合わせは
+--     循環 FK を作り、削除時に "too many levels of trigger recursion" を起こす
+--  2. tauri-plugin-sql の sqlx プールは接続ごとに PRAGMA foreign_keys が独立し、
+--     トランザクション境界も共有されないため、pull で順序が揃っていても
+--     別コネクションで FK 違反が発生する
+-- 代わりに、削除時のカスケードは API 層（lib/api/*.ts）で明示的に行う。
 CREATE TABLE IF NOT EXISTS grids (
   id             TEXT PRIMARY KEY,
-  mandalart_id   TEXT NOT NULL REFERENCES mandalarts(id) ON DELETE CASCADE,
-  -- NOTE: parent_cell_id には ON DELETE CASCADE を付けない。
-  -- grids.parent_cell_id → cells, cells.grid_id → grids の組み合わせは
-  -- 循環 FK を作り、削除時に "too many levels of trigger recursion" を
-  -- 引き起こす。親セル削除時の子グリッド整理は API 層で明示的に行う。
-  parent_cell_id TEXT REFERENCES cells(id),
+  mandalart_id   TEXT NOT NULL,
+  parent_cell_id TEXT,
   sort_order     INTEGER NOT NULL DEFAULT 0,
   memo           TEXT,
   created_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -25,7 +29,7 @@ CREATE TABLE IF NOT EXISTS grids (
 
 CREATE TABLE IF NOT EXISTS cells (
   id          TEXT PRIMARY KEY,
-  grid_id     TEXT NOT NULL REFERENCES grids(id) ON DELETE CASCADE,
+  grid_id     TEXT NOT NULL,
   position    INTEGER NOT NULL CHECK (position BETWEEN 0 AND 8),
   text        TEXT NOT NULL DEFAULT '',
   image_path  TEXT,

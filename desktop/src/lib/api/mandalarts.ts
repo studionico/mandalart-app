@@ -3,12 +3,15 @@ import type { Mandalart, Cell } from '../../types'
 
 export async function getMandalarts(): Promise<Mandalart[]> {
   return query<Mandalart>(
-    'SELECT * FROM mandalarts ORDER BY updated_at DESC'
+    'SELECT * FROM mandalarts WHERE deleted_at IS NULL ORDER BY updated_at DESC'
   )
 }
 
 export async function getMandalart(id: string): Promise<Mandalart | null> {
-  const rows = await query<Mandalart>('SELECT * FROM mandalarts WHERE id = ?', [id])
+  const rows = await query<Mandalart>(
+    'SELECT * FROM mandalarts WHERE id = ? AND deleted_at IS NULL',
+    [id],
+  )
   return rows[0] ?? null
 }
 
@@ -29,16 +32,31 @@ export async function updateMandalartTitle(id: string, title: string): Promise<v
   )
 }
 
+/**
+ * ソフトデリート: deleted_at にタイムスタンプをセットし、updated_at も更新して
+ * 同期で cloud に反映されるようにする。配下の grids / cells も同じ処理で
+ * 論理削除する（別デバイスがこれらを参照したときに見えないように）。
+ */
 export async function deleteMandalart(id: string): Promise<void> {
-  // migration 002 で循環 FK を解消済み。
-  // mandalarts → grids → cells は ON DELETE CASCADE で自動削除される。
-  await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+  const ts = now()
+  await execute(
+    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
+    [ts, ts, id],
+  )
+  await execute(
+    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE mandalart_id = ?',
+    [ts, ts, id],
+  )
+  await execute(
+    'UPDATE mandalarts SET deleted_at = ?, updated_at = ? WHERE id = ?',
+    [ts, ts, id],
+  )
 }
 
 export async function searchMandalarts(q: string): Promise<Mandalart[]> {
   const like = `%${q}%`
   return query<Mandalart>(
-    'SELECT * FROM mandalarts WHERE title LIKE ? ORDER BY updated_at DESC',
+    'SELECT * FROM mandalarts WHERE title LIKE ? AND deleted_at IS NULL ORDER BY updated_at DESC',
     [like]
   )
 }
@@ -61,7 +79,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
 
   // ルートグリッドを複製（parent_cell_id IS NULL）
   const rootGrids = await query<{ id: string; sort_order: number; memo: string | null }>(
-    'SELECT id, sort_order, memo FROM grids WHERE mandalart_id = ? AND parent_cell_id IS NULL ORDER BY sort_order',
+    'SELECT id, sort_order, memo FROM grids WHERE mandalart_id = ? AND parent_cell_id IS NULL AND deleted_at IS NULL ORDER BY sort_order',
     [sourceId],
   )
   for (const g of rootGrids) {
@@ -83,13 +101,13 @@ async function cloneGridRecursive(
 ): Promise<void> {
   // 先にソース側の状態をスナップショット（INSERT 後の再帰で自分自身を拾わないため）
   const sourceCells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? ORDER BY position',
+    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
     [sourceGridId],
   )
   const childrenBySourceCellId = new Map<string, { id: string; sort_order: number; memo: string | null }[]>()
   for (const sc of sourceCells) {
     const cgs = await query<{ id: string; sort_order: number; memo: string | null }>(
-      'SELECT id, sort_order, memo FROM grids WHERE parent_cell_id = ? ORDER BY sort_order',
+      'SELECT id, sort_order, memo FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
       [sc.id],
     )
     childrenBySourceCellId.set(sc.id, cgs)

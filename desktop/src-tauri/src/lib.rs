@@ -6,12 +6,20 @@ pub fn run() {
             tauri_plugin_sql::Builder::new()
                 .add_migrations(
                     "sqlite:mandalart.db",
-                    vec![tauri_plugin_sql::Migration {
-                        version: 1,
-                        description: "initial schema",
-                        sql: include_str!("../migrations/001_initial.sql"),
-                        kind: tauri_plugin_sql::MigrationKind::Up,
-                    }],
+                    vec![
+                        tauri_plugin_sql::Migration {
+                            version: 1,
+                            description: "initial schema",
+                            sql: include_str!("../migrations/001_initial.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        tauri_plugin_sql::Migration {
+                            version: 2,
+                            description: "add deleted_at columns for soft delete",
+                            sql: include_str!("../migrations/002_soft_delete.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                    ],
                 )
                 .build(),
         )

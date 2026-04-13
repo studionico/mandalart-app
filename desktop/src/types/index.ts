@@ -4,6 +4,7 @@ export type Mandalart = {
   title: string
   created_at: string
   updated_at: string
+  deleted_at?: string | null
 }
 
 export type Grid = {
@@ -14,6 +15,7 @@ export type Grid = {
   memo: string | null
   created_at: string
   updated_at: string
+  deleted_at?: string | null
 }
 
 export type Cell = {
@@ -25,6 +27,7 @@ export type Cell = {
   color: string | null
   created_at: string
   updated_at: string
+  deleted_at?: string | null
 }
 
 export type StockItem = {

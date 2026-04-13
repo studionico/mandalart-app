@@ -6,16 +6,22 @@ export { parseTextToSnapshot }
 
 export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
   async function fetchSnapshot(gId: string, sortOrder: number): Promise<GridSnapshot> {
-    const grids = await query<Grid & { memo: string | null }>('SELECT * FROM grids WHERE id = ?', [gId])
+    const grids = await query<Grid & { memo: string | null }>(
+      'SELECT * FROM grids WHERE id = ? AND deleted_at IS NULL',
+      [gId],
+    )
     const grid = grids[0]
     if (!grid) throw new Error('Grid not found')
 
-    const cells = await query<Cell>('SELECT * FROM cells WHERE grid_id = ?', [gId])
+    const cells = await query<Cell>(
+      'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL',
+      [gId],
+    )
 
     const children: GridSnapshot[] = []
     for (const cell of cells) {
       const childGrids = await query<{ id: string; sort_order: number }>(
-        'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? ORDER BY sort_order',
+        'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
         [cell.id]
       )
       for (const cg of childGrids) {
@@ -32,7 +38,10 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
     }
   }
 
-  const grids = await query<{ sort_order: number }>('SELECT sort_order FROM grids WHERE id = ?', [gridId])
+  const grids = await query<{ sort_order: number }>(
+    'SELECT sort_order FROM grids WHERE id = ? AND deleted_at IS NULL',
+    [gridId],
+  )
   return fetchSnapshot(gridId, grids[0]?.sort_order ?? 0)
 }
 
@@ -101,11 +110,17 @@ async function importIntoGrid(
 }
 
 export async function importIntoCell(cellId: string, snapshot: GridSnapshot): Promise<void> {
-  const cells = await query<{ grid_id: string }>('SELECT grid_id FROM cells WHERE id = ?', [cellId])
+  const cells = await query<{ grid_id: string }>(
+    'SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
   const cell = cells[0]
   if (!cell) throw new Error('Cell not found')
 
-  const grids = await query<{ mandalart_id: string }>('SELECT mandalart_id FROM grids WHERE id = ?', [cell.grid_id])
+  const grids = await query<{ mandalart_id: string }>(
+    'SELECT mandalart_id FROM grids WHERE id = ? AND deleted_at IS NULL',
+    [cell.grid_id],
+  )
   const grid = grids[0]
   if (!grid) throw new Error('Grid not found')
 

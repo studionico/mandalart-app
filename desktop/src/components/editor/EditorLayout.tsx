@@ -123,7 +123,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
         // ルートグリッドのセルを取得してパンくず初期化
         const { query } = await import('@/lib/db')
-        const cells = await query<import('@/types').Cell>('SELECT * FROM cells WHERE grid_id = ?', [root.id])
+        const cells = await query<import('@/types').Cell>(
+          'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
+          [root.id],
+        )
         resetBreadcrumb({
           gridId: root.id,
           cellId: null,
