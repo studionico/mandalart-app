@@ -2,28 +2,35 @@
 
 ## 概要
 
-`src/lib/api/` 配下のモジュールが提供する関数の仕様。
-すべて SQLite（`@tauri-apps/plugin-sql`）を介してローカルデータにアクセスする。
-呼び出し元: React コンポーネント → hooks → lib/api/（この順で依存）
+`src/lib/` 配下のモジュールが提供する関数シグネチャの一覧。呼び出し関係:
+
+```
+components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql
+                      ↘ lib/sync/ → Supabase (REST + Realtime)
+                      ↘ lib/supabase/client.ts
+```
+
+すべての CRUD はローカル SQLite が primary。サインインしている間は `lib/sync/` が差分を Supabase に push / pull する。
 
 ---
 
 ## lib/db/index.ts — データベース基盤
 
 ```typescript
-// SQLite 接続を取得（シングルトン）
+// SQLite 接続を取得 (シングルトン)
+// 初回接続時に PRAGMA journal_mode = WAL と busy_timeout = 5000 を設定する
 getDb(): Promise<Database>
 
-// SELECT クエリ（行の配列を返す）
+// SELECT クエリ (行の配列を返す)
 query<T>(sql: string, params?: unknown[]): Promise<T[]>
 
 // INSERT / UPDATE / DELETE
 execute(sql: string, params?: unknown[]): Promise<void>
 
-// UUID 生成
-generateId(): string   // crypto.randomUUID()
+// UUID 生成 (crypto.randomUUID)
+generateId(): string
 
-// 現在時刻（ISO 8601 文字列）
+// 現在時刻 (ISO 8601)
 now(): string
 ```
 
@@ -32,23 +39,37 @@ now(): string
 ## lib/api/mandalarts.ts
 
 ```typescript
-// 全マンダラートを更新日降順で取得
+// 削除されていない全マンダラートを更新日降順で取得
 getMandalarts(): Promise<Mandalart[]>
 
-// 指定 ID のマンダラートを取得（存在しない場合は null）
+// 指定 ID のマンダラートを取得 (削除済みは除外)
 getMandalart(id: string): Promise<Mandalart | null>
 
-// 新規マンダラートを作成（タイトルは後から設定）
+// 新規マンダラートを作成
 createMandalart(title?: string): Promise<Mandalart>
 
-// タイトルを更新
+// タイトルを直接更新 (現状はほぼ未使用 — 通常は updateCell 経由の auto-sync に任せる)
 updateMandalartTitle(id: string, title: string): Promise<void>
 
-// マンダラートを削除（関連する grids / cells は CASCADE 削除）
+// マンダラートをソフトデリート (cells / grids / mandalarts の順に deleted_at をセット)
 deleteMandalart(id: string): Promise<void>
 
-// タイトル部分一致検索
+// 全文検索: タイトルまたは配下のセル本文に一致するものを更新日降順で返す
+// LIKE の % / _ / \ はエスケープされる
 searchMandalarts(q: string): Promise<Mandalart[]>
+
+// マンダラートを丸ごと複製 (全グリッド / セル / サブツリーを再帰複製)
+// タイトルはソースのままコピーされる (「〜 のコピー」サフィックスは付けない)
+duplicateMandalart(sourceId: string): Promise<Mandalart>
+
+// ソフトデリートされたマンダラートを削除日降順で取得 (ゴミ箱)
+getDeletedMandalarts(): Promise<Mandalart[]>
+
+// ゴミ箱からの復元 (配下の grids / cells の deleted_at も NULL に戻す)
+restoreMandalart(id: string): Promise<void>
+
+// 完全削除 (物理削除)。ローカル DB から cells / grids / mandalarts を順に DELETE する
+permanentDeleteMandalart(id: string): Promise<void>
 ```
 
 ---
@@ -56,7 +77,7 @@ searchMandalarts(q: string): Promise<Mandalart[]>
 ## lib/api/grids.ts
 
 ```typescript
-// ルートグリッドを sort_order 昇順で取得（並列グリッドを含む）
+// ルートグリッドを sort_order 昇順で取得 (並列グリッドを含む)
 getRootGrids(mandalartId: string): Promise<Grid[]>
 
 // 指定セルを親とするサブグリッドを sort_order 昇順で取得
@@ -65,17 +86,17 @@ getChildGrids(parentCellId: string): Promise<Grid[]>
 // グリッドとその全セルを取得
 getGrid(id: string): Promise<Grid & { cells: Cell[] }>
 
-// グリッドを新規作成し、9つのセルを同時に生成して返す
+// グリッドを新規作成し、9 つのセルを同時に生成
 createGrid(params: {
   mandalartId: string
   parentCellId: string | null
   sortOrder: number
 }): Promise<Grid & { cells: Cell[] }>
 
-// グリッドのメモを更新
+// メモ (Markdown) を更新
 updateGridMemo(id: string, memo: string): Promise<void>
 
-// グリッドを削除（関連 cells は CASCADE 削除）
+// グリッドとその子孫を再帰的にソフトデリート
 deleteGrid(id: string): Promise<void>
 
 // 並列グリッドの表示順を更新
@@ -87,22 +108,28 @@ updateGridSortOrder(id: string, sortOrder: number): Promise<void>
 ## lib/api/cells.ts
 
 ```typescript
-// セルの内容を部分更新（指定フィールドのみ更新）
+// セルの内容を部分更新 (指定フィールドのみ)
+// ルートグリッドの中心セル (position=4) を更新した場合、
+// mandalarts.title も同じテキストで自動同期される
 updateCell(
   id: string,
   params: { text?: string; image_path?: string | null; color?: string | null }
 ): Promise<Cell>
 
-// 2つのセルの内容（text / image_path / color）のみを入れ替える
-// サブツリー（子グリッド）は移動しない
+// 2 つのセルの内容 (text / image_path / color) のみを入れ替える
+// サブツリー (子グリッド) は移動しない
 swapCellContent(cellIdA: string, cellIdB: string): Promise<void>
 
-// 2つのセルのサブツリーごと入れ替える
-// 一時的な UUID を経由して parent_cell_id を付け替える
+// 2 つのセルのサブツリーごと入れ替える
+// 子グリッドの parent_cell_id を付け替えるだけで実装 (循環 FK 問題を避けるため一時 ID は使わない)
 swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void>
 
-// sourceCellId のサブツリーを targetCellId 配下に再帰的にコピーする
-// 元のセルは変化しない
+// クリップボードからのペースト (カット/コピー)
+// copyCellSubtree で内容とサブツリーを複製し、cut モードなら source を論理削除
+pasteCell(sourceCellId: string, targetCellId: string, mode: 'cut' | 'copy'): Promise<void>
+
+// sourceCellId のサブツリーを targetCellId 配下に再帰的にコピー
+// 中心セル同士のコピー時は「中心セル = 自分がテーマとしているグリッド全体」と解釈してグリッド丸ごと複製
 copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
 ```
 
@@ -114,13 +141,16 @@ copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
 // ストックアイテムを作成日降順で取得
 getStockItems(): Promise<StockItem[]>
 
-// 指定セル（とそのサブツリー）のスナップショットをストックに追加
+// 指定セル (とそのサブツリー) のスナップショットをストックに追加
+// 周辺セル: そのセルの子グリッド群
+// 中央セル: 所属するグリッド自体 (8 周辺セル + その下のサブツリー)
 addToStock(cellId: string): Promise<StockItem>
 
 // ストックアイテムを削除
 deleteStockItem(id: string): Promise<void>
 
-// ストックアイテムの内容をターゲットセルに貼り付け（内容のみ）
+// ストックアイテムの内容 + サブツリーをターゲットセルに貼り付け
+// ターゲットが空セルのときのみ useDragAndDrop から呼ばれる
 pasteFromStock(stockItemId: string, targetCellId: string): Promise<void>
 ```
 
@@ -129,19 +159,23 @@ pasteFromStock(stockItemId: string, targetCellId: string): Promise<void>
 ## lib/api/storage.ts
 
 ```typescript
-// セルに画像をアップロード（現在は DataURL を返す暫定実装）
-// 将来: Tauri fs プラグインでアプリデータディレクトリに保存
+// ブラウザ File を $APPDATA/images/{cellId}-{ts}.{ext} にコピー
+// CellEditModal のファイル選択経由で呼ばれる
 uploadCellImage(
   userId: string,
   mandalartId: string,
   cellId: string,
   file: File
-): Promise<string>   // 保存パスを返す
+): Promise<string>   // 相対パス (AppData/images/...) を返す
 
-// 画像パスから表示用 URL を取得
+// Tauri のネイティブ drag-drop で得られた絶対パスを AppData/images/ にコピー
+copyImageFromPath(absolutePath: string, cellId: string): Promise<string>
+
+// 相対パスを blob URL に変換 (cache 付き)
+// Cell コンポーネントが <img src={blobUrl}> で表示するために使う
 getCellImageUrl(path: string): Promise<string>
 
-// 画像を削除（将来実装）
+// ローカルファイルを削除 + blob URL をキャッシュから破棄
 deleteCellImage(path: string): Promise<void>
 ```
 
@@ -150,71 +184,108 @@ deleteCellImage(path: string): Promise<void>
 ## lib/api/transfer.ts
 
 ```typescript
-// 指定グリッド以下の階層構造を GridSnapshot として取得（JSON エクスポート用）
+// 指定グリッド以下の階層構造を GridSnapshot として取得 (JSON エクスポート用)
+// 子グリッドには parentPosition が記録されるので round-trip 可能
 exportToJSON(gridId: string): Promise<GridSnapshot>
 
-// 指定グリッド以下をフラットな CSV 形式で取得
-exportToCSV(gridId: string): Promise<string>
+// 指定グリッド以下をフラットな CSV で取得
 // 列: position, text, color, depth
+exportToCSV(gridId: string): Promise<string>
 
-// JSON スナップショットを新規マンダラートとしてインポート
+// GridSnapshot を新規マンダラートとしてインポート
+// 中心セルのテキストがタイトルになる
 importFromJSON(snapshot: GridSnapshot): Promise<Mandalart>
 
-// 指定セルの子グリッドとして JSON スナップショットをインポート
+// GridSnapshot を既存セルの配下に挿入
+// ターゲットセルの内容はスナップショットのルート中心セルで上書きされる
 importIntoCell(cellId: string, snapshot: GridSnapshot): Promise<void>
 
-// テキスト（インデント形式 or Markdown）を GridSnapshot に変換
+// テキスト (インデント or Markdown 見出し) を GridSnapshot に変換
+// 先頭の箇条書き記号 (・ • ◦ - * + 1. 1) など) は自動で剥がされる
 parseTextToSnapshot(text: string): GridSnapshot
 ```
 
 ---
 
-## lib/api/auth.ts（スタブ）
-
-デスクトップ版ではローカルモードのみ。将来の Supabase 同期時に実装予定。
+## lib/api/auth.ts — Supabase Auth 連携
 
 ```typescript
-signOut(): Promise<void>
-getSession(): Promise<null>
-signIn(email: string, password: string): Promise<{ error: Error }>
-signUp(email: string, password: string): Promise<{ error: Error }>
-signInWithGoogle(): Promise<{ error: Error }>
-signInWithGitHub(): Promise<{ error: Error }>
+// 現在のセッションを取得
+getSession(): Promise<Session | null>
+
+// メール + パスワードでサインイン
+signInWithEmail(email: string, password: string): Promise<{ data, error }>
+
+// メール + パスワードで新規登録 (email 確認が必要な場合は Session なしで返る)
+signUpWithEmail(email: string, password: string): Promise<{ data, error }>
+
+// サインアウト
+signOut(): Promise<{ error }>
+
+// OAuth サインイン (Google / GitHub)
+// supabase.auth.signInWithOAuth({ skipBrowserRedirect: true }) で URL を取得し
+// tauri-plugin-opener でシステムブラウザを開く。コールバックは deep link で受け取る
+signInWithOAuth(provider: 'google' | 'github'): Promise<{ error }>
+
+// tauri-plugin-deep-link で受け取った URL から認可コードを取り出してセッションに変換
+handleDeepLink(url: string): Promise<void>
 ```
 
 ---
 
-## lib/realtime.ts（スタブ）
-
-デスクトップ版は単一デバイスのため Realtime 不要。
+## lib/supabase/client.ts
 
 ```typescript
-subscribeToCells(
-  mandalartId: string,
-  onInsert: (c: Cell) => void,
-  onUpdate: (c: Cell) => void,
-): () => void   // unsubscribe 関数を返す
+// 環境変数 (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) が欠損している場合でも
+// モジュール読み込み時にクラッシュしないよう、ダミー URL でフォールバック初期化する
+export const supabase: SupabaseClient
 
-subscribeToGrids(
-  mandalartId: string,
-  onInsert: (g: Grid) => void,
-  onUpdate: (g: Grid) => void,
-): () => void
-
-unsubscribe(sub: () => void): void
+// 両方の env var が設定されているかどうか
+// useAuthBootstrap / useSync はこのフラグで gate して何も動かないように
+export const isSupabaseConfigured: boolean
 ```
 
 ---
 
-## lib/offline.ts（スタブ）
-
-SQLite がプライマリのためオフライン対応不要。
+## lib/sync/push.ts
 
 ```typescript
-cacheGrid(grid: Grid & { cells: unknown[] }): Promise<void>
-getCachedGrid(id: string): Promise<null>
-queueUpdate(op: unknown): Promise<void>
-syncPendingUpdates(): Promise<void>
+// 未同期 (synced_at < updated_at もしくは synced_at IS NULL) のローカル行を
+// Supabase に行単位で upsert する
+// deleted_at もペイロードに含めるのでソフトデリートも伝播する
+// 1 行失敗しても全体を止めず、失敗行を集約して最後にまとめて throw
+pushAll(userId: string): Promise<{ mandalarts: number; grids: number; cells: number }>
+```
+
+## lib/sync/pull.ts
+
+```typescript
+// Supabase から mandalarts / grids / cells を全行 SELECT し、
+// updated_at 比較で local に反映 (last-write-wins)
+// 失敗行は console.error に詳細を出して throw
+pullAll(): Promise<{ mandalarts: number; grids: number; cells: number }>
+```
+
+## lib/sync/index.ts
+
+```typescript
+// pullAll → pushAll の順で実行
+// useSync から呼ばれる (起動時 / 手動同期ボタン / realtime 受信時)
+syncAll(userId: string): Promise<SyncStats>
+
+export type SyncStats = {
+  pushed: { mandalarts: number; grids: number; cells: number }
+  pulled: { mandalarts: number; grids: number; cells: number }
+}
+```
+
+## lib/realtime.ts
+
+```typescript
+// Supabase Realtime (postgres_changes) を mandalarts / grids / cells の 3 テーブルで購読
+// 受信したペイロードをローカル DB に upsert (deleted_at 含む)
+// すべての apply 関数は try/catch で囲まれており、失敗しても他のテーブルへの伝播を止めない
+subscribeRemoteChanges(onChange: () => void): () => void   // unsubscribe 関数を返す
 ```
 
 ---
@@ -222,43 +293,37 @@ syncPendingUpdates(): Promise<void>
 ## lib/utils/grid.ts
 
 ```typescript
-// セルが空かどうか（text が空文字 かつ image_path が null）
+// セルが空かどうか (text が空文字 かつ image_path が null)
 isCellEmpty(cell: Pick<Cell, 'text' | 'image_path'>): boolean
 
-// 周辺セル（position !== 4）に1つでも入力があるか
+// 周辺セル (position !== 4) に 1 つでも入力があるか
 hasPeripheralContent(cells: Cell[]): boolean
 
-// 中央セル（position === 4）を取得
+// 中央セル (position === 4) を取得
 getCenterCell(cells: Cell[]): Cell | undefined
 ```
 
----
-
 ## lib/utils/dnd.ts
 
-D&D ルール判定ロジック。
-
 ```typescript
-type DndRule = 'swapSubtree' | 'swapContent' | 'copySubtree' | 'noop'
+// ドラッグ元セルとドロップ先セルから D&D アクションを判定する
+// 返り値は SWAP_SUBTREE / SWAP_CONTENT / COPY_SUBTREE / NOOP のいずれか
+resolveDndAction(source: Cell, target: Cell): DndAction
 
-// ドラッグ元とドロップ先の組み合わせからルールを決定
-determineDndRule(
-  source: Cell,
-  target: Cell,
-  sourceHasChildren: boolean,
-  targetHasChildren: boolean,
-): DndRule
+export type DndAction =
+  | { type: 'SWAP_SUBTREE'; cellIdA: string; cellIdB: string }
+  | { type: 'SWAP_CONTENT'; cellIdA: string; cellIdB: string }
+  | { type: 'COPY_SUBTREE'; sourceCellId: string; targetCellId: string }
+  | { type: 'NOOP' }
 ```
-
----
 
 ## lib/utils/export.ts
 
 ```typescript
-// グリッド DOM 要素を PNG としてダウンロード
+// グリッド DOM 要素を PNG としてダウンロード (html2canvas)
 exportAsPNG(element: HTMLElement): Promise<void>
 
-// グリッド DOM 要素を PDF としてダウンロード
+// グリッド DOM 要素を PDF としてダウンロード (jsPDF)
 exportAsPDF(element: HTMLElement): Promise<void>
 
 // JSON データをファイルとしてダウンロード
@@ -266,6 +331,19 @@ downloadJSON(data: unknown): void
 
 // CSV 文字列をファイルとしてダウンロード
 downloadCSV(csv: string): void
+```
+
+## constants/tabOrder.ts
+
+```typescript
+// Tab 移動順 (0-indexed、DB の cells.position と一致)
+// 中心 4 から時計回り: 4 → 7 → 6 → 3 → 0 → 1 → 2 → 5 → 8 → 4
+// インポート時の周辺セル配置順もこの順から中心を除いたもの
+export const TAB_ORDER: number[] = [4, 7, 6, 3, 0, 1, 2, 5, 8]
+export const TAB_ORDER_REVERSE: number[]
+
+// position から次の Tab 先 position を返す
+nextTabPosition(current: number, reverse?: boolean): number
 ```
 
 ---
@@ -280,13 +358,14 @@ mandalartId: string | null
 currentGridId: string | null
 viewMode: '3x3' | '9x9'
 breadcrumb: BreadcrumbItem[]
+fontLevel: number      // -10 〜 +20 の整数
+fontScale: number      // 1.1^fontLevel (派生値、Cell に渡す)
 
-// BreadcrumbItem
 type BreadcrumbItem = {
   gridId: string
-  cellId: string | null       // 親グリッドで押下したセルの ID（root は null）
-  label: string               // セルのテキスト
-  cells: Cell[]               // ミニプレビュー用のセル一覧
+  cellId: string | null      // 親グリッドで押下したセルの ID (root は null)
+  label: string              // セルのテキスト
+  cells: Cell[]              // ミニプレビュー用のセル一覧
   highlightPosition: number | null
 }
 
@@ -295,31 +374,58 @@ setMandalartId(id: string): void
 setCurrentGrid(gridId: string): void
 setViewMode(mode: '3x3' | '9x9'): void
 pushBreadcrumb(item: BreadcrumbItem): void
-popBreadcrumbTo(gridId: string): void     // 指定 gridId までパンくずをポップ
+popBreadcrumbTo(gridId: string): void
 resetBreadcrumb(root: BreadcrumbItem): void
+
+bumpFontLevel(delta: number): void   // +1 / -1 を押すたびに呼ばれる
+resetFontLevel(): void                // 中央の「100%」ボタン
 ```
 
 ### undoStore
 
 ```typescript
-type UndoEntry = {
+type UndoOperation = {
   description: string
   undo: () => Promise<void>
   redo: () => Promise<void>
 }
 
-push(entry: UndoEntry): void
+past: UndoOperation[]
+future: UndoOperation[]
+
+push(op: UndoOperation): void
 undo(): Promise<void>
 redo(): Promise<void>
+clear(): void
 ```
 
 ### clipboardStore
 
 ```typescript
+// スナップショットは持たず、DB 内のソースセル ID のみを記録する
+// (paste 実行時に DB から source を読み直して copyCellSubtree + 必要なら論理削除)
 mode: 'cut' | 'copy' | null
 sourceCellId: string | null
-snapshot: CellSnapshot | null
 
-set(mode: 'cut' | 'copy', cellId: string, snapshot: CellSnapshot): void
+set(mode: 'cut' | 'copy', cellId: string): void
 clear(): void
+```
+
+### authStore
+
+```typescript
+session: Session | null
+user: User | null
+loading: boolean
+
+setSession(session: Session | null): void
+setLoading(loading: boolean): void
+```
+
+### themeStore
+
+```typescript
+// light / dark / system。localStorage に永続化
+preference: 'light' | 'dark' | 'system'
+setPreference(pref: 'light' | 'dark' | 'system'): void
 ```

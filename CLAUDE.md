@@ -1,173 +1,263 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+このファイルは Claude Code (claude.ai/code) がこのリポジトリで作業する際のガイドです。
 
-## Project Overview
+## プロジェクト概要
 
-マンダラート（Mandalart）— a hierarchical 3×3 grid thinking tool. Each cell can be drilled into to reveal another 3×3 grid, enabling infinite-depth expansion. Grids at the same level can also expand in parallel (side-by-side), navigated with ← → buttons.
+マンダラート（Mandalart）— 3×3 グリッドで思考を階層的に展開するデスクトップアプリ。各セルをクリックすると更に 3×3 グリッドに掘り下げられる「無限階層」式のツール。同じ階層に並列グリッドを作ることもでき、← → で切り替える。
 
-**The active codebase is the Tauri desktop app under `desktop/`.** The root-level Next.js project (`src/`, `next.config.ts`, `supabase/`) is the legacy web prototype — kept for reference but no longer maintained. When making changes, work inside `desktop/` unless the user explicitly asks about the web version.
+**アクティブなコードベースは [`desktop/`](desktop/) 配下の Tauri デスクトップアプリ**。ルートの Next.js 部分 ([`_old_web/`](_old_web/)) は試作版の Web プロトタイプでメンテ停止。修正は特に指定がない限り `desktop/` に対して行う。
 
-## Commands
-
-All commands run from `desktop/`.
+## コマンド (すべて `desktop/` から)
 
 ```bash
-# Vite dev server only (no Tauri window — fast UI iteration in browser)
+# Vite dev サーバーのみ (Tauri なしの UI 高速反復用)
 npm run dev
 
-# Full Tauri dev (launches native window; required for SQLite / FS plugins)
+# Tauri dev (SQLite / fs プラグインが必要なので、機能確認は基本こちら)
 npm run tauri dev
 
-# Type check
+# 型チェック
 npx tsc --noEmit
 
-# Production build (frontend)
+# フロントエンドの本番ビルド
 npm run build
 
-# Native app bundles (.dmg / .msi / etc.)
+# ネイティブアプリ (.dmg / .msi 等) のビルド
 npm run tauri build
 ```
 
-There is no separate lint script — rely on `tsc --noEmit` for static checks.
+別途 lint スクリプトは無い。静的チェックは `tsc --noEmit` に任せている。
 
-## Architecture
+## アーキテクチャ
 
-### Tech Stack
+### 技術スタック
 
-- **Shell**: Tauri v2 (Rust backend in `src-tauri/`)
-- **Frontend**: Vite + React 19 + TypeScript
-- **Routing**: React Router v7 (HashRouter — required because Tauri serves a file URL)
-- **Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`)
-- **State**: Zustand (`editorStore`, `undoStore`, `clipboardStore`)
-- **Database**: SQLite via `tauri-plugin-sql` (local-first, no server required)
+- **シェル**: Tauri v2 (Rust バックエンドは `src-tauri/`)
+- **フロントエンド**: Vite + React 19 + TypeScript
+- **ルーティング**: React Router v7 の HashRouter (Tauri が file URL を配信するため)
+- **スタイル**: Tailwind CSS v4 (`@tailwindcss/vite`)。ダークモードは `@custom-variant dark` 経由のクラスベース
+- **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore`)
+- **データベース**:
+  - **ローカル**: SQLite via `tauri-plugin-sql` (primary storage、オフライン動作)
+  - **クラウド**: Supabase (任意、サインインで有効化)
+- **認証**: Supabase Auth (メール + Google / GitHub OAuth)、PKCE フロー + `tauri-plugin-deep-link` で `mandalart://` スキームをキャッチ
+- **同期**: `lib/sync/` (push / pull / realtime)、last-write-wins (`updated_at` 比較)
 - **Export**: html2canvas + jsPDF
-- **Path alias**: `@/` → `desktop/src/` (defined in `vite.config.ts` + `tsconfig.json`)
+- **Path alias**: `@/` → `desktop/src/`
 
-Supabase / cloud sync / auth are **stubbed** (`lib/api/auth.ts`, `lib/realtime.ts`, `lib/offline.ts`) — the app currently runs in local-only mode. Real sync is a future phase.
+### データモデル (ローカル SQLite)
 
-### Data Model
+スキーマは [`desktop/src-tauri/migrations/`](desktop/src-tauri/migrations/) にあり、起動時に `lib.rs` で自動適用される:
 
-Three core tables form a recursive hierarchy. Schema lives in `desktop/src-tauri/migrations/001_initial.sql`, auto-applied by `lib.rs` on app start.
+- `001_initial.sql`: `mandalarts` / `grids` / `cells` / `stock_items` の初期定義
+- `002_soft_delete.sql`: 3 テーブルに `deleted_at TEXT` カラム + インデックス追加
 
+階層構造:
 ```
 mandalarts → grids → cells → grids (child, via parent_cell_id) → cells → …
 ```
 
-- `grids.parent_cell_id = NULL` → root grid (one per parallel slot)
-- `grids.sort_order` → controls ← → parallel navigation order
-- `cells.position` 0–8 (4 = center); position 4 is always the theme cell
-- `stock_items.snapshot` → JSON deep-copy of a cell + its entire subtree
+- `grids.parent_cell_id = NULL` がルートグリッド (並列グリッドは `sort_order` で順序付け)
+- `cells.position` は 0〜8 (4 が中央)、position 4 = テーマセル
+- `stock_items.snapshot` は cell + サブツリー全体の JSON スナップショット
+- **FK 制約は張っていない** (下の「DB のハマりポイント」参照)
 
-### Layered Architecture
+### レイヤード構成
 
-UI components never touch SQLite directly. The call chain is:
+UI は SQLite を直接叩かない:
 
 ```
 components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql
 ```
 
-`lib/db/index.ts` wraps `tauri-plugin-sql` with `query`, `execute`, `generateId`, `now` helpers. Every `lib/api/*` module uses those; business rules live in `lib/utils/`.
+- [`lib/db/index.ts`](desktop/src/lib/db/index.ts) が `tauri-plugin-sql` を `query` / `execute` / `generateId` / `now` のヘルパーで包む
+- [`lib/api/*.ts`](desktop/src/lib/api/) がエンティティ単位の CRUD を提供
+- [`lib/utils/*.ts`](desktop/src/lib/utils/) はピュアロジック (`grid.ts` / `dnd.ts` / `export.ts`)
+- [`lib/sync/*.ts`](desktop/src/lib/sync/) はクラウド同期 (`push.ts` / `pull.ts` / `index.ts`)
+- [`lib/realtime.ts`](desktop/src/lib/realtime.ts) は Supabase Realtime 購読
 
-### Key Source Directories (under `desktop/src/`)
+### 主要ディレクトリ (`desktop/src/` 配下)
 
-| Path | Purpose |
-|------|---------|
-| `lib/db/` | tauri-plugin-sql wrapper (`query` / `execute` / `generateId` / `now`) |
-| `lib/api/` | One file per entity: `auth`, `mandalarts`, `grids`, `cells`, `stock`, `storage`, `transfer` |
-| `lib/utils/` | Pure logic: `grid.ts`, `dnd.ts`, `export.ts` (canonical location — prefer these over any duplicates at `lib/*.ts`) |
-| `lib/import-parser.ts` | Indented-text / Markdown → `GridSnapshot` parser |
-| `lib/realtime.ts`, `lib/offline.ts` | Stubs for future cloud sync |
-| `store/` | Zustand stores: `editorStore`, `undoStore`, `clipboardStore` |
-| `hooks/` | `useGrid`, `useSubGrids`, `useDragAndDrop`, `useUndo`, etc. |
-| `pages/` | `DashboardPage.tsx`, `EditorPage.tsx` (React Router route components) |
-| `components/editor/` | `EditorLayout`, `GridView3x3`, `GridView9x9`, `Cell`, `CellEditModal`, `Breadcrumb`, `ParallelNav`, `SidePanel`, `MemoTab`, `StockTab` |
-| `constants/tabOrder.ts` | Tab order: `[4, 7, 6, 3, 0, 1, 2, 5, 8]` (0-indexed positions, clockwise from center) |
-| `src-tauri/migrations/` | SQL migrations applied on startup |
-| `src-tauri/capabilities/default.json` | Tauri v2 permissions (must include `sql:default`, `sql:allow-execute`) |
+| パス | 役割 |
+|---|---|
+| `lib/db/` | tauri-plugin-sql のラッパー。起動時に `PRAGMA journal_mode = WAL` + `PRAGMA busy_timeout = 5000` を設定 |
+| `lib/api/` | エンティティごとの CRUD: `auth` / `mandalarts` / `grids` / `cells` / `stock` / `storage` / `transfer` |
+| `lib/utils/` | `grid.ts` (セル判定) / `dnd.ts` (D&D ルール) / `export.ts` (PNG/PDF/JSON/CSV) |
+| `lib/sync/` | `push.ts` / `pull.ts` / `index.ts` — ローカル ↔ クラウドの同期 |
+| `lib/realtime.ts` | `postgres_changes` 購読 → ローカル DB 反映 |
+| `lib/supabase/client.ts` | Supabase クライアント (env 欠損時はダミー URL でフォールバックし、`isSupabaseConfigured` で gate) |
+| `lib/import-parser.ts` | インデントテキスト / Markdown 見出し → `GridSnapshot` パーサ |
+| `store/` | Zustand: `editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore` |
+| `hooks/` | `useGrid` / `useSubGrids` / `useDragAndDrop` / `useUndo` / `useSync` / `useAuthBootstrap` / `useGlobalShortcut` / `useTheme` / `useAppUpdate` |
+| `pages/` | `DashboardPage.tsx` / `EditorPage.tsx` |
+| `components/` | `ThemeToggle` / `UpdateDialog` / `AuthDialog` / `dashboard/TrashDialog` |
+| `components/editor/` | `EditorLayout` / `GridView3x3` / `GridView9x9` / `Cell` / `CellEditModal` / `Breadcrumb` / `ParallelNav` / `SidePanel` / `MemoTab` / `StockTab` / `ImportDialog` |
+| `constants/tabOrder.ts` | Tab 順 `[4, 7, 6, 3, 0, 1, 2, 5, 8]` (0-indexed) |
+| `src-tauri/migrations/` | 起動時に自動適用される SQL マイグレーション |
+| `src-tauri/capabilities/default.json` | Tauri v2 パーミッション |
 
-### Routing
+### ルーティング
 
-React Router v7 HashRouter in `App.tsx`:
+React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 
 ```
-/                     → redirect to /dashboard
-/dashboard            → DashboardPage (mandalart list)
-/mandalart/:id        → EditorPage → EditorLayout
+/                 → /dashboard にリダイレクト
+/dashboard        → DashboardPage
+/mandalart/:id    → EditorPage → EditorLayout
 ```
 
-There is no auth guard — the app is fully usable offline without login.
+認証ガードは無い。サインインしなくても全機能がローカル専用モードで使える。
 
-### Drag & Drop
+---
 
-**HTML5 DnD does not work reliably in Tauri's WebKit** — drop events are dropped silently. All D&D is implemented via `mousedown` / `mousemove` / `mouseup` + `document.elementFromPoint` in `hooks/useDragAndDrop.ts`. Drop targets are identified by `data-cell-id` and `data-stock-drop` attributes. Do not add HTML5 `draggable` / `onDragStart` handlers to new D&D code.
+## ビジネスルール
 
-### Business Rules
+### セル操作 (クリック / ドラッグ / キーボード)
 
-**Cell interactions**
-- Empty cell: single-click starts inline edit immediately (double-click is a no-op)
-- Filled cell: single-click drills (root center → home, sub-grid center → parent, peripheral → child grid), double-click starts inline edit
-- `⋯` hover button on any cell opens the full CellEditModal (colors, image, long text)
-- Peripheral cells are disabled while the center cell is empty
-- The click threshold uses a 220ms timer to distinguish single vs double, so drill has a ~220ms latency on filled cells (the latency vanishes for empty cells)
+**クリック判定** (220ms のタイマーで single vs double を識別):
 
-**D&D rules (5 cases, same-grid and 9×9 cross-subgrid)**
+| セルの状態 | シングルクリック | ダブルクリック |
+|---|---|---|
+| 空 (text も image も無い) | **即インライン編集開始** (textarea にフォーカス) | 無視 (編集継続) |
+| 入力ありの周辺セル | サブグリッドへドリル (220ms 遅延)。子グリッドが無ければ自動生成 | インライン編集 |
+| 入力ありの中央セル (ルート) | **ダッシュボードへ戻る** | インライン編集 |
+| 入力ありの中央セル (サブ) | 親グリッドへ戻る | インライン編集 |
+| 中央セルが空の周辺セル | 操作不可 (disabled) | — |
 
-| Drag source | Drop target | Result |
-|-------------|-------------|--------|
-| Peripheral | Peripheral | Swap full subtrees (`swapCellSubtree`) |
-| Center | Peripheral (has content) | Swap content only (`swapCellContent`) |
-| Center | Peripheral (empty) | Copy subtree (`copyCellSubtree`) |
-| Peripheral (has content) | Center | Swap content only |
-| Peripheral (empty) | Center | No-op |
+**その他:**
+- セル右上の `⋯` ボタン (hover 時表示) → `CellEditModal` で色 / 画像 / 長文編集
+- 右クリック → コンテキストメニュー (カット / コピー / ペースト / ストック / インポート)
+- D&D はマウスイベントベース (下記「Tauri のハマりポイント」参照)
 
-In 9×9 view, the flattened cell list (root + sub-grid cells) is passed to `useDragAndDrop` so drops across sub-grids resolve against the same rule table.
-
-**Stock rules** (`lib/api/stock.ts`)
-- Cell → stock (`addToStock`): snapshot includes the full subtree.
-  - Peripheral cell: its child grids
-  - Center cell: the grid it belongs to (8 peripherals + their descendants) — mirrors the "center cell's subtree = the grid it is the theme of" interpretation used by `copyCellSubtree`
-- Stock → cell (`pasteFromStock`): **empty target cells only, no swap semantics**. Applies snapshot content + recursively inserts `GridSnapshot` children. Stock items are not consumed on paste.
-
-**Clipboard (cut / copy / paste)**
-- `clipboardStore` holds only `{ mode, sourceCellId }` — no serialized snapshot. Paste operates on the live source cell via `pasteCell`.
-- ⌘X / ⌘C / ⌘V work on the **currently hovered cell** (tracked via `document.elementFromPoint` on the last mouse position). Shortcuts are suppressed when focus is inside `INPUT` / `TEXTAREA`.
-- Cut + paste → `copyCellSubtree` then clear source content and delete source's child grids.
-
-**Empty-data rules**
-- New mandalart: held as draft in UI; saved to DB only on first confirmed input
-- When all cells in a grid become empty → auto-delete that grid (with Undo toast)
-- When root grid empties → auto-delete the entire mandalart
-- When navigating home from an empty mandalart → skip the title dialog and delete silently
-
-**Cell numbering (0-indexed, matches DB `cells.position`)**
+### セルナンバリング (0-indexed、DB の `cells.position` と一致)
 
 ```
 0 | 1 | 2
 --+---+--
-3 | 4 | 5    ← 4 = center
+3 | 4 | 5    ← 4 = 中央
 --+---+--
 6 | 7 | 8
 ```
 
-**Tab navigation** (inside cells, both inline edit and modal)
-- Order: 4 → 7 → 6 → 3 → 0 → 1 → 2 → 5 → 8 → 4 (clockwise from center, ends at position 4 again)
-- Shift+Tab is the reverse order
-- When center cell (4) is empty, Tab is a no-op (stays on 4); peripherals are disabled until center has content
-- IME composition (`e.nativeEvent.isComposing`) suppresses Tab navigation
-- Import also places children into peripherals using this same order so the newly imported mandalart's Tab-walk lands on the items the user typed first
+### Tab 移動順
 
-### Tauri-specific Gotchas
+`4 → 7 → 6 → 3 → 0 → 1 → 2 → 5 → 8 → 4` (ループ)
 
-- **SQL permissions**: any new SQL command used via `tauri-plugin-sql` must be allowed in `src-tauri/capabilities/default.json` (`sql:default` + `sql:allow-execute` are the baseline).
-- **Image handling**: `lib/api/storage.ts` is a stub returning data URLs. Real file persistence via `tauri-plugin-fs` is a future task.
-- **Window sizing**: grid area uses a `ResizeObserver` on its container to stay square while maximizing within the viewport. Don't hardcode grid dimensions.
+- Shift+Tab は逆順
+- 中央セル (4) が空のとき Tab は留まる (周辺が disabled なので)
+- IME 変換中 (`e.nativeEvent.isComposing`) の Tab は無視
+- **インポート時の周辺セル配置順も同じ順**。`TAB_ORDER` から中央を除いた `[7, 6, 3, 0, 1, 2, 5, 8]`
 
-### Documentation
+### D&D ルール (同一グリッド / 9×9 跨ぎ 共通)
 
-Full desktop-app specs live in `desktop/docs/`:
-- `requirements.md` — UX rules, validation, navigation, D&D, stock, clipboard
-- `data-model.md` — SQL DDL for SQLite schema
-- `api-spec.md` — TypeScript function signatures for all `lib/api/` modules
-- `folder-structure.md` — Full directory tree and design rationale
-- `tasks.md` — Phased implementation checklist (source of truth for what's done / pending)
+| ドラッグ元 | ドロップ先 | 結果 |
+|---|---|---|
+| 周辺 | 周辺 | サブツリーごと入れ替え (`swapCellSubtree`) |
+| 中央 | 入力ありの周辺 | 内容のみ入れ替え (`swapCellContent`) |
+| 中央 | 空の周辺 | サブツリーをコピー (`copyCellSubtree`) |
+| 入力ありの周辺 | 中央 | 内容のみ入れ替え |
+| 空の周辺 | 中央 | 何もしない |
+
+9×9 表示では ルート + サブグリッドの全セルを平坦化して `useDragAndDrop` に渡すので、サブグリッドをまたいだ D&D も同じルールで解決される。
+
+### ストック
+
+- セル → ストック (`addToStock`): サブツリー全体をスナップショット化
+  - 周辺セルの場合: そのセルの子グリッド群
+  - 中央セルの場合: 所属グリッド自体 (8 周辺セル + 子孫)
+- ストック → セル (`pasteFromStock`): **空セルのみ受け入れ** (入れ替えは行わない)。スナップショットの内容 + 子グリッドを再帰挿入。ストックアイテムは消費されない
+
+### クリップボード (カット / コピー / ペースト)
+
+- [`clipboardStore`](desktop/src/store/clipboardStore.ts) は `{ mode, sourceCellId }` のみ保持 (スナップショットは持たない)
+- ⌘X / ⌘C / ⌘V は **hover しているセル** に対して動作 (`document.elementFromPoint` で特定)
+- `INPUT` / `TEXTAREA` にフォーカスがあるときはブラウザ標準に譲る
+- Cut + paste は `copyCellSubtree` 後に source を空化 + 子グリッドを論理削除
+
+### 空データの非保存ルール
+
+- 新規マンダラート: 初回入力までは UI 上の「下書き」扱い
+- グリッドの全セルが空になった → Undo トースト付きで自動削除
+- ルートグリッドが空になった → マンダラート全体を自動削除
+- 空のままホームに戻る → 削除してダッシュボードへ (タイトルダイアログは**廃止済み**)
+
+### マンダラート管理
+
+- **タイトル = ルート中心セルのキャッシュ**: `updateCell` が position=4 かつルートグリッドのセルを更新した際に `mandalarts.title` を同じテキストで自動更新。別途「ファイル名を付けて保存」するフローは無い
+- **ダッシュボードカード**: 130×130 の正方形タイル、ルート中心セルのテキストを 14px / `line-clamp-6` で表示。青枠 2px (中央セルと同じスタイル)。hover で右上に複製・削除ボタン、下部に更新日
+- **検索**: タイトルとセル本文を横断する全文検索 (`searchMandalarts`)、200ms debounce
+- **複製**: 全グリッド / セルを再帰コピー。タイトルにサフィックス (「〜 のコピー」等) は付けない
+- **ゴミ箱**: `deleted_at` によるソフトデリート。ダッシュボードの「ゴミ箱」ボタンから `TrashDialog` を開いて復元 / 完全削除
+
+### 文字サイズ
+
+- `editorStore.fontLevel` (-10 〜 +20 の整数)、実効倍率は `1.1^level` の乗算式
+- エディタのヘッダで `A− / 現在の % / A＋` ボタンで 1 段ずつ調整
+- 設定は localStorage (`mandalart.fontLevel`) に永続化
+- 3×3 のベース 28px、9×9 small のベース 18px。`Cell` が `fontScale` プロップで適用
+
+### ダークモード
+
+- Tailwind v4 の `@custom-variant dark (&:where(.dark, .dark *))` でクラスベース
+- `themeStore` が `preference: 'light' | 'dark' | 'system'` を保持 (localStorage)
+- `useTheme` が `<html>.dark` の付け外しと `prefers-color-scheme` の監視を担当
+- ヘッダの `ThemeToggle` (☀ ◐ ☾) で切り替え
+
+---
+
+## Tauri / SQLite のハマりポイント
+
+### Tauri WebKit の HTML5 DnD が動かない
+
+ドロップイベントがサイレントに落ちる。**セル D&D は `mousedown` / `mousemove` / `mouseup` + `document.elementFromPoint` で自前実装** ([`useDragAndDrop.ts`](desktop/src/hooks/useDragAndDrop.ts))。`data-cell-id` / `data-stock-drop` 属性でドロップ先を判定する。HTML5 の `draggable` / `onDragStart` は使わないこと。
+
+画像ファイルのネイティブドロップは `onDragDropEvent` (Tauri 側の API) + [`storage.ts`](desktop/src/lib/api/storage.ts) で処理し、AppData 配下の `images/` にコピーして `image_path` として保存する。
+
+### SQLite の FK 制約を張らない設計
+
+本来の DB スキーマには `grids.mandalart_id` / `grids.parent_cell_id` / `cells.grid_id` の FK が欲しい所だが、
+
+1. `grids.parent_cell_id → cells` と `cells.grid_id → grids` の組み合わせが**循環カスケード**を作り、削除時に "too many levels of trigger recursion" になる
+2. `tauri-plugin-sql` (sqlx) のコネクションプールは `PRAGMA foreign_keys` / トランザクションが接続ごとに独立するので、`BEGIN / COMMIT / defer_foreign_keys` をかけても効かないことがある
+
+そのためローカルスキーマでは FK 制約を一切張らず、カスケード削除は API 層で明示的に行う (`deleteMandalart` が cells → grids → mandalarts の順に UPDATE、`pasteCell` cut モードが `deleteGrid` を再帰呼び出し、等々)。
+
+### WAL モード必須
+
+`getDb()` で `PRAGMA journal_mode = WAL` + `PRAGMA busy_timeout = 5000` を初回接続時に設定している。これが無いと、pull が書き込み中にダッシュボードの読み取りが走ると "database is locked" (SQLITE_BUSY) になる。
+
+### ソフトデリートと同期
+
+- 削除系 API (`deleteMandalart` / `deleteGrid`) は実際の `DELETE` ではなく `UPDATE deleted_at = ?, updated_at = ?` を行う
+- 全 `SELECT` に `WHERE deleted_at IS NULL` フィルタが付いている
+- `pushAll` / `pullAll` は `deleted_at` カラムも含めて upsert するので、**オフラインで削除してもオンライン復帰時に別デバイスへ伝播する**
+- ゴミ箱 UI (`TrashDialog`) で `deleted_at IS NOT NULL` の行を一覧表示し、復元 (null に戻す) か物理削除ができる
+
+### Supabase 側のスキーマ修正が必要
+
+- `grids.parent_cell_id` に ON DELETE CASCADE が残っていると同じ循環カスケード問題が起きる → `ALTER TABLE grids DROP CONSTRAINT grids_parent_cell_id_fkey` が必須
+- ソフトデリート対応には `ALTER TABLE ... ADD COLUMN deleted_at timestamptz` を 3 テーブル分実行する必要がある
+- 詳細は [`desktop/docs/cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) 参照
+
+### 環境変数 (Supabase)
+
+- ローカル開発: `desktop/.env` (gitignore 済み) に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を置く
+- CI / リリースビルド: GitHub Secrets の同名 2 つを `.github/workflows/release.yml` が env に渡す
+- env が欠損していると `supabase.createClient` が URL パースで throw してモジュール読み込み時にクラッシュ (= 白画面) するので、`lib/supabase/client.ts` がフォールバック URL で初期化し、`isSupabaseConfigured` フラグで auth / sync の bootstrap を gate する
+
+---
+
+## ドキュメント
+
+アプリ仕様と運用ドキュメントは [`desktop/docs/`](desktop/docs/):
+
+| ファイル | 内容 |
+|---|---|
+| [`requirements.md`](desktop/docs/requirements.md) | 機能要件・UX ルール・セル操作・D&D・検索・インポート/エクスポート |
+| [`data-model.md`](desktop/docs/data-model.md) | ローカル SQLite スキーマ・マイグレーション履歴・同期対応の列 |
+| [`api-spec.md`](desktop/docs/api-spec.md) | `lib/api/` / `lib/sync/` / `lib/realtime.ts` の関数シグネチャ |
+| [`folder-structure.md`](desktop/docs/folder-structure.md) | ディレクトリツリーと設計上の分離方針 |
+| [`tasks.md`](desktop/docs/tasks.md) | フェーズ別のタスクチェックリスト (進捗の単一情報源) |
+| [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | Supabase プロジェクトの手動セットアップとトラブルシューティング |
+| [`updater-setup.md`](desktop/docs/updater-setup.md) | 自動アップデート用の署名鍵・GitHub Secrets・リリースフロー |

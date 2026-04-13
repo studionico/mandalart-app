@@ -307,3 +307,68 @@
 ## 全フェーズ完了
 
 26 フェーズの MVP スコープはすべて実装・動作確認済み。未対応は有料証明書が必要なコードサイニングのみ。
+
+---
+
+## フェーズ 27: MVP 後の磨き込み ✅
+
+MVP 完了後に、実際の使用感から出てきた要望を順次対応。
+
+### 27.1 ゴミ箱 / 復元 UI ✅
+- ソフトデリート基盤を活用
+- `getDeletedMandalarts` / `restoreMandalart` / `permanentDeleteMandalart` を追加
+- `TrashDialog` コンポーネント (削除日時付きリスト、復元ボタン、完全削除ボタン)
+- ダッシュボードヘッダに「ゴミ箱」ボタン
+
+### 27.2 全文検索 ✅
+- `searchMandalarts` を拡張 — タイトルに加えてセル本文も検索対象に
+- `LEFT JOIN grids + cells` で横断検索、LIKE の `%` / `_` / `\` をエスケープ
+- ダッシュボードはクライアントフィルタ → サーバーサイド検索 (200ms debounce) に変更
+
+### 27.3 ダークモード ✅
+- Tailwind v4 の `@custom-variant dark` でクラスベース実装
+- `themeStore` (Zustand、localStorage 永続化) と `useTheme` hook
+- `ThemeToggle` コンポーネント (☀ ◐ ☾ セグメント) をダッシュボード + エディタヘッダに配置
+- Modal / Button / DashboardPage / EditorLayout / Cell / GridView / SidePanel / Breadcrumb に `dark:` variant を追加
+
+### 27.4 インライン編集 + フォントサイズ ✅
+- セルを単一クリックで編集 (textarea 表示) できるように
+- 詳細編集は右上の `⋯` ボタンから `CellEditModal` を起動
+- フォントサイズ: `fontLevel` (-10 〜 +20) の乗算式 (`1.1^level`)、ヘッダの `A−` / `%` / `A＋` ボタンで調整
+- インライン編集状態は `EditorLayout` の `inlineEditingCellId` で管理、Tab ナビも対応
+
+### 27.5 クリック動作の再検討 ✅
+- 最初は「シングル = 編集、ダブル = ドリル」→ 実使用で「シングル = ドリル」が欲しくなった
+- 最終的に**空セルはシングル即編集、入力ありはシングル = ドリル + ダブル = 編集**の折衷案を採用
+- 空セルは 220ms の遅延なしで即編集開始、入力ありは 220ms 待機でシングル/ダブル判定
+
+### 27.6 インポート機能の仕様修正 ✅
+- `GridSnapshot` 型に `parentPosition` を追加
+- パーサー書き直し: ルートノードの children が root grid の周辺セルになり、孫はその周辺セルから subgrid として生える
+- 9 個以上の子は並列グリッドとして展開
+- `importIntoGrid` が `parentPosition` を見て attach 先を特定
+- `exportToJSON` も `parentPosition` を記録するので round-trip 対応
+- インポート時の配置順は `TAB_ORDER` (中心除く) に従う
+- 箇条書き記号 (・ • ◦ - * + 1. 1) など) を自動で剥がす
+- `importIntoCell` はターゲットセルの内容もスナップショットのルート中心セルに合わせて上書き
+
+### 27.7 タイトル廃止・ダッシュボードリデザイン ✅
+- 「ファイル名を付けて保存」フロー完全廃止 (タイトル設定ダイアログ削除)
+- `mandalarts.title` はルート中心セルのキャッシュとして `updateCell` で自動同期される
+- ダッシュボードのカードを 130×130 の正方形固定タイルに変更
+- 中身はルート中心セルのテキストを 14px / `line-clamp-6` / 中央揃えで表示 (`safe center` で長文時は上揃えフォールバック)
+- 3×3 ミニプレビュー削除、リネームボタン削除 (中心セル編集に統一)
+- 複製時の「〜 のコピー」サフィックス廃止
+
+### 27.8 0-indexed セルナンバリングに統一 ✅
+- 要件定義のセル番号を 1-indexed → 0-indexed (DB の `cells.position` と一致)
+- Tab 移動順も 0-indexed 表記: `4 → 7 → 6 → 3 → 0 → 1 → 2 → 5 → 8 → 4`
+- インポート配置順も同じ順 (`[7, 6, 3, 0, 1, 2, 5, 8]`)
+
+### 27.9 同期・UX 安定化 ✅
+- `push.ts` を per-row upsert + 失敗集約 (1 行失敗でも全体が止まらない)
+- `useSync` の realtime 受信を 300ms debounce (自己 push が realtime に戻ってきて reloadKey が連鎖する問題を回避)
+- `DashboardPage` のリロードで loading フラグを切り替えず、既存データを保持 (フリッカ解消)
+- `loadSeqRef` で race 対策 (古いレスポンスで新しい結果を上書きしない)
+- FK 制約撤廃 (migration 001 を FK なし版に書き直し + ローカル DB を再作成)
+- `PRAGMA journal_mode = WAL` + `busy_timeout` を `getDb` で設定

@@ -205,41 +205,66 @@ Shift+Tab は逆順
 
 | 機能 | 内容 | 状態 |
 |------|------|------|
-| グローバルショートカット | `Cmd/Ctrl+Shift+M` でウィンドウ表示/非表示 | 未実装 |
-| 画像ファイル D&D | セルへのファイルドロップで画像設定 | 未実装（暫定: DataURL）|
-| 自動アップデート | GitHub Releases からチェック・適用 | 未実装 |
-| ウィンドウ制約 | 最小サイズ 800×600、デフォルト 1200×800 | 実装済み |
+| グローバルショートカット | `Cmd/Ctrl+Shift+M` でウィンドウ表示/非表示 | ✅ 実装済み (`useGlobalShortcut`) |
+| 画像ファイル D&D | セルへのファイルドロップ → `$APPDATA/images/` に保存 | ✅ 実装済み (`tauri-plugin-fs` + `storage.ts`) |
+| 自動アップデート | GitHub Releases の `latest.json` からチェック・適用 | ✅ 実装済み ([`updater-setup.md`](./updater-setup.md) 参照) |
+| ウィンドウ制約 | 最小サイズ 800×600、デフォルト 1200×800 | ✅ 実装済み (`tauri.conf.json`) |
+| コードサイニング | macOS / Windows の正式署名 | ⬜ 未対応 (有料証明書が必要) |
 
 ---
 
 ## 認証・クラウド同期
 
-- ログイン不要でも全機能使用可能（ローカルモード）
-- 将来的に「クラウド同期を有効にする」ボタンから Supabase Auth へ誘導
-- 対応予定: メール+パスワード / Google / GitHub OAuth
+- ログイン不要で全機能使用可能 (ローカル専用モード)
+- Supabase Auth によるサインインで「クラウド同期モード」になる
+- **対応済み**: メール + パスワード / Google OAuth / GitHub OAuth
+- **同期方式**:
+  - 起動時・サインイン時に `syncAll` で pull → push の順にフル同期
+  - セル編集時に `updated_at` / `synced_at` の差分で push を走らせる
+  - Supabase Realtime (`postgres_changes`) で別デバイスの変更を購読 → ローカル DB に反映 → UI が自動更新
+  - 競合解決: `updated_at` last-write-wins
+- **削除の同期**: ソフトデリート (`deleted_at`) で実現。オフラインで削除してもオンライン復帰時にクラウドへ伝播する。別デバイスでの削除は realtime / pull で不可視化される
+- 詳細は [`cloud-sync-setup.md`](./cloud-sync-setup.md) 参照
+
+---
+
+## 表示設定
+
+### ダークモード
+
+- Tailwind v4 の `@custom-variant dark` を使ったクラスベース実装
+- `themeStore` が `light` / `dark` / `system` の 3 値を localStorage に保存
+- ヘッダの `ThemeToggle` (`☀ ◐ ☾`) で切り替え。`system` の場合は OS の設定変更にも自動追従
+
+### 文字サイズ
+
+- ヘッダの `A− / 現在の % / A＋` ボタンで調整
+- 内部的には `fontLevel` (-10 〜 +20 の整数) を保持し、実効倍率は `1.1^level` の乗算式
+- 最小 level -10 → 約 39%、 level 0 → 100%、最大 level +20 → 約 673%
+- localStorage に永続化
 
 ---
 
 ## Undo / Redo
 
-- `⌘Z` / `⌘Y`（Mac）、`Ctrl+Z` / `Ctrl+Y`（Windows）
-- 対象: テキスト編集・色変更・D&D・削除・セル移動
+- `⌘Z` / `⌘⇧Z` / `⌘Y` (Mac)、`Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` (Windows)
+- 対象: テキスト編集 / 色変更 / D&D (SWAP_SUBTREE / SWAP_CONTENT / COPY_SUBTREE) / セル移動
+- D&D の COPY_SUBTREE は「target の事前状態 + 新規作成された grid ID」を記録して undo でそれらを削除・復元する
 
 ---
 
 ## デザイン
 
-- シンプル・ミニマル・白基調のクリーンデザイン
-- Tailwind CSS によるスタイリング
-- 背景色: プリセットカラーのみ（フルカラーピッカーなし）
-- ダークモード: 将来対応予定
+- シンプル・ミニマル・白基調のクリーンデザイン、ダークモードあり
+- Tailwind CSS v4 によるスタイリング
+- 背景色: プリセットカラーのみ (フルカラーピッカーなし)
 
 ---
 
 ## MVP対象外
 
-- 他ユーザーとのリアルタイム共同編集
-- AI サポート（サブテーマ提案）
-- クラウド同期（Supabase 連携）
-- モバイルアプリ（iOS / Android）
-- Webアプリ（ブラウザ版）
+- 他ユーザーとのリアルタイム共同編集 (単一ユーザーの複数デバイス同期は対応済み)
+- AI サポート (サブテーマ提案)
+- モバイルアプリ (iOS / Android)
+- Web アプリ (ブラウザ版)
+- macOS / Windows の正式コードサイニング (有料証明書が必要)
