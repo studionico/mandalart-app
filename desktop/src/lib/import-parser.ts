@@ -1,4 +1,5 @@
 import type { GridSnapshot } from '@/types'
+import { TAB_ORDER } from '@/constants/tabOrder'
 
 type ParsedNode = {
   text: string
@@ -62,43 +63,71 @@ function parseMarkdown(text: string): ParsedNode[] {
   return root
 }
 
-/** ParsedNode ツリーを GridSnapshot に変換 */
-function nodesToGridSnapshot(nodes: ParsedNode[]): GridSnapshot[] {
-  if (nodes.length === 0) return []
+// インポート時の周辺セル配置順は Tab 移動順 (TAB_ORDER) から中心 (4) を除いたもの。
+// 中心の次にフォーカスが当たるセルが最初に埋まるよう、ユーザーの編集動線と一致させる。
+// 結果: [7, 6, 3, 0, 1, 2, 5, 8]
+const PERIPHERAL_POSITIONS = TAB_ORDER.filter((p) => p !== 4)
 
-  const PERIPHERAL_POSITIONS = [0, 1, 2, 3, 5, 6, 7, 8] // 中心(4)を除く8つ
-
-  const results: GridSnapshot[] = []
-
-  // 8個ずつ分割して並列グリッドへ
-  for (let i = 0; i < nodes.length; i += 8) {
-    const chunk = nodes.slice(i, i + 8)
-    const cells = chunk.map((node, idx) => ({
-      position: PERIPHERAL_POSITIONS[idx],
-      text: node.text,
-      image_path: null as string | null,
-      color: null as string | null,
-    }))
-
-    const children: GridSnapshot[] = []
-    for (const [_idx, node] of chunk.entries()) {
-      if (node.children.length > 0) {
-        const subSnapshots = nodesToGridSnapshot(node.children)
-        // 各セルの子グリッドを再帰的に構築
-        children.push(...subSnapshots)
-      }
-    }
-
-    results.push({
-      grid: { sort_order: i / 8, memo: null },
-      cells,
-      children,
+/**
+ * ParsedNode をマンダラート 1 グリッドに変換する。
+ *  - node.text → 中心セル (position 4)
+ *  - node.children[0..7] → 周辺セル (position 0,1,2,3,5,6,7,8)
+ *  - 孫がいる周辺セルはその位置から subgrid を生やす (parentPosition=pos)
+ *  - 9 個目以降の子は並列グリッドとして返り値の children に追加
+ *    (parentPosition=undefined + sort_order 増分、呼び出し側で
+ *     このグリッドと同じ parent_cell_id に紐付けられる)
+ */
+function nodeToGrid(
+  node: ParsedNode,
+  sortOrder: number,
+  parentPosition: number | undefined,
+): GridSnapshot {
+  const firstEight = node.children.slice(0, 8)
+  const cells: GridSnapshot['cells'] = [
+    { position: 4, text: node.text, image_path: null, color: null },
+  ]
+  for (let i = 0; i < firstEight.length; i++) {
+    cells.push({
+      position: PERIPHERAL_POSITIONS[i],
+      text: firstEight[i].text,
+      image_path: null,
+      color: null,
     })
   }
 
-  return results
+  const children: GridSnapshot[] = []
+
+  // 周辺セルに孫がいる場合は subgrid を生やす
+  firstEight.forEach((child, idx) => {
+    if (child.children.length > 0) {
+      children.push(nodeToGrid(child, 0, PERIPHERAL_POSITIONS[idx]))
+    }
+  })
+
+  // 9 個目以降: 並列グリッドとして展開
+  // 擬似ノード (同じ text + オーバーフロー分の子) を再帰することで
+  // それぞれが中心＋最大 8 周辺セルのフル構造を持てるようにする
+  const overflow = node.children.slice(8)
+  let parallelSort = sortOrder + 1
+  for (let i = 0; i < overflow.length; i += 8) {
+    const chunk = overflow.slice(i, i + 8)
+    const pseudo: ParsedNode = { text: node.text, children: chunk }
+    children.push(nodeToGrid(pseudo, parallelSort++, undefined))
+  }
+
+  return {
+    grid: { sort_order: sortOrder, memo: null },
+    parentPosition,
+    cells,
+    children,
+  }
 }
 
+/**
+ * テキストを GridSnapshot に変換する。
+ * 先頭が `#` なら Markdown、そうでなければインデントテキストとして解釈。
+ * トップレベルのノードが複数ある場合は最初のノードだけがルートとして扱われる。
+ */
 export function parseTextToSnapshot(text: string): GridSnapshot {
   const trimmed = text.trim()
   let nodes: ParsedNode[]
@@ -113,13 +142,6 @@ export function parseTextToSnapshot(text: string): GridSnapshot {
     return { grid: { sort_order: 0, memo: null }, cells: [], children: [] }
   }
 
-  // 最初のノードをルートとして扱う
   const root = nodes[0]
-  const gridSnapshots = nodesToGridSnapshot(root.children)
-
-  return {
-    grid: { sort_order: 0, memo: null },
-    cells: [{ position: 4, text: root.text, image_path: null, color: null }],
-    children: gridSnapshots,
-  }
+  return nodeToGrid(root, 0, undefined)
 }

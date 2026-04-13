@@ -45,5 +45,17 @@ export type CellSnapshot = {
 export type GridSnapshot = {
   grid: Pick<Grid, 'sort_order' | 'memo'>
   cells: Pick<Cell, 'position' | 'text' | 'image_path' | 'color'>[]
+  /**
+   * 親グリッドのどのセル (position 0..8) から生えているか。
+   *  - undefined: ルート階層のグリッド、または parent grid と同階層の並列グリッド
+   *  - 0..8: 親グリッドの該当位置のセル配下にぶら下がる通常のサブグリッド
+   */
+  parentPosition?: number
+  /**
+   * このグリッドに紐付く他のグリッド (sub-grids + parallel grids)。
+   *  - parentPosition が 0..8 の子: 自分のセル N の下にぶら下がるサブグリッド
+   *  - parentPosition が undefined の子: 自分と並列な兄弟グリッド
+   *    (parent_cell_id を共有し、sort_order で順序付け)
+   */
   children: GridSnapshot[]
 }

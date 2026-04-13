@@ -1,6 +1,8 @@
-// Tab 移動順（position ベース、0-indexed）
-// ラベル表記: 5→8→7→4→1→2→3→6→9 （1-indexed）
-// position: 4→7→6→3→0→1→2→5→8 （0-indexed）
+// Tab 移動順 (0-indexed、DB の cells.position と一致)
+// 中心 4 から時計回りに外周を一周して 4 に戻る。
+//   4 → 7 → 6 → 3 → 0 → 1 → 2 → 5 → 8 → 4
+// 中央セル (4) が空のときは peripherals が disabled なので Tab は留まる。
+// インポート時の周辺セル配置順もこの列から中心を抜いたものを使用する。
 export const TAB_ORDER: number[] = [4, 7, 6, 3, 0, 1, 2, 5, 8]
 
 // Shift+Tab の逆順

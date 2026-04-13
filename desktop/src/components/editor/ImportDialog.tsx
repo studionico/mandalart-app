@@ -127,7 +127,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
               type="file"
               accept=".json,.md,.txt,text/plain,application/json,text/markdown"
               onChange={handleFile}
-              className="block w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 file:cursor-pointer"
+              className="block w-full text-xs text-gray-700 dark:text-gray-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 dark:file:bg-gray-800 file:text-gray-700 dark:file:text-gray-200 hover:file:bg-gray-200 dark:hover:file:bg-gray-700 file:cursor-pointer"
             />
           </label>
           <Button variant="secondary" size="sm" onClick={handlePasteClipboard}>
@@ -137,7 +137,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
 
         {/* テキスト入力エリア */}
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
             または直接貼り付け（JSON / Markdown 見出し / インデントテキスト）
           </label>
           <textarea
@@ -145,7 +145,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
             onChange={(e) => setRawText(e.target.value)}
             rows={8}
             placeholder={EXAMPLE_PLACEHOLDER}
-            className="w-full text-sm font-mono border border-gray-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            className="w-full text-sm font-mono border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
           />
           <div className="flex justify-end mt-2">
             <Button size="sm" variant="secondary" onClick={handlePreview} disabled={!rawText.trim()}>
@@ -156,11 +156,11 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
 
         {/* プレビュー */}
         {parsed && (
-          <div className="border-t border-gray-100 pt-4">
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
             {parsed.ok ? (
               <>
-                <p className="text-xs text-gray-500 mb-2">プレビュー（インポートされる構造）</p>
-                <div className="bg-gray-50 rounded-lg p-3 max-h-64 overflow-y-auto">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">プレビュー（インポートされる構造）</p>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 max-h-64 overflow-y-auto">
                   <SnapshotPreview snapshot={parsed.snapshot} />
                 </div>
               </>
@@ -171,7 +171,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
         )}
 
         {/* 実行ボタン */}
-        <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+        <div className="flex justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
           <Button variant="ghost" onClick={handleClose}>キャンセル</Button>
           <Button
             onClick={handleExecute}
@@ -187,21 +187,56 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
 
 function SnapshotPreview({ snapshot, depth = 0 }: { snapshot: GridSnapshot; depth?: number }) {
   const center = snapshot.cells.find((c) => c.position === 4)
-  const peripherals = snapshot.cells.filter((c) => c.position !== 4 && c.text.trim())
+  // 周辺セルを position 順に並べて表示 (中心は除く)
+  const peripherals = [0, 1, 2, 3, 5, 6, 7, 8]
+    .map((pos) => snapshot.cells.find((c) => c.position === pos))
+    .filter((c): c is NonNullable<typeof c> => !!c && c.text.trim() !== '')
+
+  // 子を attach 先ごとに分類
+  const subgridsByPos = new Map<number, GridSnapshot[]>()
+  const parallelSiblings: GridSnapshot[] = []
+  for (const child of snapshot.children) {
+    if (child.parentPosition === undefined) {
+      parallelSiblings.push(child)
+    } else {
+      const arr = subgridsByPos.get(child.parentPosition) ?? []
+      arr.push(child)
+      subgridsByPos.set(child.parentPosition, arr)
+    }
+  }
+
+  const marker = depth === 0
+    ? '◆'
+    : snapshot.parentPosition === undefined
+      ? '≈'  // parallel grid
+      : '▸'  // subgrid
+
   return (
     <div className="text-xs" style={{ paddingLeft: depth * 12 }}>
-      <div className="font-medium text-gray-700">
-        {depth === 0 ? '◆' : '▸'} {center?.text || '(空)'}
+      <div className="font-medium text-gray-700 dark:text-gray-200">
+        {marker} {center?.text || '(空)'}
       </div>
       {peripherals.length > 0 && (
-        <ul className="ml-4 mt-0.5 text-gray-500">
-          {peripherals.map((c) => (
-            <li key={c.position} className="truncate">• {c.text}</li>
-          ))}
+        <ul className="ml-4 mt-0.5 text-gray-500 dark:text-gray-400 space-y-0.5">
+          {peripherals.map((c) => {
+            const subs = subgridsByPos.get(c.position) ?? []
+            return (
+              <li key={c.position}>
+                <div className="truncate">• {c.text}</div>
+                {subs.length > 0 && (
+                  <div className="ml-3 mt-0.5">
+                    {subs.map((sub, i) => (
+                      <SnapshotPreview key={i} snapshot={sub} depth={depth + 1} />
+                    ))}
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
-      {snapshot.children.map((child, i) => (
-        <SnapshotPreview key={i} snapshot={child} depth={depth + 1} />
+      {parallelSiblings.map((sib, i) => (
+        <SnapshotPreview key={`para-${i}`} snapshot={sib} depth={depth} />
       ))}
     </div>
   )

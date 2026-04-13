@@ -140,10 +140,22 @@ In 9×9 view, the flattened cell list (root + sub-grid cells) is passed to `useD
 - When root grid empties → auto-delete the entire mandalart
 - When navigating home from an empty mandalart → skip the title dialog and delete silently
 
-**Tab navigation** (inside cell-edit modal, desktop only)
-- Order (1-indexed labels): 5 → 8 → 7 → 4 → 1 → 2 → 3 → 6 → 9 → 5 (clockwise from center)
-- When center cell is empty, Tab stays on cell 5
+**Cell numbering (0-indexed, matches DB `cells.position`)**
+
+```
+0 | 1 | 2
+--+---+--
+3 | 4 | 5    ← 4 = center
+--+---+--
+6 | 7 | 8
+```
+
+**Tab navigation** (inside cells, both inline edit and modal)
+- Order: 4 → 7 → 6 → 3 → 0 → 1 → 2 → 5 → 8 → 4 (clockwise from center, ends at position 4 again)
+- Shift+Tab is the reverse order
+- When center cell (4) is empty, Tab is a no-op (stays on 4); peripherals are disabled until center has content
 - IME composition (`e.nativeEvent.isComposing`) suppresses Tab navigation
+- Import also places children into peripherals using this same order so the newly imported mandalart's Tab-walk lands on the items the user typed first
 
 ### Tauri-specific Gotchas
 
