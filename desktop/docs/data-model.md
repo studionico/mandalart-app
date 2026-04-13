@@ -34,8 +34,12 @@ CREATE TABLE IF NOT EXISTS mandalarts (
 CREATE TABLE IF NOT EXISTS grids (
   id             TEXT PRIMARY KEY,
   mandalart_id   TEXT NOT NULL REFERENCES mandalarts(id) ON DELETE CASCADE,
-  parent_cell_id TEXT REFERENCES cells(id) ON DELETE CASCADE,
-  -- NULL = ルートグリッド（並列含む）
+  -- NOTE: parent_cell_id には FK 制約を付けない (あえて REFERENCES を書かない)。
+  -- grids.parent_cell_id → cells, cells.grid_id → grids の組み合わせは
+  -- 循環 FK となり、"too many levels of trigger recursion" (ローカル削除時)
+  -- および push 順序の 23503 violation (クラウド同期時) を引き起こす。
+  -- 親セル削除時の子グリッド整理は API 層で明示的に行う。
+  parent_cell_id TEXT,  -- NULL = ルートグリッド（並列含む）
   sort_order     INTEGER NOT NULL DEFAULT 0,  -- 並列順序（← → ナビゲーション順）
   memo           TEXT,                         -- Markdown メモ
   created_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -47,6 +51,8 @@ CREATE TABLE IF NOT EXISTS grids (
 CREATE INDEX IF NOT EXISTS idx_grids_mandalart   ON grids(mandalart_id);
 CREATE INDEX IF NOT EXISTS idx_grids_parent_cell ON grids(parent_cell_id, sort_order);
 ```
+
+> クラウド側 (`_old_web/supabase/migrations/002_create_grids.sql`) では元々 `parent_cell_id uuid REFERENCES cells(id) ON DELETE CASCADE` と書かれているため、Supabase プロジェクトに同じ修正を適用する必要がある。手順は [`cloud-sync-setup.md`](./cloud-sync-setup.md) の「既知のスキーマ修正」節参照。
 
 ---
 

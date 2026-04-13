@@ -273,6 +273,7 @@
 - [x] `src/lib/realtime.ts` の本実装（postgres_changes 全テーブル購読、ローカル DB に反映）
 - [x] UI 統合: ダッシュボードヘッダーにサインイン / サインアウト / 同期ステータスインジケータ
 - 既知の制限（MVP スコープ外）: 削除の同期（ローカル削除はクラウドに伝播しない）、user_id バインディングは単一ユーザー前提
+- セットアップ手順とトラブルシューティングは [`docs/cloud-sync-setup.md`](./cloud-sync-setup.md) 参照
 
 ---
 
