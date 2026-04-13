@@ -95,20 +95,38 @@ export default function Cell({
     document.addEventListener('mouseup',   onUp)
   }
 
+  // セルが空かどうか (text も image も無い)
+  const isEmpty = !cell.text.trim() && !cell.image_path
+
   function handleClick() {
     if (isDisabled || didDrag.current) return
     if (isInlineEditing) return // 編集中は click ハンドラを発火させない（textarea 側に任せる）
 
+    if (isEmpty) {
+      // 空セル: シングルクリックで即編集開始。ダブルクリックは無視
+      // (2 回目のクリックは「既に編集中」扱いで textarea にフォーカスが残る)
+      if (clickTimer.current) {
+        clearTimeout(clickTimer.current)
+        clickTimer.current = null
+        return
+      }
+      onStartInlineEdit(cell)
+      // ダブルクリック検知ウィンドウ中の追加クリックを飲み込むだけのタイマー
+      clickTimer.current = setTimeout(() => { clickTimer.current = null }, CLICK_DELAY)
+      return
+    }
+
+    // 入力ありセル: シングル = ドリル / ダブル = 編集
     if (clickTimer.current) {
       clearTimeout(clickTimer.current)
       clickTimer.current = null
-      // 2 回目のクリック = ダブルクリック → ドリル
-      onDrill(cell)
+      // 2 回目のクリック = ダブルクリック → インライン編集
+      onStartInlineEdit(cell)
     } else {
       clickTimer.current = setTimeout(() => {
         clickTimer.current = null
-        // 単一クリック確定 → インライン編集モードへ
-        onStartInlineEdit(cell)
+        // 単一クリック確定 → ドリル
+        onDrill(cell)
       }, CLICK_DELAY)
     }
   }

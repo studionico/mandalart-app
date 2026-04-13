@@ -105,11 +105,11 @@ There is no auth guard — the app is fully usable offline without login.
 ### Business Rules
 
 **Cell interactions**
-- Single-click: drill into child grid (falls back to edit if no child grid exists and cell is empty)
-- Double-click: open edit modal/bottom sheet
-- Root center cell (position 4, no parent) with content → navigate home
-- Sub-grid center cell → navigate back to parent grid
-- Peripheral cells are disabled when center is empty
+- Empty cell: single-click starts inline edit immediately (double-click is a no-op)
+- Filled cell: single-click drills (root center → home, sub-grid center → parent, peripheral → child grid), double-click starts inline edit
+- `⋯` hover button on any cell opens the full CellEditModal (colors, image, long text)
+- Peripheral cells are disabled while the center cell is empty
+- The click threshold uses a 220ms timer to distinguish single vs double, so drill has a ~220ms latency on filled cells (the latency vanishes for empty cells)
 
 **D&D rules (5 cases, same-grid and 9×9 cross-subgrid)**
 
