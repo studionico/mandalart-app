@@ -19,7 +19,7 @@ import ImportDialog from './ImportDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
-import { getRootGrids, getChildGrids, createGrid } from '@/lib/api/grids'
+import { getRootGrids, getChildGrids, getGrid, createGrid } from '@/lib/api/grids'
 import { updateCell, pasteCell } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
@@ -298,6 +298,35 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   async function handleCellDrill(cell: Cell) {
     // インライン編集中なら抜けてから処理
     setInlineEditingCellId(null)
+
+    // 9×9 表示で周辺サブグリッドのセルをクリックした場合
+    // (= cell.grid_id が現在表示中のグリッドと異なる)
+    // そのサブグリッド自体にフォーカスを移す (currentGrid をサブグリッドに切替 + breadcrumb を進める)。
+    // view mode は 9×9 のまま維持されるので、そのサブグリッドが中央ブロックに表示され、
+    // その子グリッドが周辺ブロックに配置される。
+    if (gridData && cell.grid_id !== gridData.id) {
+      const subGrid = await getGrid(cell.grid_id)
+      if (!subGrid) return
+      const parentCellId = subGrid.parent_cell_id
+      if (!parentCellId) return
+      const parentCell = gridData.cells.find((c) => c.id === parentCellId)
+      if (!parentCell) return
+
+      const siblings = await getChildGrids(parentCellId)
+      const siblingIdx = siblings.findIndex((g) => g.id === subGrid.id)
+
+      setCurrentGrid(subGrid.id)
+      setParallelGrids(siblings.length > 0 ? siblings : [subGrid])
+      setParallelIndex(Math.max(0, siblingIdx))
+      pushBreadcrumb({
+        gridId: subGrid.id,
+        cellId: parentCell.id,
+        label: parentCell.text,
+        cells: gridData.cells,
+        highlightPosition: parentCell.position,
+      })
+      return
+    }
 
     // 中央セル（position 4）の特別処理
     if (cell.position === 4) {
