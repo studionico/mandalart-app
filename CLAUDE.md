@@ -195,7 +195,22 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 - `editorStore.fontLevel` (-10 〜 +20 の整数)、実効倍率は `1.1^level` の乗算式
 - エディタのヘッダで `A− / 現在の % / A＋` ボタンで 1 段ずつ調整
 - 設定は localStorage (`mandalart.fontLevel`) に永続化
-- 3×3 のベース 28px、9×9 small のベース 18px。`Cell` が `fontScale` プロップで適用
+- 3×3 のベース 28px、9×9 small のベース `28 / 3 ≒ 9.33px` (3×3 と同じテキストが同じ行数で読めるよう 1/3 に縮小)。`Cell` が `fontScale` プロップで適用
+
+### フォントウェイト
+
+- デフォルトは [`index.css`](desktop/src/index.css) で `html { font-weight: 300 }` (Light) に固定
+- 明示的な Tailwind クラス (`font-medium` / `font-semibold` / `font-bold`) を指定した箇所だけ太字化
+- 中心セルは周辺セルと同じ 300。強調しないデザイン方針
+- 詳細は [`typography.md`](desktop/docs/typography.md)
+
+### セルのビジュアル
+
+- **3×3 表示**: 中心 = `border-[6px] border-black`、周辺 (子グリッドあり) = `border-2 border-black`、周辺 (子なし) = `border border-gray-300`
+- **9×9 表示**: サブグリッドラッパーが `gap-px bg-gray-300` で「セル同士が共有する 1 本の境界線」を描画 (cells 側は border を持たない)。サブグリッドラッパー側の外枠は中央 = `border-[6px] black`、既存 = `border-2 black`、空 = `border-2 gray-300`
+- **9×9 中心セル**: `border-2 border-black -m-px z-10` で gap-px を跨いで黒枠を描画
+- **テキスト配置**: 左寄せ・上詰め。セル外縁からテキストまでの「見える余白」は 3×3 で 18px、9×9 で 6px に固定。border 幅が異なる (1〜6px) のに対応するため [`Cell.tsx`](desktop/src/components/editor/Cell.tsx) が `absolute` の inset をインラインスタイルで動的補正する (`textInsetPx = targetPadPx - borderPx`)
+- **外周グリッドの背景**: `GridView3x3` は透明 (外側の灰色ラッパーを撤去済み)、`GridView9x9` の各サブグリッドは `bg-gray-300 dark:bg-gray-600` (gap-px を縫う用)
 
 ### ダークモード
 
@@ -258,6 +273,7 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 | [`data-model.md`](desktop/docs/data-model.md) | ローカル SQLite スキーマ・マイグレーション履歴・同期対応の列 |
 | [`api-spec.md`](desktop/docs/api-spec.md) | `lib/api/` / `lib/sync/` / `lib/realtime.ts` の関数シグネチャ |
 | [`folder-structure.md`](desktop/docs/folder-structure.md) | ディレクトリツリーと設計上の分離方針 |
+| [`typography.md`](desktop/docs/typography.md) | フォント (OS システムフォント使用)・ウェイト・文字サイズ・変更方法 |
 | [`tasks.md`](desktop/docs/tasks.md) | フェーズ別のタスクチェックリスト (進捗の単一情報源) |
 | [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | Supabase プロジェクトの手動セットアップとトラブルシューティング |
 | [`updater-setup.md`](desktop/docs/updater-setup.md) | 自動アップデート用の署名鍵・GitHub Secrets・リリースフロー |

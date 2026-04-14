@@ -164,24 +164,52 @@ export default function Cell({
     }
   }
 
-  const sizeClasses = size === 'small' ? 'p-0.5' : 'p-1.5'
-  const baseFontPx = size === 'small' ? 18 : 28
+  // 表示テキストを内側の絶対配置 div でラップし、その内側だけを overflow-hidden する。
+  // こうすることでセル外周には常に一定の余白が残り、長文が溢れても上下左右の
+  // 見えている余白が均等になる。
+  //
+  // 注意: `position: absolute` は親の padding-box (= border の内側) を基準に配置される
+  // ため、border の太さが違うセル同士で inset を固定値にすると「セル外縁からテキストまで
+  // の見た目の余白」が border 幅の分だけズレてしまう。それを避けるため、border 幅で補正
+  // して「セル外縁からテキストまでの距離」を全セルで共通値にする。
+  //
+  // 目標余白 (セル外縁からテキストまで): 3×3 (normal) = 12px, 9×9 (small) = 4px
+  // ダッシュボードのカード (border 2px + p-3 = 14px) と同程度のゆとりを目指す
+  const borderPx = size === 'small'
+    ? (isCenter ? 2 : 0)
+    : isCenter
+      ? 6
+      : childCount > 0
+        ? 2
+        : 1
+  const targetPadPx = size === 'small' ? 6 : 18
+  const textInsetPx = Math.max(0, targetPadPx - borderPx)
+  const textInsetStyle: React.CSSProperties = { inset: `${textInsetPx}px` }
+
+  // 9×9 表示のセルは 3×3 表示の約 1/3 の幅しかないので、
+  // 同じテキストが同じ行数で読めるようフォントも 1/3 に縮小する
+  const baseFontPx = size === 'small' ? 28 / 3 : 28
   const fontStyle: React.CSSProperties = { fontSize: `${baseFontPx * fontScale}px`, lineHeight: 1.25 }
 
   return (
     <div
       data-cell-id={cell.id}
-      // align-items: safe center → 内容がセル内に収まるときは中央、はみ出すときは
-      // 上揃えにフォールバック。これによりテキストの先頭は常にセル内に表示される。
-      style={{ alignItems: 'safe center' }}
       className={`
-        relative flex justify-center rounded-lg border select-none overflow-hidden
+        relative select-none overflow-hidden
         min-h-0 min-w-0
         transition-shadow transition-colors
-        ${sizeClasses}
         ${bg}
-        ${isCenter ? 'border-blue-400 dark:border-blue-500 border-2 font-semibold shadow-md' : 'border-gray-300 dark:border-gray-700 shadow-sm'}
-        ${isDisabled ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:shadow-md hover:border-gray-400 dark:hover:border-gray-500'}
+        ${isCenter
+          ? size === 'small'
+            ? 'rounded-md border-2 border-black dark:border-white -m-px z-10'
+            : 'rounded-lg border-[6px] border-black dark:border-white shadow-md'
+          : size === 'small'
+            ? ''
+            : childCount > 0
+              ? 'rounded-lg border-2 border-black dark:border-white shadow-sm'
+              : 'rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm'
+        }
+        ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut || isDragSource ? 'opacity-40' : ''}
         ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         ${isInlineEditing ? 'ring-2 ring-blue-500' : ''}
@@ -206,17 +234,19 @@ export default function Cell({
           onKeyDown={handleTextareaKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          style={fontStyle}
-          className={`absolute inset-1 z-10 w-auto h-auto text-center leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`}
+          style={{ ...fontStyle, ...textInsetStyle }}
+          className={`absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`}
           placeholder=""
         />
       ) : (
-        <span
-          style={fontStyle}
-          className={`relative z-10 text-center leading-tight break-all line-clamp-3 ${textColor}`}
-        >
-          {cell.text}
-        </span>
+        <div style={textInsetStyle} className="absolute z-10 flex items-start overflow-hidden">
+          <span
+            style={fontStyle}
+            className={`block w-full text-left leading-tight break-all whitespace-pre-wrap ${textColor}`}
+          >
+            {cell.text}
+          </span>
+        </div>
       )}
 
       {/* 詳細モーダルを開くボタン (hover 時のみ表示) */}
@@ -232,9 +262,6 @@ export default function Cell({
         </button>
       )}
 
-      {childCount > 0 && (
-        <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 bg-blue-400 rounded-full" />
-      )}
     </div>
   )
 }

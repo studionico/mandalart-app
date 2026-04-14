@@ -2,3 +2,8 @@
 
 /* Tailwind v4: クラスベースのダークモードを有効化 (<html class="dark">) */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* デフォルトフォントウェイトを 300 (Light) に */
+html {
+  font-weight: 300;
+}

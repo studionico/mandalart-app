@@ -205,10 +205,9 @@ export default function DashboardPage() {
                 title={m.title || '無題'}
               >
                 <div
-                  className="w-full h-full flex items-center justify-center p-3 text-center break-all text-[14px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
-                  style={{ alignItems: 'safe center' }}
+                  className="w-full h-full flex items-start justify-start p-3 text-left break-all text-[14px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
                 >
-                  <span className="line-clamp-6 whitespace-pre-wrap">
+                  <span className="block w-full line-clamp-6 whitespace-pre-wrap">
                     {m.title || '無題'}
                   </span>
                 </div>

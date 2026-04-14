@@ -259,6 +259,37 @@ Shift+Tab は逆順
 - Tailwind CSS v4 によるスタイリング
 - 背景色: プリセットカラーのみ (フルカラーピッカーなし)
 
+### フォント
+
+- システムフォント (macOS: SF Pro + ヒラギノ角ゴ) をそのまま使用、独自フォントはバンドルしない
+- デフォルトウェイトは `index.css` で **300 (Light)** に固定
+- 中心セルは太字化せず周辺セルと同じウェイト。強調は外枠の太さで表現する
+- 詳細は [`typography.md`](./typography.md)
+
+### セルのビジュアル
+
+- **3×3 表示**
+  - 中心セル: `border-[6px] border-black` (黒 6px)
+  - 周辺セル (子グリッドあり): `border-2 border-black` (黒 2px)
+  - 周辺セル (子グリッドなし): `border border-gray-300` (極細グレー)
+  - セル間の余白 (gap) なし。セル同士は隣接して並ぶ
+  - 中心セルが空でも周辺セルの見た目は変化しない (以前のグレーアウト挙動は廃止)
+- **9×9 表示**
+  - 各サブグリッドは `gap-px bg-gray-300` を持つラッパー + 内側セルの `bg-white` で「セル同士が共有する 1 本の極細グレーの境界線」を描画
+  - サブグリッドラッパーの外枠: 中央 = `border-[6px] black`、既存の非中央 = `border-2 black`、空 (子グリッドなし) = `border-2 gray-300`
+  - サブグリッド内の中心セルだけ `border-2 border-black -m-px z-10` で gap-px を跨ぐ黒枠を描画、周辺セルは枠なし (フラット)
+  - 中央ブロックはルートグリッド自体の 9 セルを表示する
+- **テキスト配置**
+  - 左寄せ・上詰め (`items-start justify-start` + `text-left`)
+  - セル外縁からテキストまでの「見える余白」は 3×3 で **18px**、9×9 で **6px** に統一
+  - セルごとに border 幅が違う (1〜6px) ので、[`Cell.tsx`](../src/components/editor/Cell.tsx) は `textInsetPx = targetPadPx - borderPx` を計算して `absolute` の inset をインラインスタイルで動的補正する
+  - 長文は上から流れて下方向にオーバーフローする。セル全体の `overflow-hidden` でクリップ
+  - 左右の視覚バランスは短文で崩れる可能性があるが、CJK 長文は `break-all` で各行が幅いっぱいまで埋まるので実用上問題ない
+- **ダッシュボードカード**
+  - 130×130 の正方形タイル + `border-2 border-blue-400`
+  - 内側 `p-3` (12px) + 左寄せ・上詰め (`items-start` + `text-left`)
+  - テキストは `line-clamp-6` で 6 行まで、超過分は `…`
+
 ---
 
 ## MVP対象外
