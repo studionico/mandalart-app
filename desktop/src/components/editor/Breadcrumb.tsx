@@ -1,8 +1,40 @@
 
+import { useEffect, useState } from 'react'
 import { useEditorStore, BreadcrumbItem } from '@/store/editorStore'
+import { getCellImageUrl } from '@/lib/api/storage'
 
 type Props = {
   onHome: () => void
+}
+
+/**
+ * パンくず項目のラベル描画。
+ * - label に 1 行目のテキストがあればそれを表示 (改行以降は省略)
+ * - テキストが空で画像があれば小さなサムネイルを表示
+ * - どちらもなければ「（未入力）」
+ */
+function BreadcrumbLabel({ item }: { item: BreadcrumbItem }) {
+  const firstLine = item.label.split('\n')[0]
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (firstLine || !item.imagePath) {
+      setImageUrl(null)
+      return
+    }
+    getCellImageUrl(item.imagePath).then((url) => {
+      if (!cancelled) setImageUrl(url || null)
+    })
+    return () => { cancelled = true }
+  }, [firstLine, item.imagePath])
+
+  if (!firstLine && imageUrl) {
+    return <img src={imageUrl} alt="" className="w-6 h-6 object-cover rounded align-middle" />
+  }
+  return (
+    <span className="max-w-[160px] truncate inline-block align-middle">{firstLine || '（未入力）'}</span>
+  )
 }
 
 export default function Breadcrumb({ onHome }: Props) {
@@ -36,7 +68,7 @@ export default function Breadcrumb({ onHome }: Props) {
                 : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
           >
-            <span className="max-w-[160px] truncate inline-block align-middle">{item.label.split('\n')[0] || '（未入力）'}</span>
+            <BreadcrumbLabel item={item} />
           </button>
         </div>
       ))}

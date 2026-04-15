@@ -425,6 +425,10 @@ export default function Cell({
           className={`absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`}
           placeholder=""
         />
+      ) : imageUrl ? (
+        // 画像があるセルは画像のみを表示 (テキストは非表示)。
+        // 画像レイヤーは上で <div className="absolute inset-0"> として既に描画済み。
+        null
       ) : (
         <div style={textInsetStyle} className="absolute z-10 flex items-start overflow-hidden">
           <span

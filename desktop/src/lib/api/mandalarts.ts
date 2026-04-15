@@ -1,9 +1,25 @@
 import { query, execute, generateId, now } from '../db'
 import type { Mandalart, Cell } from '../../types'
 
+// ルート中心セル (position=4) の image_path を相関サブクエリで取得する共通式。
+// mandalarts テーブル自体には image_path を保存していないので、都度 JOIN して引き出す。
+const ROOT_IMAGE_PATH_SUBQUERY = `(
+  SELECT c.image_path FROM cells c
+  WHERE c.grid_id = (
+    SELECT g.id FROM grids g
+    WHERE g.mandalart_id = m.id AND g.parent_cell_id IS NULL AND g.sort_order = 0 AND g.deleted_at IS NULL
+    LIMIT 1
+  )
+  AND c.position = 4 AND c.deleted_at IS NULL
+  LIMIT 1
+)`
+
 export async function getMandalarts(): Promise<Mandalart[]> {
   return query<Mandalart>(
-    'SELECT * FROM mandalarts WHERE deleted_at IS NULL ORDER BY updated_at DESC'
+    `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
+     FROM mandalarts m
+     WHERE m.deleted_at IS NULL
+     ORDER BY m.updated_at DESC`
   )
 }
 
@@ -113,7 +129,8 @@ export async function searchMandalarts(q: string): Promise<Mandalart[]> {
     .replace(/_/g, '\\_')
   const like = `%${escaped}%`
   return query<Mandalart>(
-    `SELECT DISTINCT m.* FROM mandalarts m
+    `SELECT DISTINCT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
+     FROM mandalarts m
      LEFT JOIN grids g ON g.mandalart_id = m.id AND g.deleted_at IS NULL
      LEFT JOIN cells c ON c.grid_id = g.id AND c.deleted_at IS NULL
      WHERE m.deleted_at IS NULL

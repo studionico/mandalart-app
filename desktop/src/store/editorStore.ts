@@ -7,6 +7,7 @@ export type BreadcrumbItem = {
   gridId: string
   cellId: string | null   // null = root
   label: string
+  imagePath?: string | null  // テキストが空のときに画像サムネイル表示するためのフォールバック
   cells: Cell[]           // そのグリッドの9セル（ミニプレビュー用）
   highlightPosition: number | null  // 次の階層に進んだセルの position
 }
@@ -57,6 +58,8 @@ type EditorState = {
   pushBreadcrumb: (item: BreadcrumbItem) => void
   popBreadcrumbTo: (gridId: string) => void
   resetBreadcrumb: (root: BreadcrumbItem) => void
+  // gridId に一致する breadcrumb エントリの一部フィールドを更新する (label / imagePath など)
+  updateBreadcrumbItem: (gridId: string, updates: Partial<BreadcrumbItem>) => void
 
   bumpFontLevel: (delta: number) => void
   resetFontLevel: () => void
@@ -88,6 +91,15 @@ export const useEditorStore = create<EditorState>((set) => {
 
     resetBreadcrumb: (root) =>
       set({ breadcrumb: [root], currentGridId: root.gridId }),
+
+    updateBreadcrumbItem: (gridId, updates) =>
+      set((s) => {
+        const idx = s.breadcrumb.findIndex((b) => b.gridId === gridId)
+        if (idx < 0) return s
+        const next = s.breadcrumb.slice()
+        next[idx] = { ...next[idx], ...updates }
+        return { breadcrumb: next }
+      }),
 
     bumpFontLevel: (delta) =>
       set((s) => {

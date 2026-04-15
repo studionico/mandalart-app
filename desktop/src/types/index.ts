@@ -2,6 +2,9 @@ export type Mandalart = {
   id: string
   user_id: string
   title: string
+  // ルート中心セル (position=4) の image_path を join で取得したもの。
+  // mandalarts テーブル自体には保存していないので、SELECT の仕方に応じて無い場合もある。
+  image_path?: string | null
   created_at: string
   updated_at: string
   deleted_at?: string | null

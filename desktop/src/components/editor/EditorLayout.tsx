@@ -39,7 +39,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const {
     currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
     setMandalartId, setCurrentGrid, setViewMode,
-    pushBreadcrumb, popBreadcrumbTo, resetBreadcrumb,
+    pushBreadcrumb, popBreadcrumbTo, resetBreadcrumb, updateBreadcrumbItem,
     bumpFontLevel, resetFontLevel,
   } = useEditorStore()
 
@@ -120,6 +120,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           gridId: root.id,
           cellId: null,
           label: cells.find((c: Cell) => c.position === 4)?.text ?? '',
+          imagePath: cells.find((c: Cell) => c.position === 4)?.image_path ?? null,
           cells: cells,
           highlightPosition: null,
         })
@@ -144,6 +145,24 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
     loadChildCounts()
   }, [gridData])
+
+  // 現在表示中のグリッドの中心セル (position=4) が編集されたら、
+  // パンくずリストの末尾エントリ (= 現在地) のラベル / 画像を即座に同期する。
+  // ルート・サブグリッド・並列グリッドいずれでも「現在地 = 末尾」の原則で扱うので、
+  // 並列切替時には handleParallelNav / handleAddParallel が末尾エントリの gridId も
+  // 切替先と一致するよう更新している。
+  useEffect(() => {
+    if (!gridData || breadcrumb.length === 0) return
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (gridData.id !== last.gridId) return
+    const centerCell = gridData.cells.find((c) => c.position === 4)
+    if (!centerCell) return
+    const nextLabel = centerCell.text
+    const nextImagePath = centerCell.image_path
+    if (last.label !== nextLabel || (last.imagePath ?? null) !== (nextImagePath ?? null)) {
+      updateBreadcrumbItem(last.gridId, { label: nextLabel, imagePath: nextImagePath })
+    }
+  }, [gridData, breadcrumb, updateBreadcrumbItem])
 
   // Realtime: 別デバイスでの変更が来たらローカルを再読み込み
   useRealtime(useCallback(() => {
@@ -317,6 +336,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         gridId: subGrid.id,
         cellId: parentCell.id,
         label: parentCell.text,
+        imagePath: parentCell.image_path,
         cells: gridData.cells,
         highlightPosition: parentCell.position,
       })
@@ -360,6 +380,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         gridId: firstChild.id,
         cellId: cell.id,
         label: cell.text,
+        imagePath: cell.image_path,
         cells: currentCells,
         highlightPosition: cell.position,
       })
@@ -385,6 +406,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         gridId: newGrid.id,
         cellId: cell.id,
         label: cell.text,
+        imagePath: cell.image_path,
         cells: currentCells,
         highlightPosition: cell.position,
       })
@@ -466,13 +488,25 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   async function handleParallelNav(dir: 'prev' | 'next') {
     const nextIdx = dir === 'prev' ? parallelIndex - 1 : parallelIndex + 1
     if (nextIdx < 0 || nextIdx >= parallelGrids.length) return
+    const nextGridId = parallelGrids[nextIdx].id
+    // 並列切替に追従して breadcrumb 末尾エントリの gridId も更新し、
+    // 新しい currentGrid に対してラベル同期の useEffect が走るようにする
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (last) {
+      updateBreadcrumbItem(last.gridId, { gridId: nextGridId })
+    }
     setParallelIndex(nextIdx)
-    setCurrentGrid(parallelGrids[nextIdx].id)
+    setCurrentGrid(nextGridId)
   }
 
   async function handleAddParallel() {
     const parentCellId = breadcrumb[breadcrumb.length - 1]?.cellId ?? null
     const newGrid = await createGrid({ mandalartId, parentCellId, sortOrder: parallelGrids.length })
+    // 並列追加直後はその新しいグリッドが currentGrid になるので、breadcrumb 末尾も追従させる
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (last) {
+      updateBreadcrumbItem(last.gridId, { gridId: newGrid.id })
+    }
     setParallelGrids((prev) => [...prev, newGrid])
     setParallelIndex(parallelGrids.length)
     setCurrentGrid(newGrid.id)

@@ -198,45 +198,84 @@ export default function DashboardPage() {
         ) : (
           <div className="grid gap-3 grid-cols-[repeat(auto-fill,130px)]">
             {visible.map((m) => (
-              <div
+              <MandalartCard
                 key={m.id}
-                className="relative w-[130px] h-[130px] bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
-                onClick={() => navigate(`/mandalart/${m.id}`)}
-                title={m.title || '無題'}
-              >
-                <div
-                  className="w-full h-full flex items-start justify-start p-3 text-left break-all text-[14px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
-                >
-                  <span className="block w-full line-clamp-6 whitespace-pre-wrap">
-                    {m.title || '無題'}
-                  </span>
-                </div>
-                {/* 更新日: hover 時のみ下部にうっすら表示 */}
-                <div className="absolute bottom-1 left-2 right-2 text-[9px] text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
-                  {new Date(m.updated_at).toLocaleDateString('ja-JP')}
-                </div>
-                {/* アクション: hover 時に右上 */}
-                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDuplicate(m) }}
-                    className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center justify-center"
-                    title="複製"
-                  >
-                    ⧉
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDelete(m.id) }}
-                    className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
-                    title="削除"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
+                mandalart={m}
+                onOpen={() => navigate(`/mandalart/${m.id}`)}
+                onDuplicate={() => handleDuplicate(m)}
+                onDelete={() => handleDelete(m.id)}
+              />
             ))}
           </div>
         )}
       </main>
+    </div>
+  )
+}
+
+function MandalartCard({
+  mandalart: m, onOpen, onDuplicate, onDelete,
+}: {
+  mandalart: Mandalart
+  onOpen: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+}) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const titleFirstLine = (m.title || '').split('\n')[0]
+
+  useEffect(() => {
+    let cancelled = false
+    if (titleFirstLine || !m.image_path) {
+      setImageUrl(null)
+      return
+    }
+    import('@/lib/api/storage').then(({ getCellImageUrl }) =>
+      getCellImageUrl(m.image_path!).then((url) => {
+        if (!cancelled) setImageUrl(url || null)
+      })
+    )
+    return () => { cancelled = true }
+  }, [titleFirstLine, m.image_path])
+
+  return (
+    <div
+      className="relative w-[130px] h-[130px] bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+      onClick={onOpen}
+      title={m.title || '無題'}
+    >
+      {!titleFirstLine && imageUrl ? (
+        <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+      ) : (
+        <div
+          className="w-full h-full flex items-start justify-start p-3 text-left break-all text-[14px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
+        >
+          <span className="block w-full line-clamp-6 whitespace-pre-wrap">
+            {m.title || '無題'}
+          </span>
+        </div>
+      )}
+      {/* 更新日: hover 時のみ下部にうっすら表示 */}
+      <div className="absolute bottom-1 left-2 right-2 text-[9px] text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
+        {new Date(m.updated_at).toLocaleDateString('ja-JP')}
+      </div>
+      {/* アクション: hover 時に右上 */}
+      <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => { e.stopPropagation(); onDuplicate() }}
+          className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center justify-center"
+          title="複製"
+        >
+          ⧉
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
+          title="削除"
+        >
+          ×
+        </button>
+      </div>
     </div>
   )
 }
