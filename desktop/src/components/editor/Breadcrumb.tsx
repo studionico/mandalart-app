@@ -1,19 +1,6 @@
 
 import { useEditorStore, BreadcrumbItem } from '@/store/editorStore'
 
-function MiniPreview({ highlightPosition }: { cells: BreadcrumbItem['cells']; highlightPosition: number | null }) {
-  return (
-    <div className="grid grid-cols-3 gap-0.5 w-10 h-10 shrink-0">
-      {Array.from({ length: 9 }).map((_, i) => (
-        <div
-          key={i}
-          className={`rounded-sm ${i === highlightPosition ? 'bg-blue-400 dark:bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'}`}
-        />
-      ))}
-    </div>
-  )
-}
-
 type Props = {
   onHome: () => void
 }
@@ -43,14 +30,13 @@ export default function Breadcrumb({ onHome }: Props) {
           <span className="text-gray-300 dark:text-gray-600">/</span>
           <button
             onClick={() => handleItemClick(item, idx)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors ${
+            className={`px-2 py-1 rounded-lg transition-colors ${
               idx === breadcrumb.length - 1
                 ? 'text-gray-900 dark:text-gray-100 font-medium bg-gray-100 dark:bg-gray-800'
                 : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
           >
-            <MiniPreview cells={item.cells} highlightPosition={item.highlightPosition} />
-            <span className="max-w-[80px] truncate">{item.label || '（未入力）'}</span>
+            <span className="max-w-[160px] truncate inline-block align-middle">{item.label.split('\n')[0] || '（未入力）'}</span>
           </button>
         </div>
       ))}
