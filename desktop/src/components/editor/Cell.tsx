@@ -36,9 +36,13 @@ export default function Cell({
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const cellRef = useRef<HTMLDivElement>(null)
   const { bg, text: textColor } = getColorClasses(cell.color)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [draftText, setDraftText] = useState(cell.text)
+  // インライン編集中にテキストエリアをダブルクリックすると 3×3 サイズに拡大表示する
+  const [expandedRect, setExpandedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
+  const isExpanded = expandedRect !== null
 
   // 画像読み込み
   useEffect(() => {
@@ -65,6 +69,29 @@ export default function Cell({
       }
     }
   }, [isInlineEditing, cell.text])
+
+  // インライン編集が終わったら拡大状態を解除
+  useEffect(() => {
+    if (!isInlineEditing && expandedRect) setExpandedRect(null)
+  }, [isInlineEditing, expandedRect])
+
+  function handleTextareaDoubleClick(e: React.MouseEvent<HTMLTextAreaElement>) {
+    e.stopPropagation()
+    if (isExpanded) {
+      // 拡大中にもう一度ダブルクリックされたら元のサイズに戻す
+      setExpandedRect(null)
+      setTimeout(() => textareaRef.current?.focus(), 0)
+      return
+    }
+    const cellEl = cellRef.current
+    if (!cellEl) return
+    const gridEl = cellEl.closest('[data-grid-container]') as HTMLElement | null
+    if (!gridEl) return
+    const rect = gridEl.getBoundingClientRect()
+    setExpandedRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height })
+    // state 更新後に textarea を再フォーカスし直す (blur で編集終了しないように)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
 
   function handleMouseDown(e: React.MouseEvent) {
     if (isDisabled || e.button !== 0) return
@@ -193,6 +220,7 @@ export default function Cell({
 
   return (
     <div
+      ref={cellRef}
       data-cell-id={cell.id}
       className={`
         relative select-none overflow-hidden
@@ -234,8 +262,24 @@ export default function Cell({
           onKeyDown={handleTextareaKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          style={{ ...fontStyle, ...textInsetStyle }}
-          className={`absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`}
+          onDoubleClick={handleTextareaDoubleClick}
+          style={
+            isExpanded && expandedRect
+              ? {
+                  top: expandedRect.top,
+                  left: expandedRect.left,
+                  width: expandedRect.width,
+                  height: expandedRect.height,
+                  fontSize: '22px',
+                  lineHeight: 1.5,
+                }
+              : { ...fontStyle, ...textInsetStyle }
+          }
+          className={
+            isExpanded
+              ? `fixed z-[100] text-left bg-white dark:bg-gray-900 ${textColor} resize-none outline-none overflow-auto border-[3px] border-blue-500 dark:border-blue-400 rounded-xl shadow-2xl p-5 placeholder-gray-300`
+              : `absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`
+          }
           placeholder=""
         />
       ) : (

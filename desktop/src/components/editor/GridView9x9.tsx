@@ -51,6 +51,7 @@ export default function GridView9x9({
           return (
             <div
               key={outerPos}
+              data-grid-container
               className={`${wrapperBase} border-[6px] border-black dark:border-white`}
             >
               {Array.from({ length: 9 }).map((_, innerPos) => {
@@ -97,7 +98,7 @@ export default function GridView9x9({
           : 'border-2 border-gray-300 dark:border-gray-600'
 
         return (
-          <div key={outerPos} className={`${wrapperBase} ${borderClass}`}>
+          <div key={outerPos} data-grid-container className={`${wrapperBase} ${borderClass}`}>
             {Array.from({ length: 9 }).map((_, innerPos) => {
               if (subCellMap) {
                 const cell = subCellMap.get(innerPos)
