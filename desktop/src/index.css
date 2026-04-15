@@ -7,3 +7,15 @@
 html {
   font-weight: 300;
 }
+
+/* 並列グリッド切替時のスライドアニメーション */
+/* 2 枚のグリッドを横並び (幅 200%) にして translateX で動かす。
+   forward: 現在地 → 右隣、backward: 右隣 → 現在地 */
+@keyframes parallel-slide-forward {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes parallel-slide-backward {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}

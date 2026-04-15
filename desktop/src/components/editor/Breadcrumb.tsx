@@ -5,6 +5,12 @@ import { getCellImageUrl } from '@/lib/api/storage'
 
 type Props = {
   onHome: () => void
+  /**
+   * パンくず項目クリック時に親コンポーネントへ通知するためのフック。
+   * 渡された場合はこちらが呼ばれ、ストアの popBreadcrumbTo は使わない。
+   * EditorLayout 側で「空のグリッドを削除してから遷移」などの処理を差し込むのに使う。
+   */
+  onNavigate?: (targetGridId: string) => void
 }
 
 /**
@@ -37,12 +43,16 @@ function BreadcrumbLabel({ item }: { item: BreadcrumbItem }) {
   )
 }
 
-export default function Breadcrumb({ onHome }: Props) {
+export default function Breadcrumb({ onHome, onNavigate }: Props) {
   const { breadcrumb, popBreadcrumbTo } = useEditorStore()
 
   function handleItemClick(item: BreadcrumbItem, idx: number) {
     if (idx === breadcrumb.length - 1) return // 現在地はクリック不要
-    popBreadcrumbTo(item.gridId)
+    if (onNavigate) {
+      onNavigate(item.gridId)
+    } else {
+      popBreadcrumbTo(item.gridId)
+    }
   }
 
   return (

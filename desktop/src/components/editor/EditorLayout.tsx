@@ -12,13 +12,12 @@ import { useDragAndDrop, type DndUndoable } from '@/hooks/useDragAndDrop'
 import GridView3x3 from './GridView3x3'
 import GridView9x9 from './GridView9x9'
 import Breadcrumb from './Breadcrumb'
-import ParallelNav from './ParallelNav'
 import SidePanel from './SidePanel'
 import ImportDialog from './ImportDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
-import { getRootGrids, getChildGrids, getGrid, createGrid } from '@/lib/api/grids'
+import { getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid } from '@/lib/api/grids'
 import { updateCell, pasteCell } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
@@ -58,7 +57,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
-      setGridSize(Math.min(width, height))
+      // 左右の並列ナビボタン分を横幅から差し引く (2 * (ボタン幅 48 + gap 16) = 128px)
+      const SIDE_BUTTON_RESERVE = 128
+      const usableWidth = Math.max(0, width - SIDE_BUTTON_RESERVE)
+      setGridSize(Math.min(usableWidth, height))
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -67,6 +69,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // 並列グリッド
   const [parallelGrids, setParallelGrids] = useState<Grid[]>([])
   const [parallelIndex, setParallelIndex] = useState(0)
+
+  // 並列グリッド切替時のスライドアニメーション用 state
+  // slide が truthy な間は 2 枚のグリッド (from/to) を横並びに描画し、
+  // CSS keyframes で translateX を動かす。
+  type SlideState = {
+    fromCells: Cell[]
+    toCells: Cell[]
+    direction: 'forward' | 'backward'
+  }
+  const [slide, setSlide] = useState<SlideState | null>(null)
+  const SLIDE_DURATION_MS = 320
 
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
@@ -472,36 +485,126 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     })
   }
 
+  /**
+   * 指定グリッドの中心セルが空なら soft-delete する。
+   * 呼び出し側は必要に応じて parallelGrids / parallelIndex を更新する。
+   */
+  async function cleanupGridIfCenterEmpty(gridId: string, cells: Cell[]): Promise<boolean> {
+    const center = cells.find((c) => c.position === 4)
+    const isEmpty = !center || isCellEmpty(center)
+    if (!isEmpty) return false
+    try {
+      await deleteGrid(gridId)
+      return true
+    } catch (e) {
+      console.error('cleanup deleteGrid failed:', e)
+      return false
+    }
+  }
+
   async function handleNavigateHome() {
-    // 全セルが空なら未保存扱いで削除してホームへ
-    const allEmpty = (gridData?.cells ?? []).every((c) => isCellEmpty(c))
-    if (allEmpty) {
-      await deleteMandalart(mandalartId)
+    if (!gridData) {
       navigate('/dashboard')
       return
     }
-    // タイトルは root 中心セルの自動キャッシュなので、別途ダイアログは出さない
+    const center = gridData.cells.find((c) => c.position === 4)
+    const centerEmpty = !center || isCellEmpty(center)
+
+    if (centerEmpty) {
+      // 現在のグリッドは「空」= 存在しないものとして削除する。
+      // 唯一のルートグリッドだった場合はマンダラート全体を削除する (以前の挙動を踏襲)。
+      if (breadcrumb.length === 1 && parallelGrids.length === 1) {
+        await deleteMandalart(mandalartId)
+      } else {
+        await deleteGrid(gridData.id).catch((e) => console.error('cleanup deleteGrid failed:', e))
+      }
+    }
     navigate('/dashboard')
+  }
+
+  // パンくず項目クリックで階層を戻す際、現在地グリッドが空なら削除する
+  async function handleBreadcrumbNavigate(targetGridId: string) {
+    if (!gridData) {
+      popBreadcrumbTo(targetGridId)
+      return
+    }
+    const oldGridId = gridData.id
+    const oldCells = gridData.cells
+
+    popBreadcrumbTo(targetGridId)
+
+    await cleanupGridIfCenterEmpty(oldGridId, oldCells)
   }
 
   // 並列ナビゲーション
   async function handleParallelNav(dir: 'prev' | 'next') {
+    if (slide) return // アニメーション中は無視
     const nextIdx = dir === 'prev' ? parallelIndex - 1 : parallelIndex + 1
     if (nextIdx < 0 || nextIdx >= parallelGrids.length) return
     const nextGridId = parallelGrids[nextIdx].id
-    // 並列切替に追従して breadcrumb 末尾エントリの gridId も更新し、
-    // 新しい currentGrid に対してラベル同期の useEffect が走るようにする
+
+    // 切替先のセルを取得 (アニメーション中に描画するため)
+    const nextGridData = await getGrid(nextGridId)
+    const oldGridId = gridData?.id
+    const fromCells = gridData?.cells ?? []
+
+    // 状態更新 (breadcrumb 末尾 gridId / parallelIndex / currentGrid)
     const last = breadcrumb[breadcrumb.length - 1]
     if (last) {
       updateBreadcrumbItem(last.gridId, { gridId: nextGridId })
     }
     setParallelIndex(nextIdx)
     setCurrentGrid(nextGridId)
+
+    // スライド描画を開始し、終了後に state クリア
+    setSlide({
+      fromCells,
+      toCells: nextGridData.cells,
+      direction: dir === 'next' ? 'forward' : 'backward',
+    })
+    await new Promise((r) => setTimeout(r, SLIDE_DURATION_MS))
+    setSlide(null)
+
+    // 旧グリッドの中心セルが空なら削除する
+    // (アニメーション終了後にまとめて片付けることで、スライド中の視覚には残っているが
+    //  データ的には存在しない、という整合を担保)
+    if (oldGridId) {
+      const deleted = await cleanupGridIfCenterEmpty(oldGridId, fromCells)
+      if (deleted) {
+        // parallelGrids から除去しつつ、現在地 (next) のインデックスを再計算する。
+        // 'next' 方向では old が next より前にあったので index が 1 減る。
+        // 'prev' 方向では old が next より後ろにあったので index は変わらない。
+        setParallelGrids((prev) => prev.filter((g) => g.id !== oldGridId))
+        setParallelIndex((prev) => (dir === 'next' ? Math.max(0, prev - 1) : prev))
+      }
+    }
   }
 
   async function handleAddParallel() {
+    if (slide) return
     const parentCellId = breadcrumb[breadcrumb.length - 1]?.cellId ?? null
     const newGrid = await createGrid({ mandalartId, parentCellId, sortOrder: parallelGrids.length })
+
+    // 元 (現在表示中) のグリッドの中心セル内容を新しい並列グリッドの中心セルに自動コピーする
+    const originCenter = gridData?.cells.find((c) => c.position === 4)
+    const newCenter = newGrid.cells.find((c) => c.position === 4)
+    let toCells: Cell[] = newGrid.cells
+    if (originCenter && newCenter && !isCellEmpty(originCenter)) {
+      await updateCell(newCenter.id, {
+        text: originCenter.text,
+        image_path: originCenter.image_path,
+        color: originCenter.color,
+      })
+      // アニメーション用のセル配列にも反映させる (まだ newGrid.cells は古い状態)
+      toCells = newGrid.cells.map((c) =>
+        c.position === 4
+          ? { ...c, text: originCenter.text, image_path: originCenter.image_path, color: originCenter.color }
+          : c,
+      )
+    }
+
+    const fromCells = gridData?.cells ?? []
+
     // 並列追加直後はその新しいグリッドが currentGrid になるので、breadcrumb 末尾も追従させる
     const last = breadcrumb[breadcrumb.length - 1]
     if (last) {
@@ -510,6 +613,15 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setParallelGrids((prev) => [...prev, newGrid])
     setParallelIndex(parallelGrids.length)
     setCurrentGrid(newGrid.id)
+
+    // スライドアニメーション (新グリッドが右から入ってきて元のグリッドが左へ)
+    setSlide({
+      fromCells,
+      toCells,
+      direction: 'forward',
+    })
+    await new Promise((r) => setTimeout(r, SLIDE_DURATION_MS))
+    setSlide(null)
   }
 
   // コンテキストメニュー
@@ -605,7 +717,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
       {/* ヘッダー */}
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center gap-2 shrink-0">
-        <Breadcrumb onHome={handleNavigateHome} />
+        <Breadcrumb onHome={handleNavigateHome} onNavigate={handleBreadcrumbNavigate} />
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <ThemeToggle />
 
@@ -675,74 +787,166 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       <div className="flex flex-1 overflow-hidden">
         {/* グリッドエリア */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* 並列ナビ */}
-          <div className="flex items-center justify-center py-2 shrink-0">
-            <ParallelNav
-              currentIndex={parallelIndex}
-              total={parallelGrids.length}
-              onPrev={() => handleParallelNav('prev')}
-              onNext={() => handleParallelNav('next')}
-            />
-          </div>
-
-          {/* グリッド表示（正方形・最大化） */}
-          <div ref={gridAreaRef} className="flex-1 flex items-center justify-center overflow-hidden p-4">
-            <div
-              ref={gridRef}
-              style={{ width: gridSize, height: gridSize }}
-            >
-              {gridData && viewMode === '3x3' && gridSize > 0 && (
-                <GridView3x3
-                  cells={gridData.cells}
-                  childCounts={childCounts}
-                  cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
-                  dragSourceId={dragSourceId}
-                  dragOverId={dragOverId}
-                  fontScale={fontScale}
-                  inlineEditingCellId={inlineEditingCellId}
-                  userId={userId}
-                  mandalartId={mandalartId}
-                  onCellSave={handleSaveCell}
-                  onStartInlineEdit={handleCellStartInlineEdit}
-                  onCommitInlineEdit={handleCellCommitInlineEdit}
-                  onInlineNavigate={handleCellInlineNavigate}
-                  onDrill={handleCellDrill}
-                  onDragStart={handleDragStart}
-                  onContextMenu={handleContextMenu}
-                />
-              )}
-              {gridData && viewMode === '9x9' && gridSize > 0 && (
-                <GridView9x9
-                  rootCells={gridData.cells}
-                  subGrids={subGrids}
-                  childCounts={childCounts}
-                  cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
-                  dragSourceId={dragSourceId}
-                  dragOverId={dragOverId}
-                  fontScale={fontScale}
-                  inlineEditingCellId={inlineEditingCellId}
-                  userId={userId}
-                  mandalartId={mandalartId}
-                  onCellSave={handleSaveCell}
-                  onStartInlineEdit={handleCellStartInlineEdit}
-                  onCommitInlineEdit={handleCellCommitInlineEdit}
-                  onInlineNavigate={handleCellInlineNavigate}
-                  onDrill={handleCellDrill}
-                  onDragStart={handleDragStart}
-                  onContextMenu={handleContextMenu}
-                />
+          {/* グリッド表示（正方形・最大化） + 両脇に並列ナビボタン */}
+          <div ref={gridAreaRef} className="flex-1 flex items-center justify-center overflow-hidden p-4 gap-4">
+            {/* 左側: 1 つ前の並列グリッドへ戻る「＜」 */}
+            <div className="w-12 flex items-center justify-center shrink-0">
+              {parallelIndex > 0 && (
+                <button
+                  onClick={() => handleParallelNav('prev')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 shadow-sm flex items-center justify-center"
+                  title="前の並列グリッドへ"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
               )}
             </div>
-          </div>
 
-          {/* 並列グリッド追加ボタン */}
-          <div className="flex justify-center py-2 shrink-0">
-            <button
-              onClick={handleAddParallel}
-              className="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 border border-dashed border-gray-300 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 px-4 py-2 rounded-lg transition-colors"
+            <div
+              ref={gridRef}
+              className="relative overflow-hidden"
+              style={{ width: gridSize, height: gridSize }}
             >
-              + 新しいグリッドを追加
-            </button>
+              {slide && gridSize > 0 ? (
+                // スライド中: from (現在) と to (切替先) を横並びに描画して
+                // translateX で動かす。アニメーション中は操作を無効化する。
+                <div
+                  className="flex absolute top-0 left-0"
+                  style={{
+                    width: gridSize * 2,
+                    height: gridSize,
+                    transform:
+                      slide.direction === 'forward' ? 'translateX(0)' : 'translateX(-50%)',
+                    animation: `${
+                      slide.direction === 'forward'
+                        ? 'parallel-slide-forward'
+                        : 'parallel-slide-backward'
+                    } ${SLIDE_DURATION_MS}ms ease-in-out forwards`,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {(slide.direction === 'forward'
+                    ? [slide.fromCells, slide.toCells]
+                    : [slide.toCells, slide.fromCells]
+                  ).map((cells, i) => (
+                    <div
+                      key={i}
+                      style={{ width: gridSize, height: gridSize, flexShrink: 0 }}
+                    >
+                      {viewMode === '3x3' ? (
+                        <GridView3x3
+                          cells={cells}
+                          childCounts={childCounts}
+                          cutCellId={null}
+                          dragSourceId={null}
+                          dragOverId={null}
+                          fontScale={fontScale}
+                          inlineEditingCellId={null}
+                          onStartInlineEdit={handleCellStartInlineEdit}
+                          onCommitInlineEdit={handleCellCommitInlineEdit}
+                          onInlineNavigate={handleCellInlineNavigate}
+                          onDrill={handleCellDrill}
+                          onContextMenu={handleContextMenu}
+                        />
+                      ) : (
+                        <GridView9x9
+                          rootCells={cells}
+                          subGrids={subGrids}
+                          childCounts={childCounts}
+                          cutCellId={null}
+                          dragSourceId={null}
+                          dragOverId={null}
+                          fontScale={fontScale}
+                          inlineEditingCellId={null}
+                          onStartInlineEdit={handleCellStartInlineEdit}
+                          onCommitInlineEdit={handleCellCommitInlineEdit}
+                          onInlineNavigate={handleCellInlineNavigate}
+                          onDrill={handleCellDrill}
+                          onContextMenu={handleContextMenu}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {gridData && viewMode === '3x3' && gridSize > 0 && (
+                    <GridView3x3
+                      cells={gridData.cells}
+                      childCounts={childCounts}
+                      cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
+                      dragSourceId={dragSourceId}
+                      dragOverId={dragOverId}
+                      fontScale={fontScale}
+                      inlineEditingCellId={inlineEditingCellId}
+                      userId={userId}
+                      mandalartId={mandalartId}
+                      onCellSave={handleSaveCell}
+                      onStartInlineEdit={handleCellStartInlineEdit}
+                      onCommitInlineEdit={handleCellCommitInlineEdit}
+                      onInlineNavigate={handleCellInlineNavigate}
+                      onDrill={handleCellDrill}
+                      onDragStart={handleDragStart}
+                      onContextMenu={handleContextMenu}
+                    />
+                  )}
+                  {gridData && viewMode === '9x9' && gridSize > 0 && (
+                    <GridView9x9
+                      rootCells={gridData.cells}
+                      subGrids={subGrids}
+                      childCounts={childCounts}
+                      cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
+                      dragSourceId={dragSourceId}
+                      dragOverId={dragOverId}
+                      fontScale={fontScale}
+                      inlineEditingCellId={inlineEditingCellId}
+                      userId={userId}
+                      mandalartId={mandalartId}
+                      onCellSave={handleSaveCell}
+                      onStartInlineEdit={handleCellStartInlineEdit}
+                      onCommitInlineEdit={handleCellCommitInlineEdit}
+                      onInlineNavigate={handleCellInlineNavigate}
+                      onDrill={handleCellDrill}
+                      onDragStart={handleDragStart}
+                      onContextMenu={handleContextMenu}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* 右側: 次の並列グリッドへ進む「＞」、末尾にいる場合は新規追加「＋」 */}
+            <div className="w-12 flex items-center justify-center shrink-0">
+              {parallelIndex < parallelGrids.length - 1 ? (
+                <button
+                  onClick={() => handleParallelNav('next')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 shadow-sm flex items-center justify-center"
+                  title="次の並列グリッドへ"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              ) : (() => {
+                const centerCell = gridData?.cells.find((c) => c.position === 4)
+                const centerEmpty = !centerCell || isCellEmpty(centerCell)
+                if (centerEmpty) return null
+                return (
+                  <button
+                    onClick={handleAddParallel}
+                    className="w-12 h-12 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-gray-50 dark:hover:bg-gray-800 shadow-sm flex items-center justify-center"
+                    title="新しい並列グリッドを追加"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                )
+              })()}
+            </div>
           </div>
         </div>
 
