@@ -315,7 +315,6 @@ export default function Cell({
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut || isDragSource ? 'opacity-40' : ''}
         ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
-        ${isInlineEditing ? 'ring-2 ring-blue-500' : ''}
         group
       `}
       onMouseDown={handleMouseDown}
@@ -331,7 +330,7 @@ export default function Cell({
       {isInlineEditing && isExpanded && expandedRect ? (
         // 拡大エディタ: textarea + 背景色/画像ツールバー
         <div
-          className={`fixed z-[100] flex flex-col border-[3px] border-blue-500 dark:border-blue-400 rounded-xl shadow-2xl overflow-hidden ${getColorClasses(editingColor).bg}`}
+          className={`fixed z-[100] flex flex-col border-[3px] border-black dark:border-white rounded-xl shadow-2xl overflow-hidden ${getColorClasses(editingColor).bg}`}
           style={{
             top: expandedRect.top,
             left: expandedRect.left,

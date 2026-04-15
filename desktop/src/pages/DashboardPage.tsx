@@ -240,7 +240,7 @@ function MandalartCard({
 
   return (
     <div
-      className="relative w-[130px] h-[130px] bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+      className="relative w-[130px] h-[130px] bg-white dark:bg-gray-900 border-2 border-black dark:border-white rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
       onClick={onOpen}
       title={m.title || '無題'}
     >
