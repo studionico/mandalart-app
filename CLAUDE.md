@@ -178,14 +178,27 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 ### 空データの非保存ルール
 
 - 新規マンダラート: 初回入力までは UI 上の「下書き」扱い
-- グリッドの全セルが空になった → Undo トースト付きで自動削除
-- ルートグリッドが空になった → マンダラート全体を自動削除
+- **グリッドは「中心セルが空」= 存在しないものとして扱う**。離脱時 (並列切替 / パンくず / ホーム / ドリルアップ) に `cleanupGridIfCenterEmpty` が走り soft-delete する
+- cleanup は「このグリッドが最後の子グリッドだったら親セルも連動クリア」まで面倒を見る。これをやらないと「サブグリッドの中心を空にしたのに、戻ったら親セルで元の内容が復活してる」という UX になる
+- `handleBreadcrumbNavigate` は `popBreadcrumbTo` **より前** に cleanup を完了させる。逆順だと `useGrid` の再フェッチが先に走って古い親セル値で `gridData` が確定してちらつく
+- ルートグリッドが空になった → マンダラート全体を自動削除 (唯一のルートの場合)
 - 空のままホームに戻る → 削除してダッシュボードへ (タイトルダイアログは**廃止済み**)
+
+### 並列グリッド
+
+- **UI**: 3×3 / 9×9 グリッドの左右に `<` / `>` / `+` のインライン SVG ボタン (以前の上部 `ParallelNav` と下部「+ 新しいグリッドを追加」は廃止済み)
+  - `<` は `parallelIndex > 0` のときだけ表示
+  - 右側は「次があれば `>`、末尾かつ中心セル入力ありなら `+`、末尾かつ中心空なら非表示」の三択
+- **新規並列作成 (`+`)**: `handleAddParallel` が `createGrid` → 元グリッドの中心セル内容を新グリッドの中心セルに自動コピー → parallelGrids に追加 → orbit ではなく **slide アニメーション** で横方向に切替
+- **並列切替 (`<` / `>`)**: `handleParallelNav` が次の grid を `getGrid` して slide アニメーションを再生。完了後に旧グリッドを `cleanupGridIfCenterEmpty` してから `parallelGrids` / `parallelIndex` を再計算
+- **breadcrumb 末尾 gridId の追従**: `updateBreadcrumbItem` で並列切替や新規追加のたびに末尾エントリの gridId を現在地に合わせる。これがないと breadcrumb のラベル同期 useEffect が正しい grid を watch できない
+- **breadcrumb 経由の戻り**: `handleBreadcrumbNavigate` は target 階層の兄弟 (`getChildGrids` / `getRootGrids`) を再取得して `parallelGrids` / `parallelIndex` をリセットする。これをやらないと下位の parallelGrids が残って「上位階層なのに存在しないはずの `<` `>` ボタンが出る」バグになる
 
 ### マンダラート管理
 
 - **タイトル = ルート中心セルのキャッシュ**: `updateCell` が position=4 かつルートグリッドのセルを更新した際に `mandalarts.title` を同じテキストで自動更新。別途「ファイル名を付けて保存」するフローは無い
-- **ダッシュボードカード**: 130×130 の正方形タイル、ルート中心セルのテキストを 14px / `line-clamp-6` で表示。青枠 2px (中央セルと同じスタイル)。hover で右上に複製・削除ボタン、下部に更新日
+- **画像フォールバック**: `getMandalarts` / `searchMandalarts` は相関サブクエリでルート中心セルの `image_path` を一緒に取得する。テキストが空のときは **ダッシュボードカードとパンくずリスト末尾のラベル** を画像サムネイルに置き換えて表示
+- **ダッシュボードカード**: 130×130 の正方形タイル、ルート中心セルのテキストを 14px / `line-clamp-6` で左寄せ・上詰め表示。外枠は黒 2px。hover で右上に複製・削除ボタン、下部に更新日。タイトル空で画像のみのときはカード全面に画像
 - **検索**: タイトルとセル本文を横断する全文検索 (`searchMandalarts`)、200ms debounce
 - **複製**: 全グリッド / セルを再帰コピー。タイトルにサフィックス (「〜 のコピー」等) は付けない
 - **ゴミ箱**: `deleted_at` によるソフトデリート。ダッシュボードの「ゴミ箱」ボタンから `TrashDialog` を開いて復元 / 完全削除
@@ -207,10 +220,13 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 ### セルのビジュアル
 
 - **3×3 表示**: 中心 = `border-[6px] border-black`、周辺 (子グリッドあり) = `border-2 border-black`、周辺 (子なし) = `border border-gray-300`
+- **「子グリッドあり」の判定**: `childCount > 0` で決まる。ただし「子グリッドが存在する」ではなく「子グリッドの**周辺セルに入力がある**」= `fetchChildCountsFor` が SQL で `position != 4 AND (text != '' OR image_path IS NOT NULL)` で絞って `COUNT(DISTINCT grid_id)` を返す仕様。ドリル直後にセンターだけ自動コピーされたサブグリッドは「意味なし」扱いで border は 1px グレーのままになる
 - **9×9 表示**: サブグリッドラッパーが `gap-px bg-gray-300` で「セル同士が共有する 1 本の境界線」を描画 (cells 側は border を持たない)。サブグリッドラッパー側の外枠は中央 = `border-[6px] black`、既存 = `border-2 black`、空 = `border-2 gray-300`
 - **9×9 中心セル**: `border-2 border-black -m-px z-10` で gap-px を跨いで黒枠を描画
+- **画像優先**: セルに画像と文字が両方入っている場合、確定表示では **画像のみ** を表示 (`absolute inset-0 object-cover`)。テキストはインライン編集 / 拡大エディタのときだけ見える
 - **テキスト配置**: 左寄せ・上詰め。セル外縁からテキストまでの「見える余白」は 3×3 で 18px、9×9 で 6px に固定。border 幅が異なる (1〜6px) のに対応するため [`Cell.tsx`](desktop/src/components/editor/Cell.tsx) が `absolute` の inset をインラインスタイルで動的補正する (`textInsetPx = targetPadPx - borderPx`)
 - **外周グリッドの背景**: `GridView3x3` は透明 (外側の灰色ラッパーを撤去済み)、`GridView9x9` の各サブグリッドは `bg-gray-300 dark:bg-gray-600` (gap-px を縫う用)
+- **インラインエディタの拡大**: インライン編集中にテキストエリアをダブルクリックすると、`position: fixed` でサブグリッド全体 (3×3 コンテナ) を覆う拡大エディタが開く。下部に色選択・画像アップロードのツールバーが付き、`onMouseDown={e => e.preventDefault()}` で textarea の blur を防止。従来あった `⋯` 詳細編集モーダルは廃止済み
 
 ### ダークモード
 
@@ -218,6 +234,22 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 - `themeStore` が `preference: 'light' | 'dark' | 'system'` を保持 (localStorage)
 - `useTheme` が `<html>.dark` の付け外しと `prefers-color-scheme` の監視を担当
 - ヘッダの `ThemeToggle` (☀ ◐ ☾) で切り替え
+
+### アニメーション
+
+エディタで 2 種類の CSS-only アニメーションを再生する (React state flip + `transition` は WebKit でタイミングが不安定なので、全て `@keyframes` + `animation-fill-mode: both` に統一):
+
+1. **Slide** (並列グリッド切替): `fromCells` と `toCells` を横並びにした 200% 幅コンテナを `parallel-slide-forward/backward` で `translateX` させる。320ms
+2. **Orbit** (ドリルダウン / ドリルアップ / 初回表示): 3×3 表示専用。時計回り順にセルが staggered fade-in し、「クリックされたセルだけ」が `orbit-from-{nw/n/ne/w/e/sw/s/se}` の 8 方向 keyframes で natural 位置へドリフトする。約 1000〜1080ms
+   - drill-down: `[7, 6, 3, 0, 1, 2, 5, 8]` + 中心は移動セル (クリック位置 → 中心)
+   - drill-up:   `[7, 6, 3, 0, 1, 2, 5, 8, 4]` + 親セル (中心 → 自然位置) が natural timing でドリフト
+   - initial:    `[4, 7, 6, 3, 0, 1, 2, 5, 8]` (中心から周辺へ時計回り、移動セルなし)
+
+詳細な仕組みとハマりポイントは [`animations.md`](desktop/docs/animations.md) 参照。主要な落とし穴:
+- `@keyframes` 内で `transform: var(--x)` は WebKit で補間されない → 固定 keyframes 8 方向で対応
+- drill-up で親が root の場合は `parent.cellId === null` で movingCell が null になる → `currentEntry.cellId` を使う必要あり
+- orbit 終了時は `childCounts` state を pre-populate してから `setOrbit(null)` にしないと border 幅が一瞬ズレてちらつく
+- `ResizeObserver` の `gridSize` 更新は `Math.floor` + 4px 未満を無視して微振動を吸収する
 
 ---
 
@@ -274,6 +306,7 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 | [`api-spec.md`](desktop/docs/api-spec.md) | `lib/api/` / `lib/sync/` / `lib/realtime.ts` の関数シグネチャ |
 | [`folder-structure.md`](desktop/docs/folder-structure.md) | ディレクトリツリーと設計上の分離方針 |
 | [`typography.md`](desktop/docs/typography.md) | フォント (OS システムフォント使用)・ウェイト・文字サイズ・変更方法 |
+| [`animations.md`](desktop/docs/animations.md) | 並列スライド・ドリル軌道 (orbit) アニメーションの仕様・実装・ハマりポイント |
 | [`tasks.md`](desktop/docs/tasks.md) | フェーズ別のタスクチェックリスト (進捗の単一情報源) |
 | [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | Supabase プロジェクトの手動セットアップとトラブルシューティング |
 | [`updater-setup.md`](desktop/docs/updater-setup.md) | 自動アップデート用の署名鍵・GitHub Secrets・リリースフロー |

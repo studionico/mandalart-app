@@ -117,13 +117,30 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const ORBIT_FADE_DOWN_MS = 400
   const ORBIT_FADE_UP_MS = 400
   const ORBIT_FADE_INIT_MS = 400
-  /** target cells それぞれの子グリッド数を事前フェッチする */
+  /**
+   * target cells それぞれの「意味のある子グリッド数」を事前フェッチする。
+   *
+   * 「意味のある子グリッド」= 周辺セル (position != 4) に 1 つでも入力 (text または画像) が
+   * あるサブグリッド。ドリル直後にセンターだけ自動コピーされただけの状態はカウントしない。
+   * Cell 側の border 表示 (border-2 black = サブグリッドあり) で参照される。
+   */
   async function fetchChildCountsFor(cells: Cell[]): Promise<Map<string, number>> {
+    const { query } = await import('@/lib/db')
     const map = new Map<string, number>()
     await Promise.all(
       cells.map(async (c) => {
-        const children = await getChildGrids(c.id)
-        map.set(c.id, children.length)
+        const rows = await query<{ cnt: number }>(
+          `SELECT COUNT(DISTINCT g.id) AS cnt
+           FROM grids g
+           JOIN cells sub ON sub.grid_id = g.id
+           WHERE g.parent_cell_id = ?
+             AND g.deleted_at IS NULL
+             AND sub.position != 4
+             AND sub.deleted_at IS NULL
+             AND (sub.text != '' OR sub.image_path IS NOT NULL)`,
+          [c.id],
+        )
+        map.set(c.id, rows[0]?.cnt ?? 0)
       }),
     )
     return map
@@ -251,18 +268,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     init()
   }, [mandalartId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 子グリッド数を更新
+  // 子グリッド数を更新 (= 「意味のあるサブグリッド」カウント)
+  // fetchChildCountsFor は周辺セルに入力のあるサブグリッドのみを数えるので、
+  // Cell 側の border (border-2 = サブグリッドあり) が実際の内容状態を反映する。
   useEffect(() => {
     if (!gridData) return
-    async function loadChildCounts() {
-      const map = new Map<string, number>()
-      for (const cell of gridData!.cells) {
-        const children = await getChildGrids(cell.id)
-        map.set(cell.id, children.length)
-      }
-      setChildCounts(map)
-    }
-    loadChildCounts()
+    let cancelled = false
+    fetchChildCountsFor(gridData.cells)
+      .then((map) => {
+        if (!cancelled) setChildCounts(map)
+      })
+      .catch((e) => console.error('loadChildCounts failed:', e))
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridData])
 
   // 現在表示中のグリッドの中心セル (position=4) が編集されたら、
