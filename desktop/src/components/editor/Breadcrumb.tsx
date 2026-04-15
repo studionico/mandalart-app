@@ -56,7 +56,7 @@ export default function Breadcrumb({ onHome, onNavigate }: Props) {
   }
 
   return (
-    <nav className="flex items-center gap-1 overflow-x-auto py-1 px-1 text-sm">
+    <nav className="flex items-center gap-1 overflow-x-auto py-1 px-1 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <button
         onClick={onHome}
         className="flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors"

@@ -11,6 +11,7 @@ import { useUndo } from '@/hooks/useUndo'
 import { useDragAndDrop, type DndUndoable } from '@/hooks/useDragAndDrop'
 import GridView3x3 from './GridView3x3'
 import GridView9x9 from './GridView9x9'
+import CellComponent from './Cell'
 import Breadcrumb from './Breadcrumb'
 import SidePanel from './SidePanel'
 import ImportDialog from './ImportDialog'
@@ -60,7 +61,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 左右の並列ナビボタン分を横幅から差し引く (2 * (ボタン幅 48 + gap 16) = 128px)
       const SIDE_BUTTON_RESERVE = 128
       const usableWidth = Math.max(0, width - SIDE_BUTTON_RESERVE)
-      setGridSize(Math.min(usableWidth, height))
+      const next = Math.floor(Math.min(usableWidth, height))
+      // 数 px 単位の微小な変化は無視する。drill 遷移時に header の scrollbar 出し入れなどで
+      // ちらつく原因になるため。
+      setGridSize((prev) => (Math.abs(prev - next) < 4 ? prev : next))
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -80,6 +84,92 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
   const [slide, setSlide] = useState<SlideState | null>(null)
   const SLIDE_DURATION_MS = 320
+
+  // ドリル (3×3 のみ) のセル軌道アニメーション用 state
+  // - targetCells: 遷移後のグリッドの 9 セル
+  // - targetGridId: 切替後の currentGridId になる grid の id。
+  //                 gridData がこの id に追いつくまで orbit を表示し続けることで
+  //                 古い gridData が一瞬表示される「点滅」を防ぐ
+  // - childCountsByCellId: orbit 中の各セルに付ける border (サブグリッドあり = 2px 黒) の
+  //                        判定用。通常時の childCounts は gridData ベースで遅れて更新される
+  //                        ため、orbit 開始時に target 専用に事前フェッチして持たせる
+  // - movingCellId: 「動くセル」の id (ドリル元 or ドリル先で位置が変わるセル)
+  // - movingFromPosition: 動くセルの開始位置 (target 内でのレイアウト基準)
+  // - direction: 'drill-down' なら 4 番を除く [7,6,3,0,1,2,5,8] を stagger
+  //              'drill-up'   なら [7,6,3,0,1,2,5,8,4] を stagger (中心は最後)
+  //              'initial'    なら [4,7,6,3,0,1,2,5,8] を stagger (中心から時計回り)
+  type OrbitState = {
+    targetCells: Cell[]
+    targetGridId: string
+    childCountsByCellId: Map<string, number>
+    movingCellId: string | null
+    movingFromPosition: number
+    direction: 'drill-down' | 'drill-up' | 'initial'
+  }
+  const [orbit, setOrbit] = useState<OrbitState | null>(null)
+  // drill-down と drill-up を同じ感覚になるよう stagger / fade を揃える。
+  // drill-down: 7 * 85 + 400 = 995ms  (≒ 1s)
+  // drill-up:   8 * 85 + 400 = 1080ms (≒ 1.1s、ステップが 1 つ多いぶん若干長い)
+  // initial:    8 * 85 + 400 = 1080ms (中心含む 9 セル)
+  const ORBIT_STAGGER_DOWN_MS = 85
+  const ORBIT_STAGGER_UP_MS = 85
+  const ORBIT_STAGGER_INIT_MS = 85
+  const ORBIT_FADE_DOWN_MS = 400
+  const ORBIT_FADE_UP_MS = 400
+  const ORBIT_FADE_INIT_MS = 400
+  /** target cells それぞれの子グリッド数を事前フェッチする */
+  async function fetchChildCountsFor(cells: Cell[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>()
+    await Promise.all(
+      cells.map(async (c) => {
+        const children = await getChildGrids(c.id)
+        map.set(c.id, children.length)
+      }),
+    )
+    return map
+  }
+
+  /**
+   * 移動セル用の keyframe 名を返す。from → to の相対位置から 8 方向のうちどれかを選ぶ。
+   * 同一位置 (fromPos === toPos) のときは null。
+   */
+  function orbitMoveAnimationName(fromPos: number, toPos: number): string | null {
+    if (fromPos === toPos) return null
+    const dCol = (fromPos % 3) - (toPos % 3)
+    const dRow = Math.floor(fromPos / 3) - Math.floor(toPos / 3)
+    if (dCol === -1 && dRow === -1) return 'orbit-from-nw'
+    if (dCol === 0 && dRow === -1) return 'orbit-from-n'
+    if (dCol === 1 && dRow === -1) return 'orbit-from-ne'
+    if (dCol === -1 && dRow === 0) return 'orbit-from-w'
+    if (dCol === 1 && dRow === 0) return 'orbit-from-e'
+    if (dCol === -1 && dRow === 1) return 'orbit-from-sw'
+    if (dCol === 0 && dRow === 1) return 'orbit-from-s'
+    if (dCol === 1 && dRow === 1) return 'orbit-from-se'
+    return null
+  }
+
+  // orbit 中に gridData が target に追いついたら orbit をクリアする。
+  // orbit 表示 → 通常表示の切替で古いセルが一瞬見える (= ドリル末の点滅) を防ぐ。
+  // また、通常描画に使う childCounts は別の useEffect が async で再計算するため
+  // 反映まで数 ms 遅れてセルの border 幅が一瞬ずれてちらつく。これを防ぐため
+  // orbit クリアと同時に事前フェッチ済みの childCountsByCellId を childCounts に
+  // 流し込んでおく。
+  //
+  // 'initial' (ダッシュボードから開いた直後) は resetBreadcrumb により currentGridId が
+  // 既にセットされていて gridData のフェッチが走る。この auto-clear を走らせてしまうと
+  // アニメーション終了前に orbit がクリアされてしまうので、'initial' 中は除外する。
+  // 'initial' 用の orbit クリアは init() 内の setTimeout で明示的に行う。
+  useEffect(() => {
+    if (
+      orbit &&
+      orbit.direction !== 'initial' &&
+      gridData &&
+      gridData.id === orbit.targetGridId
+    ) {
+      setChildCounts(orbit.childCountsByCellId)
+      setOrbit(null)
+    }
+  }, [orbit, gridData])
 
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
@@ -137,6 +227,22 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           cells: cells,
           highlightPosition: null,
         })
+
+        // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in
+        const childCountsByCellId = await fetchChildCountsFor(cells)
+        setOrbit({
+          targetCells: cells,
+          targetGridId: root.id,
+          childCountsByCellId,
+          movingCellId: null,
+          movingFromPosition: 4, // 未使用 (moving cell なし)
+          direction: 'initial',
+        })
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+        )
+        setChildCounts(childCountsByCellId)
+        setOrbit(null)
       } catch (e) {
         console.error('EditorLayout init error:', e)
         setToast({ message: `読み込みエラー: ${(e as Error).message}`, type: 'error' })
@@ -367,14 +473,43 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       } else {
         // サブグリッドの中心セル → 親グリッドに戻る
         const parent = breadcrumb[breadcrumb.length - 2]
+        const currentEntry = breadcrumb[breadcrumb.length - 1]
         if (parent) {
-          const parentCellId = parent.cellId
-          const siblings = parentCellId ? await getChildGrids(parentCellId) : await getRootGrids(mandalartId)
+          // parent.cellId は「親グリッドをさらに掘るために使われたセル (= 祖父階層のセル)」
+          // なので、ここで欲しい「親グリッド内のドリル元セル」ではない。
+          // 現在地 breadcrumb エントリの cellId が「現在 grid を生んだ親 grid 内のセル」。
+          const drillFromCellId = currentEntry?.cellId ?? null
+          const siblings = parent.cellId
+            ? await getChildGrids(parent.cellId)
+            : await getRootGrids(mandalartId)
           const siblingIdx = siblings.findIndex((g) => g.id === parent.gridId)
+          // 3×3 表示ならドリルアップの軌道アニメーションを再生してから状態を切替
+          if (viewMode === '3x3') {
+            // 移動セル = 親グリッド内の「ドリル元セル」(= 今の中心が対応しているセル)
+            const parentGridData = await getGrid(parent.gridId)
+            const movingCell = drillFromCellId
+              ? parentGridData.cells.find((c) => c.id === drillFromCellId)
+              : null
+            if (movingCell) {
+              const childCountsByCellId = await fetchChildCountsFor(parentGridData.cells)
+              setOrbit({
+                targetCells: parentGridData.cells,
+                targetGridId: parent.gridId,
+                childCountsByCellId,
+                movingCellId: movingCell.id,
+                movingFromPosition: 4, // 現在の中心から親内の対応位置へ移動
+                direction: 'drill-up',
+              })
+              await new Promise((r) =>
+                setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
+              )
+            }
+          }
           setCurrentGrid(parent.gridId)
           setParallelGrids(siblings.length > 0 ? siblings : [])
           setParallelIndex(siblingIdx >= 0 ? siblingIdx : 0)
           popBreadcrumbTo(parent.gridId)
+          // orbit は gridData が parent.gridId に追いついた時点で useEffect がクリア
         }
       }
       return
@@ -383,12 +518,28 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const children = await getChildGrids(cell.id)
     if (children.length > 0) {
       // 掘り下げ
-      const firstChild = children[0]
-      setCurrentGrid(firstChild.id)
-      setParallelGrids(children)
-      setParallelIndex(0)
-
+      const firstChild = await getGrid(children[0].id)
       const currentCells = gridData?.cells ?? []
+
+      if (viewMode === '3x3') {
+        const targetCenter = firstChild.cells.find((c) => c.position === 4)
+        const childCountsByCellId = await fetchChildCountsFor(firstChild.cells)
+        setOrbit({
+          targetCells: firstChild.cells,
+          targetGridId: firstChild.id,
+          childCountsByCellId,
+          movingCellId: targetCenter?.id ?? null,
+          movingFromPosition: cell.position, // クリックした周辺セルの位置から中心へ
+          direction: 'drill-down',
+        })
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+      }
+
+      setCurrentGrid(firstChild.id)
+      setParallelGrids([firstChild])
+      setParallelIndex(0)
       pushBreadcrumb({
         gridId: firstChild.id,
         cellId: cell.id,
@@ -397,17 +548,44 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: currentCells,
         highlightPosition: cell.position,
       })
+      // orbit は gridData が firstChild.id に追いついた時点で useEffect がクリア
     } else if (!isCellEmpty(cell)) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
 
       const centerCell = newGrid.cells.find((c) => c.position === 4)
+      const populatedCells = centerCell && !isCellEmpty(cell)
+        ? newGrid.cells.map((c) =>
+            c.position === 4
+              ? { ...c, text: cell.text, image_path: cell.image_path, color: cell.color }
+              : c,
+          )
+        : newGrid.cells
       if (centerCell && !isCellEmpty(cell)) {
         await updateCell(centerCell.id, {
           text: cell.text,
           image_path: cell.image_path,
           color: cell.color,
         })
+      }
+
+      if (viewMode === '3x3') {
+        const targetCenter = populatedCells.find((c) => c.position === 4)
+        // 新規作成したばかりのサブグリッドなので子グリッド 0 件で確定
+        const childCountsByCellId = new Map<string, number>(
+          populatedCells.map((c) => [c.id, 0]),
+        )
+        setOrbit({
+          targetCells: populatedCells,
+          targetGridId: newGrid.id,
+          childCountsByCellId,
+          movingCellId: targetCenter?.id ?? null,
+          movingFromPosition: cell.position,
+          direction: 'drill-down',
+        })
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
       }
 
       setCurrentGrid(newGrid.id)
@@ -423,6 +601,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: currentCells,
         highlightPosition: cell.position,
       })
+      // orbit は gridData が newGrid.id に追いついた時点で useEffect がクリア
     }
     // 空セルでドリルしようとしても何もしない (編集はインラインで)
   }
@@ -908,6 +1087,98 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       )}
                     </div>
                   ))}
+                </div>
+              ) : orbit && viewMode === '3x3' && gridSize > 0 ? (
+                // セル軌道アニメーション中: 遷移後のグリッドの 9 セルを描画しつつ、
+                // 時計回りに staggered fade-in。移動セルだけは CSS transition で
+                // 開始位置から自然位置へ動く。
+                <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
+                  {(() => {
+                    const stagger =
+                      orbit.direction === 'drill-up'
+                        ? ORBIT_STAGGER_UP_MS
+                        : orbit.direction === 'initial'
+                          ? ORBIT_STAGGER_INIT_MS
+                          : ORBIT_STAGGER_DOWN_MS
+                    const fade =
+                      orbit.direction === 'drill-up'
+                        ? ORBIT_FADE_UP_MS
+                        : orbit.direction === 'initial'
+                          ? ORBIT_FADE_INIT_MS
+                          : ORBIT_FADE_DOWN_MS
+                    // 時計回り順:
+                    //  drill-up は中心を含む 9 position (中心は最後)
+                    //  drill-down は 8 周辺のみ (中心は moving cell)
+                    //  initial は中心から始まる 9 position
+                    const order =
+                      orbit.direction === 'drill-up'
+                        ? [7, 6, 3, 0, 1, 2, 5, 8, 4]
+                        : orbit.direction === 'initial'
+                          ? [4, 7, 6, 3, 0, 1, 2, 5, 8]
+                          : [7, 6, 3, 0, 1, 2, 5, 8]
+                    const center = orbit.targetCells.find((c) => c.position === 4)
+                    const centerEmpty = !center || isCellEmpty(center)
+                    return Array.from({ length: 9 }).map((_, pos) => {
+                      const cell = orbit.targetCells.find((c) => c.position === pos)
+                      if (!cell) return <div key={pos} />
+                      const isMoving = cell.id === orbit.movingCellId
+                      const staggerIdx = order.indexOf(pos)
+                      // drill-down で pos=4 (= 移動セル) は stagger に含まれないので delay 0
+                      const fadeDelay = staggerIdx >= 0 ? staggerIdx * stagger : 0
+
+                      // 移動セルの transform 遷移は方向別:
+                      //  drill-down: delay 0, duration = fade — 一気に中心へ寄る
+                      //  drill-up  : delay 0, duration = staggerIdx * stagger + fade
+                      //              (natural timing で周辺に到着するよう長くドリフト)
+                      let movingDuration = fade
+                      const movingDelay = 0
+                      if (isMoving && orbit.direction === 'drill-up') {
+                        const arrival = Math.max(0, staggerIdx) * stagger + fade
+                        movingDuration = Math.max(fade, arrival)
+                      }
+
+                      // 移動セル用の keyframe 名 (8 方向から選択)
+                      const moveAnimName = isMoving
+                        ? orbitMoveAnimationName(orbit.movingFromPosition, pos)
+                        : null
+
+                      // CSS keyframes + animation-fill-mode: both を使う。これにより
+                      // 各セルは delay 期間中は from フレームで固定され、時間が来たら
+                      // 再生され、終了後は to フレームで固定される。React の state flip
+                      // に依存しないので、タイミングのブレで「一瞬で終わる」問題を防げる。
+                      const wrapperStyle: React.CSSProperties =
+                        isMoving && moveAnimName
+                          ? {
+                              animation: `${moveAnimName} ${movingDuration}ms ease-out ${movingDelay}ms both`,
+                              willChange: 'transform',
+                            }
+                          : {
+                              animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
+                              willChange: 'opacity',
+                            }
+                      const isCenter = pos === 4
+                      const isDisabled = !isCenter && centerEmpty
+                      return (
+                        <CellComponent
+                          key={cell.id}
+                          cell={cell}
+                          isCenter={isCenter}
+                          isDisabled={isDisabled}
+                          isCut={false}
+                          isDragSource={false}
+                          isDragOver={false}
+                          childCount={orbit.childCountsByCellId.get(cell.id) ?? 0}
+                          fontScale={fontScale}
+                          isInlineEditing={false}
+                          onStartInlineEdit={() => {}}
+                          onCommitInlineEdit={async () => {}}
+                          onInlineNavigate={() => {}}
+                          onDrill={() => {}}
+                          wrapperStyle={wrapperStyle}
+                        />
+                      )
+                    })
+                  })()}
                 </div>
               ) : (
                 <>

@@ -23,6 +23,8 @@ type Props = {
   onDragStart?: (cell: CellType) => void
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
   size?: 'normal' | 'small'
+  /** 外側ラッパー div に追加するスタイル (アニメーション制御用) */
+  wrapperStyle?: React.CSSProperties
 }
 
 const DRAG_THRESHOLD = 5   // ドラッグ判定の移動距離（px）
@@ -35,6 +37,7 @@ export default function Cell({
   onDrill,
   onDragStart, onContextMenu,
   size = 'normal',
+  wrapperStyle,
 }: Props) {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
@@ -297,6 +300,7 @@ export default function Cell({
     <div
       ref={cellRef}
       data-cell-id={cell.id}
+      style={wrapperStyle}
       className={`
         relative select-none overflow-hidden
         min-h-0 min-w-0

@@ -19,3 +19,47 @@ html {
   from { transform: translateX(-50%); }
   to   { transform: translateX(0); }
 }
+
+/* ドリル時のセル軌道アニメーション (3×3 表示のみ)
+   - 非移動セル: opacity 0 → 1 で staggered fade-in
+   - 移動セル: 8 方向 (nw/n/ne/w/e/sw/s/se) の開始位置ごとに keyframes を用意し
+     natural 位置へ translate。CSS 変数を keyframes 内で transform に使うのは
+     WebKit で補間が効かないケースがあるため、固定値で展開した keyframes を使う。
+   animation-fill-mode: both を付けることで delay 中は from 状態、終了後は to 状態を維持する
+   1 セル分の移動量は「100% + 8px (gap-2 の gap)」で固定 */
+@keyframes orbit-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes orbit-from-nw {
+  from { transform: translate(calc(-100% - 8px), calc(-100% - 8px)); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-n {
+  from { transform: translate(0, calc(-100% - 8px)); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-ne {
+  from { transform: translate(calc(100% + 8px), calc(-100% - 8px)); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-w {
+  from { transform: translate(calc(-100% - 8px), 0); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-e {
+  from { transform: translate(calc(100% + 8px), 0); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-sw {
+  from { transform: translate(calc(-100% - 8px), calc(100% + 8px)); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-s {
+  from { transform: translate(0, calc(100% + 8px)); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-se {
+  from { transform: translate(calc(100% + 8px), calc(100% + 8px)); }
+  to   { transform: translate(0, 0); }
+}
