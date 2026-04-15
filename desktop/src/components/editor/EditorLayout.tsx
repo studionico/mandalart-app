@@ -554,6 +554,24 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // gridData が固定化される (= 画面上で変化が見えない) ため。
     await cleanupGridIfCenterEmpty(oldGridId, oldCells)
 
+    // target 階層の並列兄弟を再取得して parallelGrids / parallelIndex を現在地に合わせる。
+    // これをやらないと、遷移元 (より下位) の parallelGrids が残ったまま target を表示
+    // してしまい、実在しない「＜」「＞」ボタンが出て、クリックすると別階層のグリッドに
+    // 飛んでしまう。
+    const targetEntry = breadcrumb.find((b) => b.gridId === targetGridId)
+    if (targetEntry) {
+      const siblings = targetEntry.cellId
+        ? await getChildGrids(targetEntry.cellId)
+        : await getRootGrids(mandalartId)
+      const idx = siblings.findIndex((g) => g.id === targetGridId)
+      setParallelGrids(siblings)
+      setParallelIndex(idx >= 0 ? idx : 0)
+    } else {
+      // 万一 target が breadcrumb 内に見つからない場合は安全側に倒してクリア
+      setParallelGrids([])
+      setParallelIndex(0)
+    }
+
     popBreadcrumbTo(targetGridId)
   }
 
