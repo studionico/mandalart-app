@@ -27,10 +27,19 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     onSuccess: () => Promise<void>,
   ): Promise<boolean> {
     const { error } = await (supabase.from(table) as unknown as {
-      upsert: (r: Record<string, unknown>) => Promise<{ error: { message: string; code?: string } | null }>
+      upsert: (r: Record<string, unknown>) => Promise<{ error: { message: string; code?: string; details?: string; hint?: string } | null }>
     }).upsert(row)
     if (error) {
-      console.error(`[push] ${table} upsert failed`, { id, row, error })
+      // エラー詳細をオブジェクトに畳み込まず、message / code / details / hint を個別に展開して表示
+      console.error(
+        `[push] ${table} upsert failed`,
+        `id=${id}`,
+        `code=${(error as { code?: string }).code ?? '?'}`,
+        `message=${error.message}`,
+        `details=${(error as { details?: string }).details ?? ''}`,
+        `hint=${(error as { hint?: string }).hint ?? ''}`,
+        'row=', row,
+      )
       failures.push({
         table,
         id,
