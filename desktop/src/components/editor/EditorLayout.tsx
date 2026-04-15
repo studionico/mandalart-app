@@ -487,6 +487,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   /**
    * 指定グリッドの中心セルが空なら soft-delete する。
+   * さらに、これが最後の子グリッド (= 並列を含めて他に兄弟が無い) だった場合は、
+   * ドリル元のセル (親セル) も連動してクリアする。これをやらないと、
+   * サブグリッドの中心セルを空にしても親セル側に値が残っていて「復活した」
+   * ように見えてしまう (親セルは DB 上別の行なので updateCell では連動しない)。
    * 呼び出し側は必要に応じて parallelGrids / parallelIndex を更新する。
    */
   async function cleanupGridIfCenterEmpty(gridId: string, cells: Cell[]): Promise<boolean> {
@@ -494,7 +498,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const isEmpty = !center || isCellEmpty(center)
     if (!isEmpty) return false
     try {
+      // 削除前にグリッド情報 (parent_cell_id) を取得しておく
+      const gridWithCells = await getGrid(gridId)
+      const parentCellId = gridWithCells.parent_cell_id
+
       await deleteGrid(gridId)
+
+      // 削除後、他の兄弟 (並列を含む) が 1 つも残っていなければドリル元セルも空にする
+      if (parentCellId) {
+        const siblings = await getChildGrids(parentCellId)
+        if (siblings.length === 0) {
+          await updateCell(parentCellId, { text: '', image_path: null, color: null })
+        }
+      }
       return true
     } catch (e) {
       console.error('cleanup deleteGrid failed:', e)
@@ -516,7 +532,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       if (breadcrumb.length === 1 && parallelGrids.length === 1) {
         await deleteMandalart(mandalartId)
       } else {
-        await deleteGrid(gridData.id).catch((e) => console.error('cleanup deleteGrid failed:', e))
+        await cleanupGridIfCenterEmpty(gridData.id, gridData.cells)
       }
     }
     navigate('/dashboard')
@@ -531,9 +547,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const oldGridId = gridData.id
     const oldCells = gridData.cells
 
-    popBreadcrumbTo(targetGridId)
-
+    // 先に cleanup (DB 上のグリッド削除 + 必要なら親セルのクリア) を完了させてから
+    // popBreadcrumbTo を呼ぶ。
+    // 順序を逆にすると、popBreadcrumbTo で React が再レンダし useGrid が target grid
+    // を即座にフェッチしてしまい、cleanup による親セルクリアが反映される前のキャッシュで
+    // gridData が固定化される (= 画面上で変化が見えない) ため。
     await cleanupGridIfCenterEmpty(oldGridId, oldCells)
+
+    popBreadcrumbTo(targetGridId)
   }
 
   // 並列ナビゲーション
