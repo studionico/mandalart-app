@@ -10,11 +10,13 @@ type Props = {
   dragOverId?: string | null
   fontScale: number
   inlineEditingCellId: string | null
+  userId?: string
+  mandalartId?: string
+  onCellSave?: (cellId: string, params: { text: string; image_path: string | null; color: string | null }) => Promise<void>
   onStartInlineEdit: (cell: Cell) => void
   onCommitInlineEdit: (cell: Cell, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: Cell) => void
-  onOpenModal: (cell: Cell) => void
   onDragStart?: (cell: Cell) => void
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
 }
@@ -22,8 +24,9 @@ type Props = {
 export default function GridView3x3({
   cells, childCounts, cutCellId, dragSourceId, dragOverId,
   fontScale, inlineEditingCellId,
+  userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
-  onDrill, onOpenModal, onDragStart, onContextMenu,
+  onDrill, onDragStart, onContextMenu,
 }: Props) {
   const center = getCenterCell(cells)
   const centerEmpty = !center || isCellEmpty(center)
@@ -50,11 +53,13 @@ export default function GridView3x3({
             childCount={childCounts.get(cell.id) ?? 0}
             fontScale={fontScale}
             isInlineEditing={cell.id === inlineEditingCellId}
+            userId={userId}
+            mandalartId={mandalartId}
+            onCellSave={onCellSave}
             onStartInlineEdit={onStartInlineEdit}
             onCommitInlineEdit={onCommitInlineEdit}
             onInlineNavigate={onInlineNavigate}
             onDrill={onDrill}
-            onOpenModal={onOpenModal}
             onDragStart={onDragStart}
             onContextMenu={onContextMenu}
           />

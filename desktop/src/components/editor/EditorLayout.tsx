@@ -13,7 +13,6 @@ import GridView3x3 from './GridView3x3'
 import GridView9x9 from './GridView9x9'
 import Breadcrumb from './Breadcrumb'
 import ParallelNav from './ParallelNav'
-import CellEditModal from './CellEditModal'
 import SidePanel from './SidePanel'
 import ImportDialog from './ImportDialog'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -72,9 +71,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
 
-  // セル編集モーダル (詳細編集 ⋯ ボタンから起動)
-  const [editingCell, setEditingCell] = useState<Cell | null>(null)
-  const [isMobile, setIsMobile] = useState(false)
 
   // インライン編集中のセル ID (textarea を表示するセル)
   const [inlineEditingCellId, setInlineEditingCellId] = useState<string | null>(null)
@@ -98,7 +94,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   useEffect(() => {
     setMandalartId(mandalartId)
-    setIsMobile(window.matchMedia('(max-width: 768px)').matches)
   }, [mandalartId, setMandalartId])
 
   // 初期ロード: ルートグリッドを取得してエディタを初期化
@@ -397,12 +392,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // 空セルでドリルしようとしても何もしない (編集はインラインで)
   }
 
-  // セル右上 ⋯ ボタンから呼び出される詳細編集モーダル
-  function handleCellOpenModal(cell: Cell) {
-    setInlineEditingCellId(null)
-    setEditingCell(cell)
-  }
-
   // インライン編集の開始 (シングルクリック)
   function handleCellStartInlineEdit(cell: Cell) {
     setInlineEditingCellId(cell.id)
@@ -544,18 +533,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   handlePasteRef.current = handlePaste
 
   async function handleStockPaste(item: StockItem) {
-    if (!editingCell) {
-      setToast({ message: 'ペーストするセルを選択してください', type: 'info' })
+    // インライン編集中のセルを貼り付け先にする (詳細編集モーダル廃止後の動線)
+    const targetCellId = inlineEditingCellId
+    if (!targetCellId) {
+      setToast({ message: 'ペースト先のセルをインライン編集中にしてください (またはドラッグ&ドロップしてください)', type: 'info' })
       return
     }
-    await pasteFromStock(item.id, editingCell.id)
+    await pasteFromStock(item.id, targetCellId)
     reload()
-  }
-
-  // Tab ナビゲーション
-  function handleNavigate(position: number) {
-    const cell = gridData?.cells.find((c) => c.position === position)
-    if (cell) setEditingCell(cell)
   }
 
   // エクスポート
@@ -681,11 +666,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   dragOverId={dragOverId}
                   fontScale={fontScale}
                   inlineEditingCellId={inlineEditingCellId}
+                  userId={userId}
+                  mandalartId={mandalartId}
+                  onCellSave={handleSaveCell}
                   onStartInlineEdit={handleCellStartInlineEdit}
                   onCommitInlineEdit={handleCellCommitInlineEdit}
                   onInlineNavigate={handleCellInlineNavigate}
                   onDrill={handleCellDrill}
-                  onOpenModal={handleCellOpenModal}
                   onDragStart={handleDragStart}
                   onContextMenu={handleContextMenu}
                 />
@@ -700,11 +687,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   dragOverId={dragOverId}
                   fontScale={fontScale}
                   inlineEditingCellId={inlineEditingCellId}
+                  userId={userId}
+                  mandalartId={mandalartId}
+                  onCellSave={handleSaveCell}
                   onStartInlineEdit={handleCellStartInlineEdit}
                   onCommitInlineEdit={handleCellCommitInlineEdit}
                   onInlineNavigate={handleCellInlineNavigate}
                   onDrill={handleCellDrill}
-                  onOpenModal={handleCellOpenModal}
                   onDragStart={handleDragStart}
                   onContextMenu={handleContextMenu}
                 />
@@ -737,18 +726,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           />
         </div>
       </div>
-
-      {/* セル編集モーダル */}
-      <CellEditModal
-        cell={editingCell}
-        allCells={gridData?.cells ?? []}
-        userId={userId}
-        mandalartId={mandalartId}
-        onSave={handleSaveCell}
-        onClose={() => setEditingCell(null)}
-        onNavigate={handleNavigate}
-        isMobile={isMobile}
-      />
 
       {/* コンテキストメニュー */}
       {contextMenu && (

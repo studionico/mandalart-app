@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
-import { getColorClasses } from '@/constants/colors'
-import { getCellImageUrl } from '@/lib/api/storage'
+import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
+import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
 
 type Props = {
   cell: CellType
@@ -13,11 +13,13 @@ type Props = {
   childCount: number
   fontScale: number
   isInlineEditing: boolean
+  userId?: string
+  mandalartId?: string
+  onCellSave?: (cellId: string, params: { text: string; image_path: string | null; color: string | null }) => Promise<void>
   onStartInlineEdit: (cell: CellType) => void
   onCommitInlineEdit: (cell: CellType, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: CellType) => void
-  onOpenModal: (cell: CellType) => void
   onDragStart?: (cell: CellType) => void
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
   size?: 'normal' | 'small'
@@ -28,8 +30,9 @@ const CLICK_DELAY = 220    // single vs double click 判定 (ms)
 
 export default function Cell({
   cell, isCenter, isDisabled, isCut, isDragSource, isDragOver, childCount, fontScale,
-  isInlineEditing, onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
-  onDrill, onOpenModal,
+  isInlineEditing, userId, mandalartId, onCellSave,
+  onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
+  onDrill,
   onDragStart, onContextMenu,
   size = 'normal',
 }: Props) {
@@ -43,6 +46,12 @@ export default function Cell({
   // インライン編集中にテキストエリアをダブルクリックすると 3×3 サイズに拡大表示する
   const [expandedRect, setExpandedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
   const isExpanded = expandedRect !== null
+
+  // 拡大エディタ用の色・画像ローカル state (編集中の暫定値。保存時に onCellSave で伝播)
+  const [editingColor, setEditingColor] = useState<string | null>(cell.color)
+  const [editingImagePath, setEditingImagePath] = useState<string | null>(cell.image_path)
+  const [editingImageUrl, setEditingImageUrl] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   // 画像読み込み
   useEffect(() => {
@@ -74,6 +83,72 @@ export default function Cell({
   useEffect(() => {
     if (!isInlineEditing && expandedRect) setExpandedRect(null)
   }, [isInlineEditing, expandedRect])
+
+  // インライン編集に入るたびに拡大エディタ用のローカル state を cell の値で初期化
+  useEffect(() => {
+    if (isInlineEditing) {
+      setEditingColor(cell.color)
+      setEditingImagePath(cell.image_path)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInlineEditing])
+
+  // editingImagePath から blob URL を解決 (拡大エディタのプレビュー用)
+  useEffect(() => {
+    let cancelled = false
+    if (!editingImagePath) {
+      setEditingImageUrl(null)
+      return
+    }
+    getCellImageUrl(editingImagePath).then((url) => {
+      if (!cancelled) setEditingImageUrl(url || null)
+    })
+    return () => { cancelled = true }
+  }, [editingImagePath])
+
+  async function handleSelectColor(newColor: string | null) {
+    setEditingColor(newColor)
+    if (onCellSave) {
+      await onCellSave(cell.id, {
+        text: draftText,
+        image_path: editingImagePath,
+        color: newColor,
+      })
+    }
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  async function handleUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !userId || !mandalartId || !onCellSave) return
+    setUploadingImage(true)
+    try {
+      if (editingImagePath) await deleteCellImage(editingImagePath).catch(() => {})
+      const path = await uploadCellImage(userId, mandalartId, cell.id, file)
+      setEditingImagePath(path)
+      await onCellSave(cell.id, {
+        text: draftText,
+        image_path: path,
+        color: editingColor,
+      })
+    } finally {
+      setUploadingImage(false)
+      setTimeout(() => textareaRef.current?.focus(), 0)
+    }
+  }
+
+  async function handleRemoveImage() {
+    if (!onCellSave) return
+    if (editingImagePath) await deleteCellImage(editingImagePath).catch(() => {})
+    setEditingImagePath(null)
+    await onCellSave(cell.id, {
+      text: draftText,
+      image_path: null,
+      color: editingColor,
+    })
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
 
   function handleTextareaDoubleClick(e: React.MouseEvent<HTMLTextAreaElement>) {
     e.stopPropagation()
@@ -248,12 +323,95 @@ export default function Cell({
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, cell) } : undefined}
     >
       {imageUrl && (
-        <div className="absolute inset-0 rounded-lg overflow-hidden">
-          <img src={imageUrl} alt="" className="w-full h-full object-cover opacity-60" />
+        <div className="absolute inset-0 overflow-hidden">
+          <img src={imageUrl} alt="" className="w-full h-full object-cover" />
         </div>
       )}
 
-      {isInlineEditing ? (
+      {isInlineEditing && isExpanded && expandedRect ? (
+        // 拡大エディタ: textarea + 背景色/画像ツールバー
+        <div
+          className={`fixed z-[100] flex flex-col border-[3px] border-blue-500 dark:border-blue-400 rounded-xl shadow-2xl overflow-hidden ${getColorClasses(editingColor).bg}`}
+          style={{
+            top: expandedRect.top,
+            left: expandedRect.left,
+            width: expandedRect.width,
+            height: expandedRect.height,
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.stopPropagation()}
+        >
+          {/* 背景画像 (エリアいっぱい、不透明) */}
+          {editingImageUrl && (
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <img src={editingImageUrl} alt="" className="w-full h-full object-cover" />
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            onBlur={commitDraft}
+            onKeyDown={handleTextareaKeyDown}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={handleTextareaDoubleClick}
+            style={{ fontSize: '22px', lineHeight: 1.5 }}
+            className={`relative z-10 flex-1 min-h-0 text-left bg-transparent resize-none outline-none overflow-auto p-5 ${getColorClasses(editingColor).text} placeholder-gray-300`}
+            placeholder=""
+          />
+          {/* ツールバー (onMouseDown で focus 移譲を阻止し、textarea のフォーカスを維持) */}
+          <div
+            onMouseDown={(e) => e.preventDefault()}
+            className="relative z-10 shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-gray-900/90 backdrop-blur px-3 py-2 flex items-center gap-3 flex-wrap"
+          >
+            {/* カラーピッカー */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleSelectColor(null)}
+                className={`w-6 h-6 rounded-full border-2 bg-white ${editingColor === null ? 'border-blue-500 scale-110' : 'border-gray-300 dark:border-gray-600'} transition-transform`}
+                title="デフォルト"
+              />
+              {PRESET_COLORS.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => handleSelectColor(c.key)}
+                  className={`w-6 h-6 rounded-full border-2 ${c.bg} ${editingColor === c.key ? 'border-blue-500 scale-110' : 'border-gray-300 dark:border-gray-600'} transition-transform`}
+                  title={c.label}
+                />
+              ))}
+            </div>
+
+            {/* 画像 */}
+            <div className="flex items-center gap-2 ml-auto">
+              {editingImageUrl ? (
+                <button
+                  type="button"
+                  onClick={handleRemoveImage}
+                  className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 border border-red-300 dark:border-red-700 rounded px-2 py-1 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  title="画像を削除"
+                >
+                  画像を削除
+                </button>
+              ) : (
+                <label className="cursor-pointer text-xs text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 select-none">
+                  {uploadingImage ? 'アップロード中...' : '画像を追加'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadImage}
+                    className="hidden"
+                    disabled={uploadingImage || !userId || !mandalartId}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : isInlineEditing ? (
         <textarea
           ref={textareaRef}
           value={draftText}
@@ -263,23 +421,8 @@ export default function Cell({
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={handleTextareaDoubleClick}
-          style={
-            isExpanded && expandedRect
-              ? {
-                  top: expandedRect.top,
-                  left: expandedRect.left,
-                  width: expandedRect.width,
-                  height: expandedRect.height,
-                  fontSize: '22px',
-                  lineHeight: 1.5,
-                }
-              : { ...fontStyle, ...textInsetStyle }
-          }
-          className={
-            isExpanded
-              ? `fixed z-[100] text-left bg-white dark:bg-gray-900 ${textColor} resize-none outline-none overflow-auto border-[3px] border-blue-500 dark:border-blue-400 rounded-xl shadow-2xl p-5 placeholder-gray-300`
-              : `absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`
-          }
+          style={{ ...fontStyle, ...textInsetStyle }}
+          className={`absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`}
           placeholder=""
         />
       ) : (
@@ -291,19 +434,6 @@ export default function Cell({
             {cell.text}
           </span>
         </div>
-      )}
-
-      {/* 詳細モーダルを開くボタン (hover 時のみ表示) */}
-      {!isInlineEditing && !isDisabled && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onOpenModal(cell) }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white/80 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 z-20"
-          title="詳細編集 (色 / 画像 / 長文)"
-        >
-          ⋯
-        </button>
       )}
 
     </div>
