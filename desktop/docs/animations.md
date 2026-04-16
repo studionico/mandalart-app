@@ -64,6 +64,12 @@ type SlideState = {
 | `drill-up` | 3×3 でサブグリッドの中心セル (pos 4) をクリック | 親グリッド内の「ドリル元セル」 — 中心 (pos 4) から自然位置へ移動 | `[7, 6, 3, 0, 1, 2, 5, 8, 4]` (中心が最後) |
 | `initial` | ダッシュボードからマンダラートを開いた直後 | なし (全セル fade-in のみ) | `[4, 7, 6, 3, 0, 1, 2, 5, 8]` (中心から開始) |
 
+### 9×9 ブロック orbit (orbit9)
+
+9×9 表示でも同じ演出を「サブグリッド (3×3 ブロック)」単位で再生する。`orbit9` state は `orbit` と同じ構造を持ち、`movingToPosition` / `movingFromPosition` がブロック単位の座標に変わっているだけ。セル orbit の `targetCells` に相当するものとして `targetRootCells` (中央ブロックに入る 9 セル) と `targetSubGrids` (周辺 8 ブロックに入れるサブグリッドデータ) を事前フェッチして持たせる。
+
+発火ケースは 3×3 と同じ 3 種類。いずれも中央ブロックは 9 セルすべてを再描画し、周辺ブロックは「子サブグリッドがあればその 9 セル、なければ親セル単独を中心に配置」という分岐で 9×9 構造を再現する。auto-clear useEffect は `childCounts` に加えて `subGrids` も pre-populate してから `setOrbit9(null)` にする (= `useSubGrids` の async fetch 遅延で一瞬空っぽに見えるのを防ぐ)。
+
 ### state
 
 ```ts
@@ -194,8 +200,13 @@ type ViewSwitchState = {
 
 ### 実装のしくみ
 
-- **`to-9x9`** — CSS keyframes `view-shrink-to-center` (scale 1 → 1/3) を中央の 3×3 ラッパーに適用。周辺ブロックは既存 `orbit-fade-in` を delay 200ms + stagger 85ms で。
+- **`to-9x9`** — 3 層構成 (下 → 上):
+  1. 周辺 8 ブロック (`orbit-fade-in`、delay 200ms + stagger 85ms)
+  2. 縮小する 3×3 (source): `view-shrink-to-center` で scale 1 → 1/3 + 後半 200–400ms で `view-fade-out` の 2 アニメーションを合成
+  3. **target の 9×9 中央ブロック (通常 9×9 render と完全同一の構造 = `bg-gray-300` wrapper + `size='small'` セル + `border-[6px]`)** を最前面に置き、200–400ms で `orbit-fade-in`
+  source → target のクロスフェードをすることで、transition layer 終了時の swap でテキストや枠が pop する問題を回避している (scaled 3×3 と実 9×9 center block はセル幅 ~66 vs ~62、gap 2.67 vs 1、textInset 5.3–5.7 vs 6 と微差があり直接 swap すると「一段階内側に収縮」する)。
 - **`to-3x3`** — 中央の 9 セルは最終 (3×3 natural) 位置に CSS Grid で配置し、`transform: translate(tx, ty) scale(1/3)` で一時的に 9×9 位置に押し込む。`viewSwitchPhase === 'end'` で `transform: translate(0,0) scale(1)` に切替 → `transition: transform 400ms ease-out ${delay}ms` で展開。double `requestAnimationFrame` で phase flip の間に確実に paint を挟み、WebKit の commit/paint 競合を回避する。周辺ブロックは `view-fade-out` keyframes で fade-out。
+  transform は Cell の `wrapperStyle` prop 経由でセル本体 (= grid item) に直接適用する。余分な `<div>` で囲むと Cell が grid item としてサイズを得られず空になってしまうので注意。
 
 ### タイミング
 
@@ -216,6 +227,14 @@ type ViewSwitchState = {
 **3. subGrids / childCounts の事前投入**
 
 `to-9x9` 後の通常描画に使う `subGrids` と `childCounts` を、アニメーション開始時点で `setSubGrids / setChildCounts` で投入しておく。これをしないと useSubGrids の async fetch が遅れて「アニメ終了 → 一瞬空っぽ → 遅れて正しい描画」とちらつく。
+
+**4. `to-9x9` で中央ブロックを 2 層にする理由**
+
+初期実装は「縮小 3×3 のみ」を描画 → 終了時に通常 9×9 render に切替、という構成だった。しかしこの 2 つはセル幅・gap・textInset・外枠に微差があり、swap の瞬間に「中央ブロックのテキストが一段階内側に収縮する」視覚的な pop が起きた。対策として target レイヤー (通常 9×9 render と同じ構造) を最前面に置いてクロスフェードし、400ms 時点でピクセル一致状態にしてから transition layer を終了させる。
+
+**5. `to-3x3` で Cell を余分な div で囲まない**
+
+Cell の root div は CSS Grid item として stretch される前提。余分な `<div style={{transform}}>` ラッパーで囲むと、Cell のルートが grid item ではなくなって `height: auto`(=コンテンツ依存) で実質 0 高さに潰れる。transform / transition は必ず Cell の `wrapperStyle` prop 経由でルート div に直接適用する。
 
 ---
 

@@ -68,7 +68,12 @@ getDeletedMandalarts(): Promise<Mandalart[]>
 // ゴミ箱からの復元 (配下の grids / cells の deleted_at も NULL に戻す)
 restoreMandalart(id: string): Promise<void>
 
-// 完全削除 (物理削除)。ローカル DB から cells / grids / mandalarts を順に DELETE する
+// 完全削除 (物理削除)。ゴミ箱から元に戻せなくなる
+// 1. ローカル: cells / grids / mandalarts を順に物理 DELETE
+// 2. クラウド (サインイン時): 同じ順で Supabase から delete().eq() で消す
+//    → これをやらないと次回 pullAll で cloud の deleted_at 付き行が再挿入されて
+//      ゴミ箱に復活してしまう
+//    ネットワーク断 / RLS エラーなどで cloud delete 失敗時は warn ログのみで非致命
 permanentDeleteMandalart(id: string): Promise<void>
 ```
 
@@ -285,6 +290,14 @@ export type SyncStats = {
 // Supabase Realtime (postgres_changes) を mandalarts / grids / cells の 3 テーブルで購読
 // 受信したペイロードをローカル DB に upsert (deleted_at 含む)
 // すべての apply 関数は try/catch で囲まれており、失敗しても他のテーブルへの伝播を止めない
+//
+// 実運用での注意:
+//  1. postgres_changes の table フィルタは discriminator として効かない場合がある。
+//     各ハンドラ冒頭で if (payload.table !== 'X') return のガードを必ず入れる
+//  2. DELETE は cloud の FK CASCADE で連鎖するが、realtime では個別テーブルごとにしか
+//     イベントが来ない。しかも cloud に未 push の子行にはイベントが発行されない。
+//     各 DELETE ハンドラで「cells → grids → mandalarts」の順に明示カスケードしないと
+//     ローカルに孤立した子行が残り、push で RLS 拒否の原因になる
 subscribeRemoteChanges(onChange: () => void): () => void   // unsubscribe 関数を返す
 ```
 

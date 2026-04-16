@@ -202,6 +202,8 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 - **検索**: タイトルとセル本文を横断する全文検索 (`searchMandalarts`)、200ms debounce
 - **複製**: 全グリッド / セルを再帰コピー。タイトルにサフィックス (「〜 のコピー」等) は付けない
 - **ゴミ箱**: `deleted_at` によるソフトデリート。ダッシュボードの「ゴミ箱」ボタンから `TrashDialog` を開いて復元 / 完全削除
+  - **完全削除の 2 クリック確認**: Tauri v2 の WebView は `window.confirm` が動かないので、ブラウザ標準ダイアログではなく「1 回目のクリックでボタン表記を『本当に削除?』に切替、2 回目で実行、4 秒放置で自動リセット」という state ベース UI に実装 ([`TrashDialog.tsx`](desktop/src/components/dashboard/TrashDialog.tsx))
+  - **完全削除は local + cloud 両方を消す**: `permanentDeleteMandalart` は local SQLite から `DELETE` した後、サインイン中であれば Supabase 側も `cells → grids → mandalarts` の順で `delete().eq('...')` で消す。これをやらないと「local で完全削除 → 次回 pull で cloud の `deleted_at` 行が再挿入 → ゴミ箱に復活」というバグになる。ネットワーク断 / RLS エラーで cloud delete が失敗した場合は warn ログのみで非致命 (local は既に消えているので UI 上はゴミ箱から消える)
 
 ### 文字サイズ
 
@@ -237,19 +239,25 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 
 ### アニメーション
 
-エディタで 2 種類の CSS-only アニメーションを再生する (React state flip + `transition` は WebKit でタイミングが不安定なので、全て `@keyframes` + `animation-fill-mode: both` に統一):
+エディタで 3 種類の CSS-only アニメーションを再生する (React state flip + `transition` は WebKit でタイミングが不安定なので、基本は `@keyframes` + `animation-fill-mode: both` に統一。per-cell で translate 量が異なる `to-3x3` のみ例外的に double rAF + transition を使う):
 
 1. **Slide** (並列グリッド切替): `fromCells` と `toCells` を横並びにした 200% 幅コンテナを `parallel-slide-forward/backward` で `translateX` させる。320ms
-2. **Orbit** (ドリルダウン / ドリルアップ / 初回表示): 3×3 表示専用。時計回り順にセルが staggered fade-in し、「クリックされたセルだけ」が `orbit-from-{nw/n/ne/w/e/sw/s/se}` の 8 方向 keyframes で natural 位置へドリフトする。約 1000〜1080ms
-   - drill-down: `[7, 6, 3, 0, 1, 2, 5, 8]` + 中心は移動セル (クリック位置 → 中心)
-   - drill-up:   `[7, 6, 3, 0, 1, 2, 5, 8, 4]` + 親セル (中心 → 自然位置) が natural timing でドリフト
-   - initial:    `[4, 7, 6, 3, 0, 1, 2, 5, 8]` (中心から周辺へ時計回り、移動セルなし)
+2. **Orbit** (ドリルダウン / ドリルアップ / 初回表示): 時計回り順にセル/ブロックが staggered fade-in し、「クリックされた要素だけ」が `orbit-from-{nw/n/ne/w/e/sw/s/se}` の 8 方向 keyframes で natural 位置へドリフトする。約 1000〜1080ms
+   - drill-down: `[7, 6, 3, 0, 1, 2, 5, 8]` + 中心は移動要素 (クリック位置 → 中心)
+   - drill-up:   `[7, 6, 3, 0, 1, 2, 5, 8, 4]` + 親 (中心 → 自然位置) が natural timing でドリフト
+   - initial:    `[4, 7, 6, 3, 0, 1, 2, 5, 8]` (中心から周辺へ時計回り、移動なし)
+   - 3×3 表示ではセル単位 (`orbit`)、9×9 表示ではサブグリッドブロック単位 (`orbit9`) で同じ演出を再生する
+3. **View Switch** (3×3 ↔ 9×9 表示モード切替):
+   - `to-9x9` (約 1195ms): 中央の 3×3 を `view-shrink-to-center` (scale 1 → 1/3) で縮小しつつ、周辺 8 ブロックを時計回り stagger fade-in。400ms 時点で source (縮小 3×3) → target (通常 9×9 render と同一構造の中央ブロック) にクロスフェードして swap の pop を消す
+   - `to-3x3` (約 1080ms): 中央ブロックの 9 セルを `transform: translate(tx,ty) scale(1/3) → translate(0,0) scale(1)` で時計回り `[7,6,3,0,1,2,5,8,4]` に拡大展開、周辺 8 ブロックは fade-out。per-cell で tx/ty が違うので CSS 変数方式を避け、React state flip + double rAF + inline transform/transition を使用
 
 詳細な仕組みとハマりポイントは [`animations.md`](desktop/docs/animations.md) 参照。主要な落とし穴:
 - `@keyframes` 内で `transform: var(--x)` は WebKit で補間されない → 固定 keyframes 8 方向で対応
 - drill-up で親が root の場合は `parent.cellId === null` で movingCell が null になる → `currentEntry.cellId` を使う必要あり
-- orbit 終了時は `childCounts` state を pre-populate してから `setOrbit(null)` にしないと border 幅が一瞬ズレてちらつく
+- orbit / orbit9 終了時は `childCounts` (と `subGrids`) を pre-populate してから `setOrbit(null)` にしないと border 幅が一瞬ズレてちらつく
 - `ResizeObserver` の `gridSize` 更新は `Math.floor` + 4px 未満を無視して微振動を吸収する
+- `to-9x9` は scaled 3×3 と実 9×9 中央ブロックで textInset / cell 幅 / gap に微差があるため、単純 swap だと「テキストが一段階内側に収縮」する pop が起きる → クロスフェードで解決
+- `to-3x3` のセルは Cell の `wrapperStyle` prop 経由で transform を適用する。余分な `<div>` で囲むと Cell が grid item ではなくなり高さ 0 に潰れる
 
 ---
 
@@ -280,6 +288,16 @@ React Router v7 HashRouter ([`App.tsx`](desktop/src/App.tsx)):
 - 全 `SELECT` に `WHERE deleted_at IS NULL` フィルタが付いている
 - `pushAll` / `pullAll` は `deleted_at` カラムも含めて upsert するので、**オフラインで削除してもオンライン復帰時に別デバイスへ伝播する**
 - ゴミ箱 UI (`TrashDialog`) で `deleted_at IS NOT NULL` の行を一覧表示し、復元 (null に戻す) か物理削除ができる
+- 物理削除 (`permanentDeleteMandalart`) は **local と cloud の両方を消す**。cloud を残すと次回 pull で復活する (上の「マンダラート管理 / 完全削除」参照)
+
+### Supabase Realtime のハマりポイント
+
+[`lib/realtime.ts`](desktop/src/lib/realtime.ts) で 3 テーブル (`mandalarts` / `grids` / `cells`) を個別に購読しているが、実運用で 2 つ落とし穴があった:
+
+1. **`table` フィルターが discriminator として効かない場合がある**: `postgres_changes` を `{ table: 'mandalarts' }` で購読していても、`cells` への変更イベントが混線して `mandalarts` のハンドラに届くことがある。各ハンドラ冒頭で `if (payload.table !== 'mandalarts') return` のようにガードしないと、cells ペイロードを mandalarts 行として INSERT しようとして NOT NULL 制約違反になる
+2. **DELETE は個別テーブルごとにしかイベントが来ない + cloud に未 push の子行はイベントが発行されない**: cloud 側は FK CASCADE で自動連鎖削除するが、realtime 経由で local に届くのは DELETE されたテーブルの行のみ。ローカルに「cloud にまだ push されていない子 grids / cells」があると、親の DELETE イベントだけでは孤立して残る。各 DELETE ハンドラで `DELETE FROM cells WHERE grid_id IN (...)` のように子孫まで明示的にカスケードする必要がある
+
+これらを怠ると「push 時に RLS 拒否で同期エラー」「mandalarts.title NOT NULL 制約違反」といった症状が出る。
 
 ### Supabase 側のスキーマ修正が必要
 
