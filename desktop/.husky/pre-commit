@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# pre-commit hook: commit 前に以下を順に実行し、失敗したら commit を中止する。
+#   1. lint-staged で staged TS/TSX に eslint --fix
+#   2. `npm run typecheck` で tsc --noEmit
+#
+# 各コマンドは desktop/ 配下から実行する。失敗時は husky が exit code 非 0 を見て
+# commit を拒否してくれる。緊急時は `git commit --no-verify` で bypass できるが、
+# CLAUDE.md の「Git の安全ルール」に従って基本使わない。
+
+cd "$(dirname "$0")/.." || exit 1
+
+npx lint-staged || exit 1
+npm run typecheck || exit 1

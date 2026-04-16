@@ -121,7 +121,6 @@ export default function CellEditModal({
         <label className="block text-xs font-medium text-gray-500 mb-1.5">画像</label>
         {imageUrl ? (
           <div className="relative inline-block">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl} alt="" className="h-24 w-24 object-cover rounded-lg border border-gray-200" />
             <button
               onClick={handleImageRemove}

@@ -372,3 +372,74 @@ MVP 完了後に、実際の使用感から出てきた要望を順次対応。
 - `loadSeqRef` で race 対策 (古いレスポンスで新しい結果を上書きしない)
 - FK 制約撤廃 (migration 001 を FK なし版に書き直し + ローカル DB を再作成)
 - `PRAGMA journal_mode = WAL` + `busy_timeout` を `getDb` で設定
+
+---
+
+## フェーズ 28: 開発体制の整備 ✅
+
+MVP 後の開発効率と退行防止を目的に、自動検査・テスト・ドキュメント参照性を整備。
+
+### 28.1 ハードコーディング排除 + 定数化ルール ✅
+- `constants/grid.ts` / `timing.ts` / `layout.ts` / `storage.ts` を新設
+- 中心 position、orbit 登場順、アニメ timing、レイアウト px、localStorage キーを一元管理
+- CSS 側は `--outer-grid-gap` で keyframes 内の 8px を統一
+- CLAUDE.md に「コーディング規約 / ハードコーディング禁止」セクションを追加
+
+### 28.2 自動検査 (lint / test / CI) ✅
+- **ESLint v9 flat config** (`eslint.config.js`): `@eslint/js` + `typescript-eslint` + `eslint-plugin-react-hooks` (v7) + `eslint-plugin-react-refresh`
+  - react-hooks v7 の新ルール (`set-state-in-effect` / `refs` / `set-state-in-render`) は warn に留めている
+- **husky v9 + lint-staged**: `desktop/.husky/pre-commit` が commit 時に lint-staged + typecheck を実行
+- **Vitest**: `vitest.config.ts` (node env)、ピュア関数の unit test 4 本 (dnd / grid / tabOrder / import-parser)
+- **CI** (`.github/workflows/ci.yml`): push / PR で typecheck → lint → test → vite build
+
+### 28.3 docs 参照性の強化 ✅
+- CLAUDE.md 冒頭に「タスク逆引き index」(何を触る時にどの docs を読むか)
+- CLAUDE.md に「タスクタイプ別チェックリスト」(アニメ / 新 API / 定数追加 / スキーマ変更 / 同期)
+- CLAUDE.md に「ローカル検査 / CI」節 (各コマンドと発火タイミングの表)
+
+### 28.4 ウインドウ状態の永続化 ✅
+- `tauri-plugin-window-state` を導入、終了時のウインドウサイズ・位置・最大化状態を
+  AppConfig (`~/Library/Application Support/jp.mandalart.app/window-state.json`) に保存し、
+  起動時に復元
+
+### 28.5 ダッシュボード入口の 3×3 統一 ✅
+- `openMandalart(id)` ヘルパーで `setViewMode('3x3')` → `navigate`
+- 新規作成 / カードクリック / インポート完了の 3 経路を統一
+
+---
+
+## フェーズ 29 以降: 将来取り組む改善 ⬜
+
+今回の整備でスコープ外にした項目。導入コストが見合う時期に検討。
+
+### 29.1 カスタム ESLint rule で規約を機械チェック ⬜
+- `localStorage.{getItem,setItem}` の直接使用禁止 (→ `STORAGE_KEYS` 強制)
+- `position === <数値>` の裸比較禁止 (→ `CENTER_POSITION` / `isCenterPosition()` 強制)
+- `setTimeout(fn, <閾値超>)` の magic number 禁止
+- 実装は `no-restricted-syntax` rule を拡張するか、軽量なカスタムプラグインを自作
+
+### 29.2 React Testing Library による UI smoke test ⬜
+- セル操作 (中央空 → 周辺 disabled / shift+tab / 編集保存) の smoke test
+- jsdom 環境の vitest project を追加して node テストと共存
+
+### 29.3 軽量 ADR (決定ログ) ⬜
+- `desktop/docs/decisions/` に 1 ファイル 1 決定で記録:
+  - 001: FK 制約を張らない理由 (循環カスケード問題)
+  - 002: Realtime の table filter guard + DELETE カスケード
+  - 003: View switch のクロスフェード (swap pop 回避)
+  - 004: 完全削除は local + cloud 両方実行 (pull 復活回避)
+
+### 29.4 用語集 (glossary.md) ⬜
+- center cell / 中心セル / center block / サブグリッド / 並列グリッド 等の定義を固定
+- AI セッションを跨いだ用語のブレを減らす
+
+### 29.5 プロジェクト専用 slash command ⬜
+- `.claude/commands/check-rules.md` — ハードコーディング検出 (grep ベース)
+- `.claude/commands/sync-docs.md` — constants / api 変更に対応する docs 更新の確認
+- `.claude/commands/add-constant.md` — 定数追加と CLAUDE.md 定数一覧の同期
+
+### 29.6 release.yml への CI 前置 ⬜
+- tag push で release する前に ci job 成功を require する (CI 失敗なら release しない)
+
+### 29.7 CHANGELOG.md ⬜
+- ユーザー向けリリースノート + 次回 Claude セッションの参照用コンテキスト

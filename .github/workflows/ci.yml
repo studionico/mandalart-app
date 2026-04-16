@@ -1,0 +1,44 @@
+name: CI
+
+# 通常の push と PR で静的検査・テストを走らせる。
+# Rust ビルドは重いので release.yml (tag push) にのみ任せ、ここでは
+# フロントエンドの typecheck / lint / test / vite build だけを確認する。
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        # husky の prepare script が git 未検出時に失敗するのを回避
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build (Vite only)
+        # Supabase env は CI では未設定でも起動できる (client.ts がフォールバック)
+        run: npm run build

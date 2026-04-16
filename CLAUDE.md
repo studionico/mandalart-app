@@ -2,6 +2,79 @@
 
 このファイルは Claude Code (claude.ai/code) がこのリポジトリで作業する際のガイドです。
 
+## タスク逆引き index (まずここを見る)
+
+何を触るかによって、実装前に読むべき docs と守るべきルールが違う。作業を始める前に該当行を確認すること。
+
+| 触るもの | 先に読む | 守る / 使う |
+|---|---|---|
+| セルの見た目 / セル操作 | [`requirements.md`](desktop/docs/requirements.md), [`typography.md`](desktop/docs/typography.md) | 本 CLAUDE.md「セル操作」「セルのビジュアル」節 |
+| アニメーション (orbit / slide / view switch) | [`animations.md`](desktop/docs/animations.md) | 新 keyframes は [`index.css`](desktop/src/index.css)、新 timing は [`constants/timing.ts`](desktop/src/constants/timing.ts)。アニメ中は `pointer-events: none` を忘れずに |
+| lib/api の関数追加・変更 | [`api-spec.md`](desktop/docs/api-spec.md), [`data-model.md`](desktop/docs/data-model.md) | 定数化ルール (下記「ハードコーディング禁止」)、ピュア関数は Vitest で test 追加 |
+| DB スキーマ変更 (ローカル SQLite) | [`data-model.md`](desktop/docs/data-model.md) + [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | 新マイグレーション → [`src-tauri/migrations/`](desktop/src-tauri/migrations/) に番号付きで追加 → [`lib.rs`](desktop/src-tauri/src/lib.rs) に登録 → Supabase 側の手動作業も docs に追記 |
+| 同期・realtime | 本 CLAUDE.md「Supabase Realtime のハマりポイント」+ [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | DELETE ハンドラで明示カスケード、table filter guard (`if (payload.table !== '...') return`) を必ず入れる |
+| 定数追加 / 変更 | 本 CLAUDE.md「ハードコーディング禁止」 | [`constants/`](desktop/src/constants/) 配下の該当ファイル + 同一ファイル内にコメントで意図を残す |
+| ダッシュボード・認証 | [`requirements.md`](desktop/docs/requirements.md), [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | `DashboardPage` の `openMandalart()` ヘルパーを経由 (viewMode を 3×3 にリセット) |
+| リリース / 自動更新 | [`updater-setup.md`](desktop/docs/updater-setup.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) | version は `tauri.conf.json` と `package.json` と `Cargo.toml` の 3 箇所を揃える |
+| CI / テスト / lint | 本 CLAUDE.md「ローカル検査 / CI」 | `npm run typecheck` / `lint` / `test` で検査、pre-commit hook が commit 時に自動実行 |
+
+## ローカル検査 / CI
+
+自動検査のしくみと各コマンド:
+
+| 検査 | コマンド (`desktop/` から) | タイミング |
+|---|---|---|
+| 型チェック | `npm run typecheck` (`tsc --noEmit`) | pre-commit + CI |
+| ESLint | `npm run lint` (autofix: `npm run lint:fix`) | pre-commit (staged のみ) + CI |
+| ユニットテスト | `npm test` (watch: `npm run test:watch`) | CI (ローカルでも手動で) |
+| ビルド検証 | `npm run build` | CI のみ |
+| Tauri dev | `npm run tauri dev` | 手動 |
+| Tauri release build | `npm run tauri build` | リリース時 |
+
+- **pre-commit hook** ([`desktop/.husky/pre-commit`](desktop/.husky/pre-commit)): `lint-staged` → `typecheck` の順で実行。失敗したら commit を拒否。緊急時のみ `git commit --no-verify` で bypass 可 (基本使わない)
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): 全 branch への push と PR で typecheck / lint / test / vite build を実行。Rust ビルドは release.yml 側に分離
+- **lint の warning 扱い**: react-hooks v7 の新ルール (`set-state-in-effect` / `refs` / `set-state-in-render`) は既存コードへの影響が大きいので `warn` に留めている。新規コードを書くときは避けるのが望ましい
+
+## タスクタイプ別チェックリスト
+
+共通: **作業前にタスク逆引き index を確認** → 該当 docs を読む → 実装 → 検証。
+
+### アニメを触る時
+- [ ] [`animations.md`](desktop/docs/animations.md) を読む
+- [ ] 新 keyframes は [`index.css`](desktop/src/index.css) に追加
+- [ ] 新 timing は [`constants/timing.ts`](desktop/src/constants/timing.ts) に定数追加
+- [ ] アニメ中は `pointer-events: none` + 編集系 props を no-op で遮断
+- [ ] WebKit で `transform: var(--x)` は補間が効かないので避ける (固定 keyframes に展開する)
+- [ ] 終了時に state を pre-populate して swap pop を防ぐ (childCounts / subGrids)
+
+### 新 API 関数を追加する時
+- [ ] `lib/api/` の適切なファイルに追加
+- [ ] [`api-spec.md`](desktop/docs/api-spec.md) に関数シグネチャとコメントを追記
+- [ ] 定数 (position === N 等) は裸で書かず `constants/grid.ts` の定数を参照
+- [ ] ピュア関数なら [`__tests__/`](desktop/src/) 配下に Vitest テストを追加
+- [ ] cloud 同期が必要なら `lib/sync/push.ts` の upsert 対象カラムも更新
+
+### 定数を追加 / 変更する時
+- [ ] [`constants/`](desktop/src/constants/) 配下の既存カテゴリ (`grid` / `timing` / `layout` / `storage` / `colors` / `tabOrder`) に属するか確認
+- [ ] 属さないなら新ファイル `constants/<カテゴリ>.ts` を作る
+- [ ] 定数のコメントに「なぜこの値か」を書く (連動する他の値 / Tailwind プリセットとの関係など)
+- [ ] CLAUDE.md の「ハードコーディング禁止」セクションの定数一覧を更新
+
+### DB スキーマを変更する時
+- [ ] [`src-tauri/migrations/`](desktop/src-tauri/migrations/) に `00N_<name>.sql` を追加 (版番号は既存の最大値 + 1)
+- [ ] [`lib.rs`](desktop/src-tauri/src/lib.rs) の `add_migrations` に登録
+- [ ] [`data-model.md`](desktop/docs/data-model.md) のスキーマ記述 / マイグレーション履歴を更新
+- [ ] Supabase 側にも同等の変更が必要なら [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) に「既知のスキーマ修正」として追記
+- [ ] `lib/sync/push.ts` / `pull.ts` / `realtime.ts` が新カラムを扱うよう更新
+
+### 同期 / realtime に触れる時
+- [ ] 本 CLAUDE.md「Supabase Realtime のハマりポイント」節を読む
+- [ ] 新 DELETE ハンドラには子孫カスケードを明示実装 (cloud の FK CASCADE には頼らない)
+- [ ] 各 `postgres_changes` ハンドラ冒頭で `if (payload.table !== 'X') return` のガード
+- [ ] pull / push は `deleted_at` を含めて upsert (soft delete の伝播)
+
+---
+
 ## コーディング規約
 
 ### ハードコーディング禁止

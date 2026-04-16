@@ -422,7 +422,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       })
       .catch((e) => console.error('loadChildCounts failed:', e))
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridData])
 
   // 現在表示中のグリッドの中心セル (position=4) が編集されたら、
@@ -551,7 +550,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       document.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Tauri ネイティブのファイルドロップイベント
   // 画像ファイルを受け付け、ドロップ位置のセルに保存 + image_path を更新
