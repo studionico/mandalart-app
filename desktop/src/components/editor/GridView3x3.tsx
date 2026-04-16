@@ -1,6 +1,7 @@
 import type { Cell } from '@/types'
 import CellComponent from './Cell'
 import { getCenterCell, isCellEmpty } from '@/lib/utils/grid'
+import { GRID_CELL_COUNT, isCenterPosition } from '@/constants/grid'
 
 type Props = {
   cells: Cell[]
@@ -34,11 +35,11 @@ export default function GridView3x3({
 
   return (
     <div data-grid-container className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full">
-      {Array.from({ length: 9 }).map((_, i) => {
+      {Array.from({ length: GRID_CELL_COUNT }).map((_, i) => {
         const cell = cellMap.get(i)
         if (!cell) return <div key={i} className="rounded-lg bg-gray-100 dark:bg-gray-900" />
 
-        const isCenter   = i === 4
+        const isCenter   = isCenterPosition(i)
         const isDisabled = !isCenter && centerEmpty
 
         return (

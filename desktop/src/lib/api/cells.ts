@@ -1,4 +1,5 @@
 import { query, execute, generateId, now } from '../db'
+import { CENTER_POSITION } from '@/constants/grid'
 import type { Cell } from '../../types'
 
 export async function updateCell(
@@ -24,7 +25,7 @@ export async function updateCell(
   // が更新されたら、mandalarts.title をそのテキストにミラーする。
   // title は「ルート中心セルのキャッシュ」として扱い、
   // ダッシュボードの表示 / 検索 / ソートに使う。
-  if (cell && cell.position === 4 && params.text !== undefined) {
+  if (cell && cell.position === CENTER_POSITION && params.text !== undefined) {
     const grids = await query<{ mandalart_id: string; parent_cell_id: string | null; sort_order: number }>(
       'SELECT mandalart_id, parent_cell_id, sort_order FROM grids WHERE id = ?',
       [cell.grid_id],
@@ -125,7 +126,7 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
 
   // 2) 中心セルで子グリッドを持たない場合、
   //    「その中心セルがテーマとしているグリッド自体」を subtree として複製する。
-  if (src.position === 4 && childGrids.length === 0) {
+  if (src.position === CENTER_POSITION && childGrids.length === 0) {
     await copyGridRecursive(src.grid_id, targetCellId, 0)
   }
 

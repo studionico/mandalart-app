@@ -3,6 +3,7 @@ import Modal from '@/components/ui/Modal'
 import Button from '@/components/ui/Button'
 import type { GridSnapshot } from '@/types'
 import { parseTextToSnapshot, importFromJSON, importIntoCell } from '@/lib/api/transfer'
+import { CENTER_POSITION, PERIPHERAL_POSITIONS } from '@/constants/grid'
 
 type Mode =
   | { kind: 'new' }
@@ -186,9 +187,9 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
 }
 
 function SnapshotPreview({ snapshot, depth = 0 }: { snapshot: GridSnapshot; depth?: number }) {
-  const center = snapshot.cells.find((c) => c.position === 4)
+  const center = snapshot.cells.find((c) => c.position === CENTER_POSITION)
   // 周辺セルを position 順に並べて表示 (中心は除く)
-  const peripherals = [0, 1, 2, 3, 5, 6, 7, 8]
+  const peripherals = PERIPHERAL_POSITIONS
     .map((pos) => snapshot.cells.find((c) => c.position === pos))
     .filter((c): c is NonNullable<typeof c> => !!c && c.text.trim() !== '')
 

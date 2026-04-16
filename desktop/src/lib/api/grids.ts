@@ -1,4 +1,5 @@
 import { query, execute, generateId, now } from '../db'
+import { GRID_CELL_COUNT } from '@/constants/grid'
 import type { Grid, Cell } from '../../types'
 
 export async function getRootGrids(mandalartId: string): Promise<Grid[]> {
@@ -41,7 +42,7 @@ export async function createGrid(params: {
     [gridId, params.mandalartId, params.parentCellId, params.sortOrder, ts, ts]
   )
 
-  const cellInserts = Array.from({ length: 9 }).map((_, i) => ({
+  const cellInserts = Array.from({ length: GRID_CELL_COUNT }).map((_, i) => ({
     id: generateId(), grid_id: gridId, position: i, ts,
   }))
   for (const c of cellInserts) {

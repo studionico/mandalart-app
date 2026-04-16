@@ -1,3 +1,4 @@
+import { CENTER_POSITION } from '@/constants/grid'
 import type { Cell } from '@/types'
 
 /** セルが「空」かどうか（text が空 かつ image_path が null） */
@@ -7,12 +8,12 @@ export function isCellEmpty(cell: Pick<Cell, 'text' | 'image_path'>): boolean {
 
 /** 中心セル（position 4）を取得 */
 export function getCenterCell(cells: Cell[]): Cell | undefined {
-  return cells.find((c) => c.position === 4)
+  return cells.find((c) => c.position === CENTER_POSITION)
 }
 
 /** 周辺セル（position 0-3, 5-8）を取得 */
 export function getPeripheralCells(cells: Cell[]): Cell[] {
-  return cells.filter((c) => c.position !== 4)
+  return cells.filter((c) => c.position !== CENTER_POSITION)
 }
 
 /** 周辺セルに入力があるか（中心クリア可否チェック） */

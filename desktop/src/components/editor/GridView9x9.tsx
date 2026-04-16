@@ -1,6 +1,7 @@
 import type { Cell, Grid } from '@/types'
 import CellComponent from './Cell'
 import { getCenterCell, isCellEmpty } from '@/lib/utils/grid'
+import { CENTER_POSITION, GRID_CELL_COUNT, isCenterPosition } from '@/constants/grid'
 
 type SubGrid = {
   grid: Grid
@@ -46,8 +47,8 @@ export default function GridView9x9({
 
   return (
     <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full">
-      {Array.from({ length: 9 }).map((_, outerPos) => {
-        const isRootCenter = outerPos === 4
+      {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+        const isRootCenter = isCenterPosition(outerPos)
 
         // 9×9 表示の中央ブロックはルートグリッド自体の 9 セルを描画する
         if (isRootCenter) {
@@ -57,10 +58,10 @@ export default function GridView9x9({
               data-grid-container
               className={`${wrapperBase} border-[6px] border-black dark:border-white`}
             >
-              {Array.from({ length: 9 }).map((_, innerPos) => {
+              {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
                 const cell = rootCellMap.get(innerPos)
                 if (!cell) return <div key={innerPos} className={emptyCellClass} />
-                const isInnerCenter = innerPos === 4
+                const isInnerCenter = isCenterPosition(innerPos)
                 const isDisabled = !isInnerCenter && rootCenterEmpty
 
                 return (
@@ -109,11 +110,11 @@ export default function GridView9x9({
 
         return (
           <div key={outerPos} data-grid-container className={`${wrapperBase} ${borderClass}`}>
-            {Array.from({ length: 9 }).map((_, innerPos) => {
+            {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
               if (subCellMap) {
                 const cell = subCellMap.get(innerPos)
                 if (!cell) return <div key={innerPos} className={emptyCellClass} />
-                const isSubCenter = innerPos === 4
+                const isSubCenter = isCenterPosition(innerPos)
                 const isDisabled = !isSubCenter && subCenterEmpty
 
                 return (
@@ -143,7 +144,7 @@ export default function GridView9x9({
               }
 
               // 子サブグリッドが無い場合: ルートセル本体を中央に、周辺は空の白セル
-              if (innerPos === 4 && rootCell) {
+              if (innerPos === CENTER_POSITION && rootCell) {
                 return (
                   <CellComponent
                     key={rootCell.id + '-center'}

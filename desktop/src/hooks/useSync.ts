@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { syncAll, type SyncStats } from '@/lib/sync'
 import { subscribeRemoteChanges } from '@/lib/realtime'
 import { useAuthStore } from '@/store/authStore'
+import { SYNC_DEBOUNCE_MS } from '@/constants/timing'
 
 export type SyncStatus = 'idle' | 'syncing' | 'error' | 'offline'
 
@@ -49,7 +50,7 @@ export function useSync() {
 
   // Realtime subscription (サインイン中のみ)
   // 自分自身の push による postgres_changes イベントも戻ってくるので、
-  // 連続発火を 300ms 内で 1 回に間引いて reloadKey の雪崩を防ぐ。
+  // 連続発火を SYNC_DEBOUNCE_MS 内で 1 回に間引いて reloadKey の雪崩を防ぐ。
   useEffect(() => {
     if (!user) return
     let pending: ReturnType<typeof setTimeout> | null = null
@@ -58,7 +59,7 @@ export function useSync() {
       pending = setTimeout(() => {
         pending = null
         setReloadKey((k) => k + 1)
-      }, 300)
+      }, SYNC_DEBOUNCE_MS)
     })
     return () => {
       if (pending) clearTimeout(pending)

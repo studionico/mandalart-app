@@ -5,6 +5,7 @@ import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
 import { PRESET_COLORS } from '@/constants/colors'
 import { nextTabPosition } from '@/constants/tabOrder'
+import { CENTER_POSITION } from '@/constants/grid'
 import type { Cell } from '@/types'
 import { uploadCellImage, getCellImageUrl, deleteCellImage } from '@/lib/api/storage'
 
@@ -91,7 +92,7 @@ export default function CellEditModal({
       if (!cell) return
 
       // 中心セルが空（入力中のテキストも含めて）なら移動しない
-      if (cell.position === 4 && !text.trim() && !imagePath) return
+      if (cell.position === CENTER_POSITION && !text.trim() && !imagePath) return
 
       // 現在のセルを保存してから次へ移動
       saveCell().then(() => {

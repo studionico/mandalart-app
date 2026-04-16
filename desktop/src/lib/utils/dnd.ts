@@ -1,5 +1,6 @@
 import type { Cell } from '@/types'
 import { isCellEmpty } from './grid'
+import { isCenterPosition } from '@/constants/grid'
 
 export type DndAction =
   | { type: 'SWAP_SUBTREE'; cellIdA: string; cellIdB: string }
@@ -15,8 +16,8 @@ export type DndAction =
 export function resolveDndAction(source: Cell, target: Cell): DndAction {
   if (source.id === target.id) return { type: 'NOOP' }
 
-  const sourceIsCenter = source.position === 4
-  const targetIsCenter = target.position === 4
+  const sourceIsCenter = isCenterPosition(source.position)
+  const targetIsCenter = isCenterPosition(target.position)
   const sourceEmpty = isCellEmpty(source)
   const targetEmpty = isCellEmpty(target)
 

@@ -11,7 +11,9 @@ import AuthDialog from '@/components/AuthDialog'
 import TrashDialog from '@/components/dashboard/TrashDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import { useAuthStore } from '@/store/authStore'
+import { useEditorStore } from '@/store/editorStore'
 import { useSync } from '@/hooks/useSync'
+import { DASHBOARD_CARD_SIZE_PX, DASHBOARD_CARD_FONT_PX } from '@/constants/layout'
 import type { Mandalart } from '@/types'
 
 type SortKey = 'updated' | 'title'
@@ -53,12 +55,20 @@ export default function DashboardPage() {
     return () => clearTimeout(t)
   }, [query, reloadKey, load])
 
+  // ダッシュボードからエディタへ遷移する際は常に 3×3 モードで開く。
+  // 直前に 9×9 を見ていたマンダラートを閉じて別のマンダラートを開いた場合でも、
+  // エディタの入口を一貫させたいので必ずリセットする。
+  function openMandalart(id: string) {
+    useEditorStore.getState().setViewMode('3x3')
+    navigate(`/mandalart/${id}`)
+  }
+
   async function handleCreate() {
     try {
       const m = await createMandalart()
       const grid = await createGrid({ mandalartId: m.id, parentCellId: null, sortOrder: 0 })
       void grid
-      navigate(`/mandalart/${m.id}`)
+      openMandalart(m.id)
     } catch (e) {
       alert('エラー: ' + String(e))
       console.error(e)
@@ -179,7 +189,7 @@ export default function DashboardPage() {
         onClose={() => setImportOpen(false)}
         onComplete={(result) => {
           setImportOpen(false)
-          if (result.mandalartId) navigate(`/mandalart/${result.mandalartId}`)
+          if (result.mandalartId) openMandalart(result.mandalartId)
         }}
       />
 
@@ -196,12 +206,17 @@ export default function DashboardPage() {
             <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
           </div>
         ) : (
-          <div className="grid gap-3 grid-cols-[repeat(auto-fill,130px)]">
+          <div
+            className="grid gap-3"
+            style={{
+              gridTemplateColumns: `repeat(auto-fill, ${DASHBOARD_CARD_SIZE_PX}px)`,
+            }}
+          >
             {visible.map((m) => (
               <MandalartCard
                 key={m.id}
                 mandalart={m}
-                onOpen={() => navigate(`/mandalart/${m.id}`)}
+                onOpen={() => openMandalart(m.id)}
                 onDuplicate={() => handleDuplicate(m)}
                 onDelete={() => handleDelete(m.id)}
               />
@@ -240,7 +255,8 @@ function MandalartCard({
 
   return (
     <div
-      className="relative w-[130px] h-[130px] bg-white dark:bg-gray-900 border-2 border-black dark:border-white rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+      className="relative bg-white dark:bg-gray-900 border-2 border-black dark:border-white rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+      style={{ width: DASHBOARD_CARD_SIZE_PX, height: DASHBOARD_CARD_SIZE_PX }}
       onClick={onOpen}
       title={m.title || '無題'}
     >
@@ -248,7 +264,8 @@ function MandalartCard({
         <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
         <div
-          className="w-full h-full flex items-start justify-start p-3 text-left break-all text-[14px] leading-tight text-gray-800 dark:text-gray-100 font-medium"
+          className="w-full h-full flex items-start justify-start p-3 text-left break-all leading-tight text-gray-800 dark:text-gray-100 font-medium"
+          style={{ fontSize: DASHBOARD_CARD_FONT_PX }}
         >
           <span className="block w-full line-clamp-6 whitespace-pre-wrap">
             {m.title || '無題'}

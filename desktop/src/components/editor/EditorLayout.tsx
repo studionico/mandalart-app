@@ -27,6 +27,26 @@ import { exportAsPNG, exportAsPDF, downloadJSON, downloadCSV } from '@/lib/utils
 import { exportToJSON, exportToCSV } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
 import { nextTabPosition } from '@/constants/tabOrder'
+import {
+  CENTER_POSITION,
+  GRID_CELL_COUNT,
+  GRID_SIDE,
+  ORBIT_ORDER_CENTER_THEN_PERIPHERAL,
+  ORBIT_ORDER_PERIPHERAL,
+  ORBIT_ORDER_PERIPHERAL_THEN_CENTER,
+  isCenterPosition,
+} from '@/constants/grid'
+import {
+  ANIM_FADE_MS,
+  ANIM_STAGGER_MS,
+  SLIDE_DURATION_MS as SLIDE_MS,
+  VIEW_SWITCH_TO_9_DELAY_MS as VIEW_SWITCH_TO_9_DELAY,
+} from '@/constants/timing'
+import {
+  GRID_SIZE_CHANGE_THRESHOLD_PX,
+  OUTER_GRID_GAP_PX,
+  SIDE_BUTTON_RESERVE_PX,
+} from '@/constants/layout'
 import type { Cell, Grid, StockItem } from '@/types'
 
 type Props = {
@@ -58,13 +78,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
-      // 左右の並列ナビボタン分を横幅から差し引く (2 * (ボタン幅 48 + gap 16) = 128px)
-      const SIDE_BUTTON_RESERVE = 128
-      const usableWidth = Math.max(0, width - SIDE_BUTTON_RESERVE)
+      // 左右の並列ナビボタン分を横幅から差し引く
+      const usableWidth = Math.max(0, width - SIDE_BUTTON_RESERVE_PX)
       const next = Math.floor(Math.min(usableWidth, height))
       // 数 px 単位の微小な変化は無視する。drill 遷移時に header の scrollbar 出し入れなどで
       // ちらつく原因になるため。
-      setGridSize((prev) => (Math.abs(prev - next) < 4 ? prev : next))
+      setGridSize((prev) => (Math.abs(prev - next) < GRID_SIZE_CHANGE_THRESHOLD_PX ? prev : next))
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -83,7 +102,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     direction: 'forward' | 'backward'
   }
   const [slide, setSlide] = useState<SlideState | null>(null)
-  const SLIDE_DURATION_MS = 320
+  const SLIDE_DURATION_MS = SLIDE_MS
 
   // ドリル (3×3 のみ) のセル軌道アニメーション用 state
   // - targetCells: 遷移後のグリッドの 9 セル
@@ -108,15 +127,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
   const [orbit, setOrbit] = useState<OrbitState | null>(null)
   // drill-down と drill-up を同じ感覚になるよう stagger / fade を揃える。
-  // drill-down: 7 * 85 + 400 = 995ms  (≒ 1s)
-  // drill-up:   8 * 85 + 400 = 1080ms (≒ 1.1s、ステップが 1 つ多いぶん若干長い)
-  // initial:    8 * 85 + 400 = 1080ms (中心含む 9 セル)
-  const ORBIT_STAGGER_DOWN_MS = 85
-  const ORBIT_STAGGER_UP_MS = 85
-  const ORBIT_STAGGER_INIT_MS = 85
-  const ORBIT_FADE_DOWN_MS = 400
-  const ORBIT_FADE_UP_MS = 400
-  const ORBIT_FADE_INIT_MS = 400
+  // drill-down: 7 * stagger + fade (≒ 1s)
+  // drill-up:   8 * stagger + fade (≒ 1.1s、ステップが 1 つ多いぶん若干長い)
+  // initial:    8 * stagger + fade (中心含む 9 セル)
+  // 値は constants/timing.ts で一元管理し、Orbit / View Switch でビートを揃えている。
+  const ORBIT_STAGGER_DOWN_MS = ANIM_STAGGER_MS
+  const ORBIT_STAGGER_UP_MS = ANIM_STAGGER_MS
+  const ORBIT_STAGGER_INIT_MS = ANIM_STAGGER_MS
+  const ORBIT_FADE_DOWN_MS = ANIM_FADE_MS
+  const ORBIT_FADE_UP_MS = ANIM_FADE_MS
+  const ORBIT_FADE_INIT_MS = ANIM_FADE_MS
 
   // 9×9 表示用の orbit state。こちらは「サブグリッド (3×3 ブロック)」単位で動かす。
   // 3×3 orbit の仕組みをそのままブロック単位に持ち上げた構造。
@@ -157,9 +177,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   //         total = 200 + 7 * 85 + 400 = 1195ms
   // to-3x3: 0-400ms 周辺ブロック fade-out、中央 9 セルが順次 [7,6,3,0,1,2,5,8,4] で 3×3 位置へ展開。
   //         total = 8 * 85 + 400 = 1080ms
-  const VIEW_SWITCH_FADE_MS = 400
-  const VIEW_SWITCH_STAGGER_MS = 85
-  const VIEW_SWITCH_TO_9_DELAY_MS = 200
+  const VIEW_SWITCH_FADE_MS = ANIM_FADE_MS
+  const VIEW_SWITCH_STAGGER_MS = ANIM_STAGGER_MS
+  const VIEW_SWITCH_TO_9_DELAY_MS = VIEW_SWITCH_TO_9_DELAY
   const VIEW_SWITCH_TO_9_TOTAL_MS =
     VIEW_SWITCH_TO_9_DELAY_MS + 7 * VIEW_SWITCH_STAGGER_MS + VIEW_SWITCH_FADE_MS
   const VIEW_SWITCH_TO_3_TOTAL_MS = 8 * VIEW_SWITCH_STAGGER_MS + VIEW_SWITCH_FADE_MS
@@ -341,8 +361,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         resetBreadcrumb({
           gridId: root.id,
           cellId: null,
-          label: cells.find((c: Cell) => c.position === 4)?.text ?? '',
-          imagePath: cells.find((c: Cell) => c.position === 4)?.image_path ?? null,
+          label: cells.find((c: Cell) => c.position === CENTER_POSITION)?.text ?? '',
+          imagePath: cells.find((c: Cell) => c.position === CENTER_POSITION)?.image_path ?? null,
           cells: cells,
           highlightPosition: null,
         })
@@ -414,7 +434,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!gridData || breadcrumb.length === 0) return
     const last = breadcrumb[breadcrumb.length - 1]
     if (gridData.id !== last.gridId) return
-    const centerCell = gridData.cells.find((c) => c.position === 4)
+    const centerCell = gridData.cells.find((c) => c.position === CENTER_POSITION)
     if (!centerCell) return
     const nextLabel = centerCell.text
     const nextImagePath = centerCell.image_path
@@ -624,7 +644,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
 
     // 中央セル（position 4）の特別処理
-    if (cell.position === 4) {
+    if (cell.position === CENTER_POSITION) {
       if (breadcrumb.length <= 1) {
         // ルートグリッドの中心セル（入力あり）→ ホームへ
         if (!isCellEmpty(cell)) {
@@ -708,7 +728,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const currentCells = gridData?.cells ?? []
 
       if (viewMode === '3x3') {
-        const targetCenter = firstChild.cells.find((c) => c.position === 4)
+        const targetCenter = firstChild.cells.find((c) => c.position === CENTER_POSITION)
         const childCountsByCellId = await fetchChildCountsFor(firstChild.cells)
         setOrbit({
           targetCells: firstChild.cells,
@@ -739,10 +759,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
 
-      const centerCell = newGrid.cells.find((c) => c.position === 4)
+      const centerCell = newGrid.cells.find((c) => c.position === CENTER_POSITION)
       const populatedCells = centerCell && !isCellEmpty(cell)
         ? newGrid.cells.map((c) =>
-            c.position === 4
+            c.position === CENTER_POSITION
               ? { ...c, text: cell.text, image_path: cell.image_path, color: cell.color }
               : c,
           )
@@ -756,7 +776,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       }
 
       if (viewMode === '3x3') {
-        const targetCenter = populatedCells.find((c) => c.position === 4)
+        const targetCenter = populatedCells.find((c) => c.position === CENTER_POSITION)
         // 新規作成したばかりのサブグリッドなので子グリッド 0 件で確定
         const childCountsByCellId = new Map<string, number>(
           populatedCells.map((c) => [c.id, 0]),
@@ -821,7 +841,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const nextPos = nextTabPosition(currentPosition, reverse)
     // 中心が空のときは周辺セル無効なので留まる
     if (centerEmpty && nextPos !== 4) {
-      setInlineEditingCellId(updatedCells.find((c) => c.position === 4)?.id ?? null)
+      setInlineEditingCellId(updatedCells.find((c) => c.position === CENTER_POSITION)?.id ?? null)
       return
     }
     const next = updatedCells.find((c) => c.position === nextPos)
@@ -833,7 +853,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!cell) return
 
     // バリデーション: 周辺セルに入力があれば中心をクリアできない
-    if (cell.position === 4 && isCellEmpty({ text: params.text, image_path: params.image_path })) {
+    if (cell.position === CENTER_POSITION && isCellEmpty({ text: params.text, image_path: params.image_path })) {
       if (hasPeripheralContent(gridData?.cells ?? [])) {
         setToast({ message: '周辺セルに入力がある場合、中心セルを空にできません', type: 'error' })
         return
@@ -859,7 +879,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    * 呼び出し側は必要に応じて parallelGrids / parallelIndex を更新する。
    */
   async function cleanupGridIfCenterEmpty(gridId: string, cells: Cell[]): Promise<boolean> {
-    const center = cells.find((c) => c.position === 4)
+    const center = cells.find((c) => c.position === CENTER_POSITION)
     const isEmpty = !center || isCellEmpty(center)
     if (!isEmpty) return false
     try {
@@ -888,7 +908,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       navigate('/dashboard')
       return
     }
-    const center = gridData.cells.find((c) => c.position === 4)
+    const center = gridData.cells.find((c) => c.position === CENTER_POSITION)
     const centerEmpty = !center || isCellEmpty(center)
 
     if (centerEmpty) {
@@ -990,8 +1010,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const newGrid = await createGrid({ mandalartId, parentCellId, sortOrder: parallelGrids.length })
 
     // 元 (現在表示中) のグリッドの中心セル内容を新しい並列グリッドの中心セルに自動コピーする
-    const originCenter = gridData?.cells.find((c) => c.position === 4)
-    const newCenter = newGrid.cells.find((c) => c.position === 4)
+    const originCenter = gridData?.cells.find((c) => c.position === CENTER_POSITION)
+    const newCenter = newGrid.cells.find((c) => c.position === CENTER_POSITION)
     let toCells: Cell[] = newGrid.cells
     if (originCenter && newCenter && !isCellEmpty(originCenter)) {
       await updateCell(newCenter.id, {
@@ -1001,7 +1021,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       })
       // アニメーション用のセル配列にも反映させる (まだ newGrid.cells は古い状態)
       toCells = newGrid.cells.map((c) =>
-        c.position === 4
+        c.position === CENTER_POSITION
           ? { ...c, text: originCenter.text, image_path: originCenter.image_path, color: originCenter.color }
           : c,
       )
@@ -1265,12 +1285,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 (() => {
                   const FADE = VIEW_SWITCH_FADE_MS
                   const STAGGER = VIEW_SWITCH_STAGGER_MS
-                  const GAP = 8 // outer grid gap-2
-                  const B = (gridSize - 2 * GAP) / 3 // 各ブロックの幅
+                  const GAP = OUTER_GRID_GAP_PX
+                  const B = (gridSize - 2 * GAP) / GRID_SIDE // 各ブロックの幅
                   const rootCellMap = new Map(
                     viewSwitch.rootCells.map((c) => [c.position, c]),
                   )
-                  const rootCenter = viewSwitch.rootCells.find((c) => c.position === 4)
+                  const rootCenter = viewSwitch.rootCells.find((c) => c.position === CENTER_POSITION)
                   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
                   const innerWrapperBase =
                     'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-600 rounded-xl overflow-hidden min-h-0 min-w-0'
@@ -1293,7 +1313,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     // 子サブグリッドあり: 9 セルすべて描画
                     if (sub) {
                       const subCellMap = new Map(sub.cells.map((c) => [c.position, c]))
-                      const subCenter = sub.cells.find((c) => c.position === 4)
+                      const subCenter = sub.cells.find((c) => c.position === CENTER_POSITION)
                       const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
                       return (
                         <div
@@ -1301,10 +1321,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           style={style}
                           className={`${innerWrapperBase} ${blockBorder}`}
                         >
-                          {Array.from({ length: 9 }).map((_, innerPos) => {
+                          {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
                             const cell = subCellMap.get(innerPos)
                             if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
-                            const isInnerCenter = innerPos === 4
+                            const isInnerCenter = isCenterPosition(innerPos)
                             const isDisabled = !isInnerCenter && subCenterEmpty
                             return (
                               <CellComponent
@@ -1337,8 +1357,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         style={style}
                         className={`${innerWrapperBase} ${blockBorder}`}
                       >
-                        {Array.from({ length: 9 }).map((_, innerPos) => {
-                          if (innerPos === 4 && rootCell) {
+                        {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                          if (innerPos === CENTER_POSITION && rootCell) {
                             return (
                               <CellComponent
                                 key={rootCell.id + '-center'}
@@ -1378,15 +1398,15 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     // swap で text 位置がわずかに内側に動く」pop が消える。target 側は実 9×9
                     // render と同じ構造 (bg-gray-300 wrapper + 6px 外枠 + size='small' セル) を
                     // 使っているのでピクセル一致する。
-                    const order = [7, 6, 3, 0, 1, 2, 5, 8]
+                    const order = ORBIT_ORDER_PERIPHERAL
                     const crossfadeDuration = FADE / 2
                     const crossfadeDelay = FADE - crossfadeDuration
                     return (
                       <div className="relative w-full h-full pointer-events-none">
                         {/* 9×9 周辺ブロック: 時計回り stagger で fade-in */}
                         <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
-                          {Array.from({ length: 9 }).map((_, outerPos) => {
-                            if (outerPos === 4) return <div key={outerPos} />
+                          {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+                            if (isCenterPosition(outerPos)) return <div key={outerPos} />
                             const idx = order.indexOf(outerPos)
                             const delay =
                               VIEW_SWITCH_TO_9_DELAY_MS + Math.max(0, idx) * STAGGER
@@ -1425,7 +1445,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         {/* target: 実 9×9 中央ブロック (shrink 後半で fade-in)。
                             通常 9×9 render と同一構造。 */}
                         <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
-                          {Array.from({ length: 9 }).map((_, outerPos) => {
+                          {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
                             if (outerPos !== 4) return <div key={outerPos} />
                             return (
                               <div
@@ -1436,10 +1456,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                   willChange: 'opacity',
                                 }}
                               >
-                                {Array.from({ length: 9 }).map((_, innerPos) => {
+                                {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
                                   const cell = rootCellMap.get(innerPos)
                                   if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
-                                  const isInnerCenter = innerPos === 4
+                                  const isInnerCenter = isCenterPosition(innerPos)
                                   const isDisabled = !isInnerCenter && rootCenterEmpty
                                   return (
                                     <CellComponent
@@ -1471,13 +1491,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
                   // 9×9 → 3×3: 中央ブロックの 9 セルを個別に 3×3 位置へ拡大展開、
                   // 周辺ブロックは fade-out
-                  const cellOrder = [7, 6, 3, 0, 1, 2, 5, 8, 4]
+                  const cellOrder = ORBIT_ORDER_PERIPHERAL_THEN_CENTER
                   return (
                     <div className="relative w-full h-full pointer-events-none">
                       {/* 9×9 周辺ブロック: 全体 fade-out (stagger なし) */}
                       <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
-                        {Array.from({ length: 9 }).map((_, outerPos) => {
-                          if (outerPos === 4) return <div key={outerPos} />
+                        {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+                          if (isCenterPosition(outerPos)) return <div key={outerPos} />
                           const style: React.CSSProperties = {
                             animation: `view-fade-out ${FADE}ms ease-out 0ms both`,
                             willChange: 'opacity',
@@ -1494,27 +1514,27 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           直接適用する。余分な div で囲むとセルが grid item としてサイズを
                           得られず空になってしまうので注意。 */}
                       <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
-                        {Array.from({ length: 9 }).map((_, pos) => {
+                        {Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
                           const cell = rootCellMap.get(pos)
                           if (!cell) return <div key={pos} />
-                          const c = pos % 3
-                          const r = Math.floor(pos / 3)
+                          const c = pos % GRID_SIDE
+                          const r = Math.floor(pos / GRID_SIDE)
                           // 9×9 中央ブロック内位置 (global 座標、gridSize 原点から)
-                          //   top-left = (B+GAP) + c * (B/3 + 1), (B+GAP) + r * (B/3 + 1)
+                          //   top-left = (B+GAP) + c * (B/GRID_SIDE + 1), (B+GAP) + r * (B/GRID_SIDE + 1)
                           // 3×3 natural 位置 (grid セルとしての top-left)
                           //   = c * (B+GAP), r * (B+GAP)
-                          // transform: translate(tx, ty) scale(1/3) with origin top-left
+                          // transform: translate(tx, ty) scale(1/GRID_SIDE) with origin top-left
                           //   の最終 top-left = (natural.x + tx, natural.y + ty)
                           // これを 9×9 位置に合わせる
-                          const tx = (B + GAP) + c * (B / 3 + 1) - c * (B + GAP)
-                          const ty = (B + GAP) + r * (B / 3 + 1) - r * (B + GAP)
+                          const tx = (B + GAP) + c * (B / GRID_SIDE + 1) - c * (B + GAP)
+                          const ty = (B + GAP) + r * (B / GRID_SIDE + 1) - r * (B + GAP)
                           const idx = cellOrder.indexOf(pos)
                           const delay = Math.max(0, idx) * STAGGER
-                          const isCenter = pos === 4
+                          const isCenter = isCenterPosition(pos)
                           const isDisabled = !isCenter && rootCenterEmpty
                           const transform =
                             viewSwitchPhase === 'start'
-                              ? `translate(${tx}px, ${ty}px) scale(${1 / 3})`
+                              ? `translate(${tx}px, ${ty}px) scale(${1 / GRID_SIDE})`
                               : 'translate(0, 0) scale(1)'
                           const transition = `transform ${FADE}ms ease-out ${delay}ms`
                           return (
@@ -1633,13 +1653,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     //  initial は中心から始まる 9 position
                     const order =
                       orbit.direction === 'drill-up'
-                        ? [7, 6, 3, 0, 1, 2, 5, 8, 4]
+                        ? ORBIT_ORDER_PERIPHERAL_THEN_CENTER
                         : orbit.direction === 'initial'
-                          ? [4, 7, 6, 3, 0, 1, 2, 5, 8]
-                          : [7, 6, 3, 0, 1, 2, 5, 8]
-                    const center = orbit.targetCells.find((c) => c.position === 4)
+                          ? ORBIT_ORDER_CENTER_THEN_PERIPHERAL
+                          : ORBIT_ORDER_PERIPHERAL
+                    const center = orbit.targetCells.find((c) => c.position === CENTER_POSITION)
                     const centerEmpty = !center || isCellEmpty(center)
-                    return Array.from({ length: 9 }).map((_, pos) => {
+                    return Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
                       const cell = orbit.targetCells.find((c) => c.position === pos)
                       if (!cell) return <div key={pos} />
                       const isMoving = cell.id === orbit.movingCellId
@@ -1677,7 +1697,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
                               willChange: 'opacity',
                             }
-                      const isCenter = pos === 4
+                      const isCenter = isCenterPosition(pos)
                       const isDisabled = !isCenter && centerEmpty
                       return (
                         <CellComponent
@@ -1719,14 +1739,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         : ORBIT_FADE_DOWN_MS
                   const order =
                     orbit9.direction === 'drill-up'
-                      ? [7, 6, 3, 0, 1, 2, 5, 8, 4]
+                      ? ORBIT_ORDER_PERIPHERAL_THEN_CENTER
                       : orbit9.direction === 'initial'
-                        ? [4, 7, 6, 3, 0, 1, 2, 5, 8]
-                        : [7, 6, 3, 0, 1, 2, 5, 8]
+                        ? ORBIT_ORDER_CENTER_THEN_PERIPHERAL
+                        : ORBIT_ORDER_PERIPHERAL
                   const rootCellMap = new Map(
                     orbit9.targetRootCells.map((c) => [c.position, c]),
                   )
-                  const rootCenter = orbit9.targetRootCells.find((c) => c.position === 4)
+                  const rootCenter = orbit9.targetRootCells.find((c) => c.position === CENTER_POSITION)
                   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
                   // 各ブロック内の小サブグリッドラッパー共通クラス
                   const innerWrapperBase =
@@ -1734,7 +1754,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
                   return (
                     <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
-                      {Array.from({ length: 9 }).map((_, outerPos) => {
+                      {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
                         const isMoving = outerPos === orbit9.movingToPosition
                         const staggerIdx = order.indexOf(outerPos)
                         const fadeDelay =
@@ -1762,7 +1782,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                 willChange: 'opacity',
                               }
 
-                        const isCenterBlock = outerPos === 4
+                        const isCenterBlock = isCenterPosition(outerPos)
                         // 中央ブロック = target のルートセル 9 つ、それ以外 = target の子サブグリッド
                         const rootCell = isCenterBlock
                           ? null
@@ -1790,10 +1810,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               style={blockStyle}
                               className={`${innerWrapperBase} ${blockBorder}`}
                             >
-                              {Array.from({ length: 9 }).map((_, innerPos) => {
+                              {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
                                 const cell = rootCellMap.get(innerPos)
                                 if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
-                                const isInnerCenter = innerPos === 4
+                                const isInnerCenter = isCenterPosition(innerPos)
                                 const isDisabled = !isInnerCenter && rootCenterEmpty
                                 return (
                                   <CellComponent
@@ -1822,7 +1842,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         // 周辺ブロック: 子サブグリッドがあれば 9 セル、なければ placeholder + root cell
                         if (sub) {
                           const subCellMap = new Map(sub.cells.map((c) => [c.position, c]))
-                          const subCenter = sub.cells.find((c) => c.position === 4)
+                          const subCenter = sub.cells.find((c) => c.position === CENTER_POSITION)
                           const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
                           return (
                             <div
@@ -1830,10 +1850,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               style={blockStyle}
                               className={`${innerWrapperBase} ${blockBorder}`}
                             >
-                              {Array.from({ length: 9 }).map((_, innerPos) => {
+                              {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
                                 const cell = subCellMap.get(innerPos)
                                 if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
-                                const isInnerCenter = innerPos === 4
+                                const isInnerCenter = isCenterPosition(innerPos)
                                 const isDisabled = !isInnerCenter && subCenterEmpty
                                 return (
                                   <CellComponent
@@ -1866,8 +1886,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                             style={blockStyle}
                             className={`${innerWrapperBase} ${blockBorder}`}
                           >
-                            {Array.from({ length: 9 }).map((_, innerPos) => {
-                              if (innerPos === 4 && rootCell) {
+                            {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                              if (innerPos === CENTER_POSITION && rootCell) {
                                 return (
                                   <CellComponent
                                     key={rootCell.id + '-center'}
@@ -1956,7 +1976,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   </svg>
                 </button>
               ) : (() => {
-                const centerCell = gridData?.cells.find((c) => c.position === 4)
+                const centerCell = gridData?.cells.find((c) => c.position === CENTER_POSITION)
                 const centerEmpty = !centerCell || isCellEmpty(centerCell)
                 if (centerEmpty) return null
                 return (

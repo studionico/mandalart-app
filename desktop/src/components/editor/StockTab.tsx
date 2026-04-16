@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
+import { GRID_CELL_COUNT } from '@/constants/grid'
 import type { StockItem } from '@/types'
 import Button from '@/components/ui/Button'
 
@@ -98,7 +99,7 @@ export default function StockTab({
             >
               {/* ミニプレビュー */}
               <div className="grid grid-cols-3 gap-0.5 w-10 h-10 shrink-0">
-                {Array.from({ length: 9 }).map((_, i) => (
+                {Array.from({ length: GRID_CELL_COUNT }).map((_, i) => (
                   <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-100' : 'bg-gray-100'}`} />
                 ))}
               </div>

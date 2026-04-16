@@ -1,4 +1,5 @@
 import { query, execute, generateId, now } from '../db'
+import { CENTER_POSITION } from '@/constants/grid'
 import type { Cell, StockItem, CellSnapshot, GridSnapshot } from '../../types'
 
 type RawStockItem = { id: string; snapshot: string; created_at: string }
@@ -102,7 +103,7 @@ async function buildCellSnapshot(cellId: string): Promise<CellSnapshot> {
 
   const children: GridSnapshot[] = []
 
-  if (c.position === 4) {
+  if (c.position === CENTER_POSITION) {
     const grids = await query<{ memo: string | null; sort_order: number }>(
       'SELECT memo, sort_order FROM grids WHERE id = ? AND deleted_at IS NULL',
       [c.grid_id],

@@ -1,8 +1,9 @@
 import { create } from 'zustand'
+import { STORAGE_KEYS } from '@/constants/storage'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
-const KEY = 'mandalart.theme'
+const KEY = STORAGE_KEYS.theme
 
 function loadPreference(): ThemePreference {
   try {

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { STORAGE_KEYS } from '@/constants/storage'
 import type { Cell } from '@/types'
 
 export type ViewMode = '3x3' | '9x9'
@@ -18,7 +19,7 @@ export type BreadcrumbItem = {
 //   level    0 → 100%
 //   level +20 → 約 673%
 // 線形ステップだと level = -10 で fontScale = 0 になってしまうため乗算採用。
-const FONT_LEVEL_KEY = 'mandalart.fontLevel'
+const FONT_LEVEL_KEY = STORAGE_KEYS.fontLevel
 const FONT_LEVEL_MIN = -10
 const FONT_LEVEL_MAX = 20
 const FONT_LEVEL_DEFAULT = 0

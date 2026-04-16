@@ -2,6 +2,38 @@
 
 このファイルは Claude Code (claude.ai/code) がこのリポジトリで作業する際のガイドです。
 
+## コーディング規約
+
+### ハードコーディング禁止
+
+マジックナンバー / マジック文字列 / 繰り返し現れるサイズ・タイミング・キー名を、コード中に裸の値で埋め込まない。以下のルールに従い、**必ず [`desktop/src/constants/`](desktop/src/constants/) 配下の定数か、CSS 変数か、設定ファイルを経由する**。
+
+**定数化すべきもの**:
+- **グリッド構造**: 中央 position (`CENTER_POSITION = 4`)、総セル数 (`GRID_CELL_COUNT = 9`)、周辺一覧 (`PERIPHERAL_POSITIONS`)、1 辺 (`GRID_SIDE = 3`)、Orbit 登場順の配列 → [`constants/grid.ts`](desktop/src/constants/grid.ts)
+- **タイミング (ms)**: クリック判定・各アニメの stagger / fade / delay・同期 debounce・UI 確認リセット → [`constants/timing.ts`](desktop/src/constants/timing.ts)
+- **レイアウト (px)**: ダッシュボードカードサイズ、outer grid gap、並列ナビボタン幅、セル base font、text inset 等 → [`constants/layout.ts`](desktop/src/constants/layout.ts)
+- **localStorage キー**: `STORAGE_KEYS.xxx` 経由で参照 (全キーは `mandalart.<area>.<name>` プレフィックス統一) → [`constants/storage.ts`](desktop/src/constants/storage.ts)
+- **プリセットカラー**: → [`constants/colors.ts`](desktop/src/constants/colors.ts)
+- **Tab 移動順 / 周辺配置順**: → [`constants/tabOrder.ts`](desktop/src/constants/tabOrder.ts) (内部で `constants/grid.ts` の orbit 順を再利用)
+
+**CSS 側**:
+- `calc(-100% - 8px)` のように Tailwind クラス (gap-2 等) と連動する数値は **CSS 変数 `--outer-grid-gap` 等で一元化** する。JS 側の `OUTER_GRID_GAP_PX` と値を合わせる旨をコメントに残す
+- Tailwind の任意値クラス (`w-[130px]` 等) で同じ数値が 2 箇所以上出てくる場合は、インラインスタイル + 定数 (`style={{ width: DASHBOARD_CARD_SIZE_PX }}`) に置き換える
+
+**Supabase / Tauri 設定**:
+- 環境変数 (`VITE_SUPABASE_URL` 等) はコードに書かない。`.env` / `lib/supabase/client.ts` 経由
+- Tauri のウインドウ設定 / plugin 構成は [`src-tauri/tauri.conf.json`](desktop/src-tauri/tauri.conf.json) / [`src-tauri/capabilities/default.json`](desktop/src-tauri/capabilities/default.json) に
+- SQL マイグレーションは [`src-tauri/migrations/`](desktop/src-tauri/migrations/) に番号付きで置き、`lib.rs` で登録
+
+**例外 (裸の値で OK)**:
+- 1 ファイル内で 1 回しか出現せず、意味が文脈から自明で、他と連動しない値 (例: その場限りの `setTimeout(fn, 50)`、単発の微調整の px)
+- Tailwind のプリセットクラスそのもの (`p-3`, `gap-2`, `rounded-xl` 等)。ただし同じ値が裸の px として JS 側にも出る場合は定数化する
+- CSS の keyframes 内部で transform 全体を CSS 変数化するのは WebKit で補間が効かない場合があるので避ける ([`animations.md`](desktop/docs/animations.md) 参照)。`translate(calc(... - var(--x)))` のように **引数内計算に閉じた** 使い方なら OK
+
+**新しい定数ファイルを作る判断基準**:
+- 既存の 4 ファイル (grid / timing / layout / storage / colors / tabOrder) のどれにも属さないカテゴリが発生したら新規作成。カテゴリ名は `constants/<カテゴリ>.ts`
+- 作った定数は関連 docs にも反映させる
+
 ## プロジェクト概要
 
 マンダラート（Mandalart）— 3×3 グリッドで思考を階層的に展開するデスクトップアプリ。各セルをクリックすると更に 3×3 グリッドに掘り下げられる「無限階層」式のツール。同じ階層に並列グリッドを作ることもでき、← → で切り替える。

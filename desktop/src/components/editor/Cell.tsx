@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
 import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
+import { CLICK_DELAY_MS } from '@/constants/timing'
+import {
+  CELL_BASE_FONT_PX,
+  CELL_TEXT_INSET_NORMAL_PX,
+  CELL_TEXT_INSET_SMALL_PX,
+} from '@/constants/layout'
+import { GRID_SIDE } from '@/constants/grid'
 import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
 
 type Props = {
@@ -28,7 +35,7 @@ type Props = {
 }
 
 const DRAG_THRESHOLD = 5   // ドラッグ判定の移動距離（px）
-const CLICK_DELAY = 220    // single vs double click 判定 (ms)
+const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
 
 export default function Cell({
   cell, isCenter, isDisabled, isCut, isDragSource, isDragOver, childCount, fontScale,
@@ -287,13 +294,13 @@ export default function Cell({
       : childCount > 0
         ? 2
         : 1
-  const targetPadPx = size === 'small' ? 6 : 18
+  const targetPadPx = size === 'small' ? CELL_TEXT_INSET_SMALL_PX : CELL_TEXT_INSET_NORMAL_PX
   const textInsetPx = Math.max(0, targetPadPx - borderPx)
   const textInsetStyle: React.CSSProperties = { inset: `${textInsetPx}px` }
 
-  // 9×9 表示のセルは 3×3 表示の約 1/3 の幅しかないので、
-  // 同じテキストが同じ行数で読めるようフォントも 1/3 に縮小する
-  const baseFontPx = size === 'small' ? 28 / 3 : 28
+  // 9×9 表示のセルは 3×3 表示の約 1/GRID_SIDE の幅しかないので、
+  // 同じテキストが同じ行数で読めるようフォントも 1/GRID_SIDE に縮小する
+  const baseFontPx = size === 'small' ? CELL_BASE_FONT_PX / GRID_SIDE : CELL_BASE_FONT_PX
   const fontStyle: React.CSSProperties = { fontSize: `${baseFontPx * fontScale}px`, lineHeight: 1.25 }
 
   return (

@@ -4,6 +4,7 @@ import Button from '@/components/ui/Button'
 import {
   getDeletedMandalarts, restoreMandalart, permanentDeleteMandalart,
 } from '@/lib/api/mandalarts'
+import { CONFIRM_AUTO_RESET_MS } from '@/constants/timing'
 import type { Mandalart } from '@/types'
 
 type Props = {
@@ -19,7 +20,7 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
   const [busy, setBusy] = useState<string | null>(null)
   // Tauri v2 の WebView は window.confirm が動作しないため、2 クリック方式で確認する。
   // 1 回目のクリックで confirmingId を立ててボタン表記を「本当に削除?」に切替え、
-  // 2 回目のクリックで実削除。4 秒放置したら自動で confirm 状態を解除する。
+  // 2 回目のクリックで実削除。CONFIRM_AUTO_RESET_MS ms 放置したら自動解除。
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
   async function load() {
@@ -40,7 +41,7 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
   // confirm 状態は 4 秒で自動解除
   useEffect(() => {
     if (!confirmingId) return
-    const t = setTimeout(() => setConfirmingId(null), 4000)
+    const t = setTimeout(() => setConfirmingId(null), CONFIRM_AUTO_RESET_MS)
     return () => clearTimeout(t)
   }, [confirmingId])
 
