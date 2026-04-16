@@ -63,3 +63,19 @@ html {
   from { transform: translate(calc(100% + 8px), calc(100% + 8px)); }
   to   { transform: translate(0, 0); }
 }
+
+/* 表示モード切替アニメーション (3×3 ↔ 9×9)
+   - 3×3 → 9×9: 現在の 3×3 全体を中央原点で 1/3 に縮小 (= 9×9 の中央ブロック位置に収束)
+     同時に周辺 8 ブロックを時計回り stagger で fade-in させる
+   - 9×9 → 3×3: 中央ブロックの 9 セルを個別 transition で 9×9 位置 → 3×3 位置へ展開
+     (per-cell の translate 量が異なるため CSS 変数方式を避け、React state flip +
+      double requestAnimationFrame + inline transform で動かす)
+     周辺 8 ブロックは fade-out */
+@keyframes view-shrink-to-center {
+  from { transform: scale(1); }
+  to   { transform: scale(0.333333); }
+}
+@keyframes view-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}

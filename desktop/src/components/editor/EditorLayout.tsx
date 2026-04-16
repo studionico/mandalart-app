@@ -136,6 +136,50 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     direction: 'drill-down' | 'drill-up' | 'initial'
   }
   const [orbit9, setOrbit9] = useState<Orbit9State | null>(null)
+
+  // 表示モード切替アニメーション用 state (3×3 ↔ 9×9)
+  // - direction 'to-9x9': 現在の 3×3 を縮小して中央ブロックへ収束 + 周辺ブロックを時計回り fade-in
+  // - direction 'to-3x3': 中央ブロックの 9 セルを個別に 3×3 位置へ展開 + 周辺ブロックを fade-out
+  //
+  // 9→3 方向は per-cell で translate 量が異なるため、CSS 変数ベースの keyframes が使えない
+  // (animations.md 参照)。代わりに React state flip + double requestAnimationFrame +
+  // inline transform で動かす。viewSwitchPhase が 'start' → 'end' に切り替わった瞬間
+  // CSS transition が発火する。
+  type ViewSwitchState = {
+    direction: 'to-9x9' | 'to-3x3'
+    rootCells: Cell[]
+    subGrids: Map<string, SubGridData>
+    childCountsByCellId: Map<string, number>
+  }
+  const [viewSwitch, setViewSwitch] = useState<ViewSwitchState | null>(null)
+  const [viewSwitchPhase, setViewSwitchPhase] = useState<'start' | 'end'>('start')
+  // to-9x9: 0-400ms で中央 3×3 が scale(1)→scale(1/3)、200ms から周辺ブロックが時計回り stagger fade-in。
+  //         total = 200 + 7 * 85 + 400 = 1195ms
+  // to-3x3: 0-400ms 周辺ブロック fade-out、中央 9 セルが順次 [7,6,3,0,1,2,5,8,4] で 3×3 位置へ展開。
+  //         total = 8 * 85 + 400 = 1080ms
+  const VIEW_SWITCH_FADE_MS = 400
+  const VIEW_SWITCH_STAGGER_MS = 85
+  const VIEW_SWITCH_TO_9_DELAY_MS = 200
+  const VIEW_SWITCH_TO_9_TOTAL_MS =
+    VIEW_SWITCH_TO_9_DELAY_MS + 7 * VIEW_SWITCH_STAGGER_MS + VIEW_SWITCH_FADE_MS
+  const VIEW_SWITCH_TO_3_TOTAL_MS = 8 * VIEW_SWITCH_STAGGER_MS + VIEW_SWITCH_FADE_MS
+
+  // viewSwitch がセットされたら 2 フレーム待って phase を 'end' に切替 → CSS transition 発火
+  useEffect(() => {
+    if (!viewSwitch) {
+      setViewSwitchPhase('start')
+      return
+    }
+    let r1 = 0
+    let r2 = 0
+    r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => setViewSwitchPhase('end'))
+    })
+    return () => {
+      if (r1) cancelAnimationFrame(r1)
+      if (r2) cancelAnimationFrame(r2)
+    }
+  }, [viewSwitch])
   /**
    * target cells それぞれの「意味のある子グリッド数」を事前フェッチする。
    *
@@ -984,6 +1028,52 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setSlide(null)
   }
 
+  // 表示モード切替: 3×3 ↔ 9×9 をアニメーション付きで切替える
+  // - to-9x9: 現在の 3×3 を中央原点で scale(1)→scale(1/3) に縮小、同時に周辺 8 ブロックを
+  //   時計回り stagger で fade-in
+  // - to-3x3: 中央ブロック 9 セルを個別に 3×3 位置へ拡大 + 移動、周辺ブロックは fade-out
+  // viewMode 自体はアニメーション開始時に切替える (transition layer 内で表示を制御するので OK)。
+  async function handleViewModeSwitch(next: '3x3' | '9x9') {
+    if (next === viewMode) return
+    if (!gridData) {
+      setViewMode(next)
+      return
+    }
+    if (viewSwitch || slide || orbit || orbit9) return // 他アニメ中は多重起動しない
+
+    const [counts, subs] = await Promise.all([
+      fetchChildCountsFor(gridData.cells),
+      next === '9x9' ? fetchSubGridsFor(gridData.cells) : Promise.resolve(subGrids),
+    ])
+
+    if (next === '9x9') {
+      // 9×9 への切替: subGrids / childCounts を事前投入しておき、transition layer も
+      // 通常 render もすぐ正しい状態を見られるようにする
+      setSubGrids(subs)
+      setChildCounts(counts)
+      setViewSwitch({
+        direction: 'to-9x9',
+        rootCells: gridData.cells,
+        subGrids: subs,
+        childCountsByCellId: counts,
+      })
+      setViewMode('9x9')
+      await new Promise((r) => setTimeout(r, VIEW_SWITCH_TO_9_TOTAL_MS))
+      setViewSwitch(null)
+    } else {
+      setChildCounts(counts)
+      setViewSwitch({
+        direction: 'to-3x3',
+        rootCells: gridData.cells,
+        subGrids: subs,
+        childCountsByCellId: counts,
+      })
+      setViewMode('3x3')
+      await new Promise((r) => setTimeout(r, VIEW_SWITCH_TO_3_TOTAL_MS))
+      setViewSwitch(null)
+    }
+  }
+
   // コンテキストメニュー
   function handleContextMenu(e: React.MouseEvent, cell: Cell) {
     setContextMenu({ x: e.clientX, y: e.clientY, cell })
@@ -1113,8 +1203,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             {(['3x3', '9x9'] as const).map((mode) => (
               <button
                 key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`px-3 py-1.5 transition-colors ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                onClick={() => handleViewModeSwitch(mode)}
+                disabled={viewSwitch != null}
+                className={`px-3 py-1.5 transition-colors disabled:opacity-60 ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
               >
                 {mode}
               </button>
@@ -1169,7 +1260,295 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               className="relative overflow-hidden"
               style={{ width: gridSize, height: gridSize }}
             >
-              {slide && gridSize > 0 ? (
+              {viewSwitch && gridSize > 0 ? (
+                // 表示モード切替アニメーション (3×3 ↔ 9×9)
+                (() => {
+                  const FADE = VIEW_SWITCH_FADE_MS
+                  const STAGGER = VIEW_SWITCH_STAGGER_MS
+                  const GAP = 8 // outer grid gap-2
+                  const B = (gridSize - 2 * GAP) / 3 // 各ブロックの幅
+                  const rootCellMap = new Map(
+                    viewSwitch.rootCells.map((c) => [c.position, c]),
+                  )
+                  const rootCenter = viewSwitch.rootCells.find((c) => c.position === 4)
+                  const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
+                  const innerWrapperBase =
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-600 rounded-xl overflow-hidden min-h-0 min-w-0'
+                  const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
+
+                  // 共通: 周辺 9×9 ブロックをレンダリングする関数 (fade-in / fade-out 用)
+                  function renderPeripheralBlock(outerPos: number, style: React.CSSProperties) {
+                    const rootCell = rootCellMap.get(outerPos) ?? null
+                    const sub =
+                      rootCell
+                        ? viewSwitch!.subGrids.get(rootCell.id) ?? null
+                        : null
+                    const hasMeaningfulSub = rootCell
+                      ? (viewSwitch!.childCountsByCellId.get(rootCell.id) ?? 0) > 0
+                      : false
+                    const blockBorder = hasMeaningfulSub
+                      ? 'border-2 border-black dark:border-white'
+                      : 'border-2 border-gray-300 dark:border-gray-600'
+
+                    // 子サブグリッドあり: 9 セルすべて描画
+                    if (sub) {
+                      const subCellMap = new Map(sub.cells.map((c) => [c.position, c]))
+                      const subCenter = sub.cells.find((c) => c.position === 4)
+                      const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
+                      return (
+                        <div
+                          key={outerPos}
+                          style={style}
+                          className={`${innerWrapperBase} ${blockBorder}`}
+                        >
+                          {Array.from({ length: 9 }).map((_, innerPos) => {
+                            const cell = subCellMap.get(innerPos)
+                            if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                            const isInnerCenter = innerPos === 4
+                            const isDisabled = !isInnerCenter && subCenterEmpty
+                            return (
+                              <CellComponent
+                                key={cell.id}
+                                cell={cell}
+                                isCenter={isInnerCenter}
+                                isDisabled={isDisabled}
+                                isCut={false}
+                                isDragSource={false}
+                                isDragOver={false}
+                                childCount={0}
+                                fontScale={fontScale}
+                                isInlineEditing={false}
+                                onStartInlineEdit={() => {}}
+                                onCommitInlineEdit={async () => {}}
+                                onInlineNavigate={() => {}}
+                                onDrill={() => {}}
+                                size="small"
+                              />
+                            )
+                          })}
+                        </div>
+                      )
+                    }
+
+                    // 子サブグリッドなし: rootCell を中央にだけ、他は空白
+                    return (
+                      <div
+                        key={outerPos}
+                        style={style}
+                        className={`${innerWrapperBase} ${blockBorder}`}
+                      >
+                        {Array.from({ length: 9 }).map((_, innerPos) => {
+                          if (innerPos === 4 && rootCell) {
+                            return (
+                              <CellComponent
+                                key={rootCell.id + '-center'}
+                                cell={rootCell}
+                                isCenter={true}
+                                isDisabled={false}
+                                isCut={false}
+                                isDragSource={false}
+                                isDragOver={false}
+                                childCount={0}
+                                fontScale={fontScale}
+                                isInlineEditing={false}
+                                onStartInlineEdit={() => {}}
+                                onCommitInlineEdit={async () => {}}
+                                onInlineNavigate={() => {}}
+                                onDrill={() => {}}
+                                size="small"
+                              />
+                            )
+                          }
+                          return <div key={innerPos} className={innerEmptyCellClass} />
+                        })}
+                      </div>
+                    )
+                  }
+
+                  if (viewSwitch.direction === 'to-9x9') {
+                    // 3×3 → 9×9: 中央の 3×3 が縮小 + 終端の実 9×9 中央ブロックにクロスフェード。
+                    // 周辺ブロックは時計回り stagger で fade-in。
+                    //
+                    // 設計:
+                    //  - 縮小 3×3 (source): scale 1 → 1/3 (0〜FADE) + opacity 1 → 0 (FADE/2〜FADE)
+                    //  - 実 9×9 中央ブロック (target): 自然サイズで配置、opacity 0 → 1 (FADE/2〜FADE)
+                    //  - 2 者は FADE/2〜FADE の間にクロスフェードし、FADE 時点で完全に target に遷移
+                    //
+                    // これにより「transition layer 終了 (VIEW_SWITCH_TO_9_TOTAL_MS 時点) での
+                    // swap で text 位置がわずかに内側に動く」pop が消える。target 側は実 9×9
+                    // render と同じ構造 (bg-gray-300 wrapper + 6px 外枠 + size='small' セル) を
+                    // 使っているのでピクセル一致する。
+                    const order = [7, 6, 3, 0, 1, 2, 5, 8]
+                    const crossfadeDuration = FADE / 2
+                    const crossfadeDelay = FADE - crossfadeDuration
+                    return (
+                      <div className="relative w-full h-full pointer-events-none">
+                        {/* 9×9 周辺ブロック: 時計回り stagger で fade-in */}
+                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                          {Array.from({ length: 9 }).map((_, outerPos) => {
+                            if (outerPos === 4) return <div key={outerPos} />
+                            const idx = order.indexOf(outerPos)
+                            const delay =
+                              VIEW_SWITCH_TO_9_DELAY_MS + Math.max(0, idx) * STAGGER
+                            const style: React.CSSProperties = {
+                              animation: `orbit-fade-in ${FADE}ms ease-out ${delay}ms both`,
+                              willChange: 'opacity',
+                            }
+                            return renderPeripheralBlock(outerPos, style)
+                          })}
+                        </div>
+
+                        {/* source: 縮小 3×3 (中央原点で scale 1 → 1/3、後半で opacity 0) */}
+                        <div
+                          className="absolute inset-0"
+                          style={{
+                            transformOrigin: 'center center',
+                            animation: `view-shrink-to-center ${FADE}ms ease-out 0ms both, view-fade-out ${crossfadeDuration}ms linear ${crossfadeDelay}ms both`,
+                            willChange: 'transform, opacity',
+                          }}
+                        >
+                          <GridView3x3
+                            cells={viewSwitch.rootCells}
+                            childCounts={viewSwitch.childCountsByCellId}
+                            cutCellId={null}
+                            dragSourceId={null}
+                            dragOverId={null}
+                            fontScale={fontScale}
+                            inlineEditingCellId={null}
+                            onStartInlineEdit={() => {}}
+                            onCommitInlineEdit={async () => {}}
+                            onInlineNavigate={() => {}}
+                            onDrill={() => {}}
+                          />
+                        </div>
+
+                        {/* target: 実 9×9 中央ブロック (shrink 後半で fade-in)。
+                            通常 9×9 render と同一構造。 */}
+                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                          {Array.from({ length: 9 }).map((_, outerPos) => {
+                            if (outerPos !== 4) return <div key={outerPos} />
+                            return (
+                              <div
+                                key={outerPos}
+                                className={`${innerWrapperBase} border-[6px] border-black dark:border-white`}
+                                style={{
+                                  animation: `orbit-fade-in ${crossfadeDuration}ms ease-out ${crossfadeDelay}ms both`,
+                                  willChange: 'opacity',
+                                }}
+                              >
+                                {Array.from({ length: 9 }).map((_, innerPos) => {
+                                  const cell = rootCellMap.get(innerPos)
+                                  if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                                  const isInnerCenter = innerPos === 4
+                                  const isDisabled = !isInnerCenter && rootCenterEmpty
+                                  return (
+                                    <CellComponent
+                                      key={cell.id}
+                                      cell={cell}
+                                      isCenter={isInnerCenter}
+                                      isDisabled={isDisabled}
+                                      isCut={false}
+                                      isDragSource={false}
+                                      isDragOver={false}
+                                      childCount={viewSwitch!.childCountsByCellId.get(cell.id) ?? 0}
+                                      fontScale={fontScale}
+                                      isInlineEditing={false}
+                                      onStartInlineEdit={() => {}}
+                                      onCommitInlineEdit={async () => {}}
+                                      onInlineNavigate={() => {}}
+                                      onDrill={() => {}}
+                                      size="small"
+                                    />
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // 9×9 → 3×3: 中央ブロックの 9 セルを個別に 3×3 位置へ拡大展開、
+                  // 周辺ブロックは fade-out
+                  const cellOrder = [7, 6, 3, 0, 1, 2, 5, 8, 4]
+                  return (
+                    <div className="relative w-full h-full pointer-events-none">
+                      {/* 9×9 周辺ブロック: 全体 fade-out (stagger なし) */}
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                        {Array.from({ length: 9 }).map((_, outerPos) => {
+                          if (outerPos === 4) return <div key={outerPos} />
+                          const style: React.CSSProperties = {
+                            animation: `view-fade-out ${FADE}ms ease-out 0ms both`,
+                            willChange: 'opacity',
+                          }
+                          return renderPeripheralBlock(outerPos, style)
+                        })}
+                      </div>
+
+                      {/* 中央ブロック 9 セル: 9×9 内側位置 → 3×3 外側位置へ transition */}
+                      {/* 各セルは最終 3×3 grid 配置で描画し、start 状態で scale(1/3) + translate
+                          により 9×9 中央ブロック内位置に寄せる。double rAF で phase を
+                          'start' → 'end' に切替えると transform transition が発火する。
+                          transform は Cell の wrapperStyle 経由でセル本体 (= grid item) に
+                          直接適用する。余分な div で囲むとセルが grid item としてサイズを
+                          得られず空になってしまうので注意。 */}
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                        {Array.from({ length: 9 }).map((_, pos) => {
+                          const cell = rootCellMap.get(pos)
+                          if (!cell) return <div key={pos} />
+                          const c = pos % 3
+                          const r = Math.floor(pos / 3)
+                          // 9×9 中央ブロック内位置 (global 座標、gridSize 原点から)
+                          //   top-left = (B+GAP) + c * (B/3 + 1), (B+GAP) + r * (B/3 + 1)
+                          // 3×3 natural 位置 (grid セルとしての top-left)
+                          //   = c * (B+GAP), r * (B+GAP)
+                          // transform: translate(tx, ty) scale(1/3) with origin top-left
+                          //   の最終 top-left = (natural.x + tx, natural.y + ty)
+                          // これを 9×9 位置に合わせる
+                          const tx = (B + GAP) + c * (B / 3 + 1) - c * (B + GAP)
+                          const ty = (B + GAP) + r * (B / 3 + 1) - r * (B + GAP)
+                          const idx = cellOrder.indexOf(pos)
+                          const delay = Math.max(0, idx) * STAGGER
+                          const isCenter = pos === 4
+                          const isDisabled = !isCenter && rootCenterEmpty
+                          const transform =
+                            viewSwitchPhase === 'start'
+                              ? `translate(${tx}px, ${ty}px) scale(${1 / 3})`
+                              : 'translate(0, 0) scale(1)'
+                          const transition = `transform ${FADE}ms ease-out ${delay}ms`
+                          return (
+                            <CellComponent
+                              key={cell.id}
+                              cell={cell}
+                              isCenter={isCenter}
+                              isDisabled={isDisabled}
+                              isCut={false}
+                              isDragSource={false}
+                              isDragOver={false}
+                              childCount={
+                                viewSwitch.childCountsByCellId.get(cell.id) ?? 0
+                              }
+                              fontScale={fontScale}
+                              isInlineEditing={false}
+                              onStartInlineEdit={() => {}}
+                              onCommitInlineEdit={async () => {}}
+                              onInlineNavigate={() => {}}
+                              onDrill={() => {}}
+                              wrapperStyle={{
+                                transform,
+                                transition,
+                                transformOrigin: 'top left',
+                                willChange: 'transform',
+                              }}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()
+              ) : slide && gridSize > 0 ? (
                 // スライド中: from (現在) と to (切替先) を横並びに描画して
                 // translateX で動かす。アニメーション中は操作を無効化する。
                 <div
