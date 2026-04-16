@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
 import { useClipboardStore } from '@/store/clipboardStore'
 import { useGrid } from '@/hooks/useGrid'
-import { useSubGrids } from '@/hooks/useSubGrids'
+import { useSubGrids, type SubGridData } from '@/hooks/useSubGrids'
 import { useRealtime } from '@/hooks/useRealtime'
 import { useOffline } from '@/hooks/useOffline'
 import { useUndo } from '@/hooks/useUndo'
@@ -48,7 +48,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const clipboard = useClipboardStore()
 
   const { data: gridData, reload, updateCell: updateCellLocal } = useGrid(currentGridId)
-  const { subGrids, reload: reloadSubGrids } = useSubGrids(gridData?.cells ?? [])
+  const { subGrids, reload: reloadSubGrids, setSubGrids } = useSubGrids(gridData?.cells ?? [])
   const gridRef = useRef<HTMLDivElement>(null)
   const gridAreaRef = useRef<HTMLDivElement>(null)
   const [gridSize, setGridSize] = useState(0)
@@ -117,6 +117,25 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const ORBIT_FADE_DOWN_MS = 400
   const ORBIT_FADE_UP_MS = 400
   const ORBIT_FADE_INIT_MS = 400
+
+  // 9×9 表示用の orbit state。こちらは「サブグリッド (3×3 ブロック)」単位で動かす。
+  // 3×3 orbit の仕組みをそのままブロック単位に持ち上げた構造。
+  // - targetRootCells: target 9×9 の中央ブロック (= target 現在グリッド) の 9 セル
+  // - targetSubGrids:  target 9×9 の各周辺ブロックに表示するサブグリッドデータ
+  //                    (cellId → SubGridData。useSubGrids と同じ構造)
+  // - movingToPosition: 移動ブロックの target 内での位置 (drill-down = 4、drill-up = 親内位置)
+  //                     null のとき (initial) は移動ブロックなし
+  // - movingFromPosition: 移動ブロックが視覚的に出発する位置
+  type Orbit9State = {
+    targetRootCells: Cell[]
+    targetSubGrids: Map<string, SubGridData>
+    targetGridId: string
+    childCountsByCellId: Map<string, number>
+    movingToPosition: number | null
+    movingFromPosition: number
+    direction: 'drill-down' | 'drill-up' | 'initial'
+  }
+  const [orbit9, setOrbit9] = useState<Orbit9State | null>(null)
   /**
    * target cells それぞれの「意味のある子グリッド数」を事前フェッチする。
    *
@@ -141,6 +160,28 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           [c.id],
         )
         map.set(c.id, rows[0]?.cnt ?? 0)
+      }),
+    )
+    return map
+  }
+
+  /**
+   * 9×9 orbit 用: root cells それぞれの子グリッドを一括取得。
+   * ないセルは Map に含めない。
+   */
+  async function fetchSubGridsFor(rootCells: Cell[]): Promise<Map<string, SubGridData>> {
+    const map = new Map<string, SubGridData>()
+    await Promise.all(
+      rootCells.map(async (cell) => {
+        const children = await getChildGrids(cell.id)
+        if (children.length > 0) {
+          const first = await getGrid(children[0].id)
+          map.set(cell.id, {
+            grid: first,
+            cells: first.cells,
+            parentPosition: cell.position,
+          })
+        }
       }),
     )
     return map
@@ -187,6 +228,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setOrbit(null)
     }
   }, [orbit, gridData])
+
+  // 9×9 orbit も同様に gridData 一致で auto-clear。
+  // subGrids は useSubGrids 側が async でフェッチするため、切替直後に古い subGrids で
+  // 描画されて「ちらつく」ことがある。事前取得済みの targetSubGrids を setSubGrids で
+  // 注入して初回描画から正しい状態にする。
+  useEffect(() => {
+    if (
+      orbit9 &&
+      orbit9.direction !== 'initial' &&
+      gridData &&
+      gridData.id === orbit9.targetGridId
+    ) {
+      setChildCounts(orbit9.childCountsByCellId)
+      setSubGrids(orbit9.targetSubGrids)
+      setOrbit9(null)
+    }
+  }, [orbit9, gridData, setSubGrids])
 
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
@@ -246,20 +304,40 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         })
 
         // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in
+        // 現在の viewMode に合わせて 3×3 (セル単位) か 9×9 (サブグリッド単位) のどちらかを発火
         const childCountsByCellId = await fetchChildCountsFor(cells)
-        setOrbit({
-          targetCells: cells,
-          targetGridId: root.id,
-          childCountsByCellId,
-          movingCellId: null,
-          movingFromPosition: 4, // 未使用 (moving cell なし)
-          direction: 'initial',
-        })
-        await new Promise((r) =>
-          setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
-        )
-        setChildCounts(childCountsByCellId)
-        setOrbit(null)
+        if (viewMode === '9x9') {
+          const targetSubGrids = await fetchSubGridsFor(cells)
+          setOrbit9({
+            targetRootCells: cells,
+            targetSubGrids,
+            targetGridId: root.id,
+            childCountsByCellId,
+            movingToPosition: null, // 移動ブロックなし
+            movingFromPosition: 4, // 未使用
+            direction: 'initial',
+          })
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          setChildCounts(childCountsByCellId)
+          setSubGrids(targetSubGrids)
+          setOrbit9(null)
+        } else {
+          setOrbit({
+            targetCells: cells,
+            targetGridId: root.id,
+            childCountsByCellId,
+            movingCellId: null,
+            movingFromPosition: 4, // 未使用 (moving cell なし)
+            direction: 'initial',
+          })
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          setChildCounts(childCountsByCellId)
+          setOrbit(null)
+        }
       } catch (e) {
         console.error('EditorLayout init error:', e)
         setToast({ message: `読み込みエラー: ${(e as Error).message}`, type: 'error' })
@@ -466,6 +544,26 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const siblings = await getChildGrids(parentCellId)
       const siblingIdx = siblings.findIndex((g) => g.id === subGrid.id)
 
+      // 9×9 表示ではサブグリッドブロック単位の orbit を再生してから状態を切替
+      if (viewMode === '9x9') {
+        const [targetSubGrids, childCountsByCellId] = await Promise.all([
+          fetchSubGridsFor(subGrid.cells),
+          fetchChildCountsFor(subGrid.cells),
+        ])
+        setOrbit9({
+          targetRootCells: subGrid.cells,
+          targetSubGrids,
+          targetGridId: subGrid.id,
+          childCountsByCellId,
+          movingToPosition: 4, // 周辺 (q) → 中心 (4) へ
+          movingFromPosition: parentCell.position,
+          direction: 'drill-down',
+        })
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+      }
+
       setCurrentGrid(subGrid.id)
       setParallelGrids(siblings.length > 0 ? siblings : [subGrid])
       setParallelIndex(Math.max(0, siblingIdx))
@@ -477,6 +575,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: gridData.cells,
         highlightPosition: parentCell.position,
       })
+      // orbit9 は auto-clear useEffect が gridData.id === subGrid.id を検知してクリア
       return
     }
 
@@ -516,6 +615,31 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 childCountsByCellId,
                 movingCellId: movingCell.id,
                 movingFromPosition: 4, // 現在の中心から親内の対応位置へ移動
+                direction: 'drill-up',
+              })
+              await new Promise((r) =>
+                setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
+              )
+            }
+          } else if (viewMode === '9x9') {
+            // 9×9 ブロック単位のドリルアップ: 現在の中央ブロック (= 現在 grid) が
+            // 親内のドリル元位置 (p) に向かって動く。target は親グリッド + その子グリッド群
+            const parentGridData = await getGrid(parent.gridId)
+            const movingParentCell = drillFromCellId
+              ? parentGridData.cells.find((c) => c.id === drillFromCellId)
+              : null
+            if (movingParentCell) {
+              const [targetSubGrids, childCountsByCellId] = await Promise.all([
+                fetchSubGridsFor(parentGridData.cells),
+                fetchChildCountsFor(parentGridData.cells),
+              ])
+              setOrbit9({
+                targetRootCells: parentGridData.cells,
+                targetSubGrids,
+                targetGridId: parent.gridId,
+                childCountsByCellId,
+                movingToPosition: movingParentCell.position, // 親内のドリル元位置へ
+                movingFromPosition: 4, // 現中央ブロックから出発
                 direction: 'drill-up',
               })
               await new Promise((r) =>
@@ -1198,6 +1322,201 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     })
                   })()}
                 </div>
+              ) : orbit9 && viewMode === '9x9' && gridSize > 0 ? (
+                // 9×9 orbit: サブグリッドブロック単位で時計回りに現れる。
+                // 移動ブロック (クリックされた or 親セル対応) は対応 keyframes で translate。
+                (() => {
+                  const stagger =
+                    orbit9.direction === 'drill-up'
+                      ? ORBIT_STAGGER_UP_MS
+                      : orbit9.direction === 'initial'
+                        ? ORBIT_STAGGER_INIT_MS
+                        : ORBIT_STAGGER_DOWN_MS
+                  const fade =
+                    orbit9.direction === 'drill-up'
+                      ? ORBIT_FADE_UP_MS
+                      : orbit9.direction === 'initial'
+                        ? ORBIT_FADE_INIT_MS
+                        : ORBIT_FADE_DOWN_MS
+                  const order =
+                    orbit9.direction === 'drill-up'
+                      ? [7, 6, 3, 0, 1, 2, 5, 8, 4]
+                      : orbit9.direction === 'initial'
+                        ? [4, 7, 6, 3, 0, 1, 2, 5, 8]
+                        : [7, 6, 3, 0, 1, 2, 5, 8]
+                  const rootCellMap = new Map(
+                    orbit9.targetRootCells.map((c) => [c.position, c]),
+                  )
+                  const rootCenter = orbit9.targetRootCells.find((c) => c.position === 4)
+                  const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
+                  // 各ブロック内の小サブグリッドラッパー共通クラス
+                  const innerWrapperBase =
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-600 rounded-xl overflow-hidden min-h-0 min-w-0'
+                  const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
+                  return (
+                    <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
+                      {Array.from({ length: 9 }).map((_, outerPos) => {
+                        const isMoving = outerPos === orbit9.movingToPosition
+                        const staggerIdx = order.indexOf(outerPos)
+                        const fadeDelay =
+                          staggerIdx >= 0 ? staggerIdx * stagger : 0
+                        let movingDuration = fade
+                        if (isMoving && orbit9.direction === 'drill-up') {
+                          const arrival = Math.max(0, staggerIdx) * stagger + fade
+                          movingDuration = Math.max(fade, arrival)
+                        }
+                        const moveAnimName =
+                          isMoving && orbit9.movingToPosition !== null
+                            ? orbitMoveAnimationName(
+                                orbit9.movingFromPosition,
+                                orbit9.movingToPosition,
+                              )
+                            : null
+                        const blockStyle: React.CSSProperties =
+                          isMoving && moveAnimName
+                            ? {
+                                animation: `${moveAnimName} ${movingDuration}ms ease-out 0ms both`,
+                                willChange: 'transform',
+                              }
+                            : {
+                                animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
+                                willChange: 'opacity',
+                              }
+
+                        const isCenterBlock = outerPos === 4
+                        // 中央ブロック = target のルートセル 9 つ、それ以外 = target の子サブグリッド
+                        const rootCell = isCenterBlock
+                          ? null
+                          : rootCellMap.get(outerPos) ?? null
+                        const sub =
+                          !isCenterBlock && rootCell
+                            ? orbit9.targetSubGrids.get(rootCell.id) ?? null
+                            : null
+                        // 周辺ブロック外枠の黒判定: 「意味のあるサブグリッド」
+                        // (= 周辺セルに入力がある) の場合のみ 2px 黒。
+                        const hasMeaningfulSub = rootCell
+                          ? (orbit9.childCountsByCellId.get(rootCell.id) ?? 0) > 0
+                          : false
+                        const blockBorder = isCenterBlock
+                          ? 'border-[6px] border-black dark:border-white'
+                          : hasMeaningfulSub
+                            ? 'border-2 border-black dark:border-white'
+                            : 'border-2 border-gray-300 dark:border-gray-600'
+
+                        // 中央ブロックの内側セル
+                        if (isCenterBlock) {
+                          return (
+                            <div
+                              key={outerPos}
+                              style={blockStyle}
+                              className={`${innerWrapperBase} ${blockBorder}`}
+                            >
+                              {Array.from({ length: 9 }).map((_, innerPos) => {
+                                const cell = rootCellMap.get(innerPos)
+                                if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                                const isInnerCenter = innerPos === 4
+                                const isDisabled = !isInnerCenter && rootCenterEmpty
+                                return (
+                                  <CellComponent
+                                    key={cell.id}
+                                    cell={cell}
+                                    isCenter={isInnerCenter}
+                                    isDisabled={isDisabled}
+                                    isCut={false}
+                                    isDragSource={false}
+                                    isDragOver={false}
+                                    childCount={orbit9.childCountsByCellId.get(cell.id) ?? 0}
+                                    fontScale={fontScale}
+                                    isInlineEditing={false}
+                                    onStartInlineEdit={() => {}}
+                                    onCommitInlineEdit={async () => {}}
+                                    onInlineNavigate={() => {}}
+                                    onDrill={() => {}}
+                                    size="small"
+                                  />
+                                )
+                              })}
+                            </div>
+                          )
+                        }
+
+                        // 周辺ブロック: 子サブグリッドがあれば 9 セル、なければ placeholder + root cell
+                        if (sub) {
+                          const subCellMap = new Map(sub.cells.map((c) => [c.position, c]))
+                          const subCenter = sub.cells.find((c) => c.position === 4)
+                          const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
+                          return (
+                            <div
+                              key={outerPos}
+                              style={blockStyle}
+                              className={`${innerWrapperBase} ${blockBorder}`}
+                            >
+                              {Array.from({ length: 9 }).map((_, innerPos) => {
+                                const cell = subCellMap.get(innerPos)
+                                if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                                const isInnerCenter = innerPos === 4
+                                const isDisabled = !isInnerCenter && subCenterEmpty
+                                return (
+                                  <CellComponent
+                                    key={cell.id}
+                                    cell={cell}
+                                    isCenter={isInnerCenter}
+                                    isDisabled={isDisabled}
+                                    isCut={false}
+                                    isDragSource={false}
+                                    isDragOver={false}
+                                    childCount={0}
+                                    fontScale={fontScale}
+                                    isInlineEditing={false}
+                                    onStartInlineEdit={() => {}}
+                                    onCommitInlineEdit={async () => {}}
+                                    onInlineNavigate={() => {}}
+                                    onDrill={() => {}}
+                                    size="small"
+                                  />
+                                )
+                              })}
+                            </div>
+                          )
+                        }
+
+                        // 子サブグリッドなし: rootCell 本体だけ中央に、周辺は白プレースホルダ
+                        return (
+                          <div
+                            key={outerPos}
+                            style={blockStyle}
+                            className={`${innerWrapperBase} ${blockBorder}`}
+                          >
+                            {Array.from({ length: 9 }).map((_, innerPos) => {
+                              if (innerPos === 4 && rootCell) {
+                                return (
+                                  <CellComponent
+                                    key={rootCell.id + '-center'}
+                                    cell={rootCell}
+                                    isCenter={true}
+                                    isDisabled={false}
+                                    isCut={false}
+                                    isDragSource={false}
+                                    isDragOver={false}
+                                    childCount={0}
+                                    fontScale={fontScale}
+                                    isInlineEditing={false}
+                                    onStartInlineEdit={() => {}}
+                                    onCommitInlineEdit={async () => {}}
+                                    onInlineNavigate={() => {}}
+                                    onDrill={() => {}}
+                                    size="small"
+                                  />
+                                )
+                              }
+                              return <div key={innerPos} className={innerEmptyCellClass} />
+                            })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()
               ) : (
                 <>
                   {gridData && viewMode === '3x3' && gridSize > 0 && (

@@ -38,5 +38,5 @@ export function useSubGrids(rootCells: Cell[]) {
     if (rootCells.length > 0) load()
   }, [load, rootCells])
 
-  return { subGrids, reload: load }
+  return { subGrids, reload: load, setSubGrids }
 }

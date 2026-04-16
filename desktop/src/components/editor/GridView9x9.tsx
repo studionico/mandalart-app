@@ -98,7 +98,12 @@ export default function GridView9x9({
         const subCenter = sub ? getCenterCell(sub.cells) : null
         const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
 
-        const borderClass = subCellMap
+        // 外枠の黒 2px は「意味のあるサブグリッド」= 周辺セルに入力がある場合のみ。
+        // childCounts は fetchChildCountsFor 側でその条件を満たすものだけカウントされる。
+        const hasMeaningfulSub = rootCell
+          ? (childCounts.get(rootCell.id) ?? 0) > 0
+          : false
+        const borderClass = hasMeaningfulSub
           ? 'border-2 border-black dark:border-white'
           : 'border-2 border-gray-300 dark:border-gray-600'
 
