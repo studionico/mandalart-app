@@ -1,4 +1,5 @@
 import { query, execute, generateId, now } from '../db'
+import { supabase, isSupabaseConfigured } from '../supabase/client'
 import type { Mandalart, Cell } from '../../types'
 
 // ルート中心セル (position=4) の image_path を相関サブクエリで取得する共通式。
@@ -101,15 +102,45 @@ export async function restoreMandalart(id: string): Promise<void> {
 
 /**
  * 完全削除（物理削除）。ゴミ箱から元に戻せなくなる。
- * ローカル DB から cells / grids / mandalarts を順に実際の DELETE で消す。
+ * ローカル DB から cells / grids / mandalarts を順に実際の DELETE で消し、
+ * サインインしていれば cloud からも同じ順で物理削除する。
+ *
+ * cloud からも消さないと、次回 pullAll で deleted_at 付きの行が再挿入されて
+ * ゴミ箱に復活してしまう（「完全削除したはずが同期で戻ってきた」問題の原因）。
  */
 export async function permanentDeleteMandalart(id: string): Promise<void> {
+  // 1. ローカル
   await execute(
     'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
     [id],
   )
   await execute('DELETE FROM grids WHERE mandalart_id = ?', [id])
   await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+
+  // 2. クラウド (任意)。未サインイン / Supabase 未設定なら何もしない
+  if (!isSupabaseConfigured) return
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return
+
+  try {
+    // FK CASCADE に頼らず、cells → grids → mandalarts の順で明示削除する。
+    // 循環 FK 問題で parent_cell_id の制約は外している運用なので、
+    // 順序を守れば制約違反は起きない。
+    const { data: cloudGrids } = await supabase
+      .from('grids')
+      .select('id')
+      .eq('mandalart_id', id)
+    const gridIds = ((cloudGrids ?? []) as { id: string }[]).map((g) => g.id)
+    if (gridIds.length > 0) {
+      await supabase.from('cells').delete().in('grid_id', gridIds)
+    }
+    await supabase.from('grids').delete().eq('mandalart_id', id)
+    await supabase.from('mandalarts').delete().eq('id', id)
+  } catch (e) {
+    // ネットワーク断 / RLS 等で失敗した場合: ローカルは既に消えている。
+    // 次回オンライン時に再度完全削除を実行すれば cloud も消える。
+    console.warn('[permanentDelete] cloud delete failed (local delete already succeeded):', e)
+  }
 }
 
 /**

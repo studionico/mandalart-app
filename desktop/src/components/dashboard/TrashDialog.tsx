@@ -17,6 +17,10 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
   const [items, setItems] = useState<Mandalart[]>([])
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  // Tauri v2 の WebView は window.confirm が動作しないため、2 クリック方式で確認する。
+  // 1 回目のクリックで confirmingId を立ててボタン表記を「本当に削除?」に切替え、
+  // 2 回目のクリックで実削除。4 秒放置したら自動で confirm 状態を解除する。
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -29,7 +33,16 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
 
   useEffect(() => {
     if (open) load()
+    // 閉じたら confirm 状態もリセット
+    if (!open) setConfirmingId(null)
   }, [open])
+
+  // confirm 状態は 4 秒で自動解除
+  useEffect(() => {
+    if (!confirmingId) return
+    const t = setTimeout(() => setConfirmingId(null), 4000)
+    return () => clearTimeout(t)
+  }, [confirmingId])
 
   async function handleRestore(m: Mandalart) {
     setBusy(m.id)
@@ -43,7 +56,12 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
   }
 
   async function handlePermanentDelete(m: Mandalart) {
-    if (!window.confirm(`「${m.title || '無題'}」を完全に削除しますか？この操作は取り消せません。`)) return
+    // 1 回目: confirm 状態へ
+    if (confirmingId !== m.id) {
+      setConfirmingId(m.id)
+      return
+    }
+    // 2 回目: 実削除
     setBusy(m.id)
     try {
       await permanentDeleteMandalart(m.id)
@@ -51,6 +69,7 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
       onChange()
     } finally {
       setBusy(null)
+      setConfirmingId(null)
     }
   }
 
@@ -88,8 +107,9 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
                 size="sm"
                 onClick={() => handlePermanentDelete(m)}
                 disabled={busy === m.id}
+                title={confirmingId === m.id ? 'もう一度押すと完全削除されます' : '完全削除 (取り消せません)'}
               >
-                完全削除
+                {confirmingId === m.id ? '本当に削除?' : '完全削除'}
               </Button>
             </div>
           ))}
