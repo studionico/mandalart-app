@@ -16,11 +16,16 @@ export function subscribeRemoteChanges(
 ): () => void {
   const channel = supabase.channel('mandalart-sync')
 
+  // Supabase realtime の table フィルターが実測で discriminator として
+  // 効かないケースがあり、mandalarts ハンドラに cells ペイロードが届くなどの
+  // 混線が発生する。各ハンドラの冒頭で payload.table を検証し、対象外ならスキップする。
+
   // mandalarts は今のところ delete だけで自動削除がないので、UI のリストの整合性のために購読する
   channel.on(
     'postgres_changes',
     { event: '*', schema: 'public', table: 'mandalarts' },
     async (payload) => {
+      if (payload.table !== 'mandalarts') return
       try {
         await applyMandalartChange(payload)
         onChange()
@@ -34,6 +39,7 @@ export function subscribeRemoteChanges(
     'postgres_changes',
     { event: '*', schema: 'public', table: 'grids' },
     async (payload) => {
+      if (payload.table !== 'grids') return
       try {
         await applyGridChange(payload)
         onChange()
@@ -47,6 +53,7 @@ export function subscribeRemoteChanges(
     'postgres_changes',
     { event: '*', schema: 'public', table: 'cells' },
     async (payload) => {
+      if (payload.table !== 'cells') return
       try {
         await applyCellChange(payload)
         onChange()
@@ -66,7 +73,18 @@ export function subscribeRemoteChanges(
 async function applyMandalartChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
   if (payload.eventType === 'DELETE') {
     const id = payload.old.id as string
-    if (id) await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+    if (id) {
+      // cloud 側は FK CASCADE で grids / cells も連動削除されるが、realtime の DELETE
+      // イベントは個別テーブルごとに届き、しかも「まだ cloud に push されていない子行」
+      // に対する DELETE は発行されない。ここで明示的に cascade しないと local に
+      // 孤立 cells / grids が残って後続の push で RLS 拒否の原因になる。
+      await execute(
+        'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
+        [id],
+      )
+      await execute('DELETE FROM grids WHERE mandalart_id = ?', [id])
+      await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+    }
     return
   }
   const m = payload.new as { id: string; title: string; created_at: string; updated_at: string; deleted_at: string | null }
@@ -88,7 +106,11 @@ async function applyMandalartChange(payload: { eventType: string; new: Record<st
 async function applyGridChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
   if (payload.eventType === 'DELETE') {
     const id = payload.old.id as string
-    if (id) await execute('DELETE FROM grids WHERE id = ?', [id])
+    if (id) {
+      // 上記と同じ理由で cells も cascade 削除
+      await execute('DELETE FROM cells WHERE grid_id = ?', [id])
+      await execute('DELETE FROM grids WHERE id = ?', [id])
+    }
     return
   }
   const g = payload.new as CloudGrid & { deleted_at: string | null }
