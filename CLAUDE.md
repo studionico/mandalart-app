@@ -18,6 +18,7 @@
 | API (lib/api) | [`api-spec.md`](desktop/docs/api-spec.md), [`data-model.md`](desktop/docs/data-model.md) |
 | DB スキーマ変更 | [`data-model.md`](desktop/docs/data-model.md), [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) |
 | 同期・realtime | 本ファイル「落とし穴」節, [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) |
+| セキュリティ / RLS 確認 | [`security.md`](desktop/docs/security.md) |
 | リリース・更新 | [`updater-setup.md`](desktop/docs/updater-setup.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
 | フォルダ構成 | [`folder-structure.md`](desktop/docs/folder-structure.md) |
 

@@ -176,10 +176,13 @@ SELECT tablename FROM pg_publication_tables WHERE pubname = 'supabase_realtime';
 
 ## トラブルシューティング
 
+RLS 周りで疑いが出たら、まず [`security.md`](./security.md) の「再検証 SQL」で現在のポリシー状態を確認する。
+
 ### `同期エラー` / `permission denied for table mandalarts`
 
 - RLS 有効で `user_id = auth.uid()` を満たしていない行がある
 - 対策: サインイン状態を確認、`user_id` が正しく `auth.users.id` にマッチしているか
+- RLS ポリシー自体の検証は [`security.md`](./security.md) 参照
 
 ### `insert or update on table "grids" violates foreign key constraint "grids_parent_cell_id_fkey"` (23503)
 
