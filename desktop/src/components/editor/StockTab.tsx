@@ -1,6 +1,8 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
+import { CONFIRM_AUTO_RESET_MS } from '@/constants/timing'
+import Button from '@/components/ui/Button'
 import type { StockItem } from '@/types'
 
 type Props = {
@@ -18,6 +20,10 @@ export default function StockTab({
 }: Props) {
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
+  // Tauri v2 の WebView は window.confirm が動作しないため、一括削除は 2 クリック方式。
+  // 1 回目でボタン表記を切替え、2 回目で実行。CONFIRM_AUTO_RESET_MS 放置で自動解除。
+  const [confirmingAll, setConfirmingAll] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -28,9 +34,41 @@ export default function StockTab({
 
   useEffect(() => { load() }, [reloadKey])
 
+  // confirm 状態は CONFIRM_AUTO_RESET_MS で自動解除
+  useEffect(() => {
+    if (!confirmingAll) return
+    const t = setTimeout(() => setConfirmingAll(false), CONFIRM_AUTO_RESET_MS)
+    return () => clearTimeout(t)
+  }, [confirmingAll])
+
   async function handleDelete(id: string) {
     await deleteStockItem(id)
     setItems((prev) => prev.filter((i) => i.id !== id))
+  }
+
+  async function handleDeleteAll() {
+    // 1 回目: confirm 状態へ
+    if (!confirmingAll) {
+      setConfirmingAll(true)
+      return
+    }
+    // 2 回目: 全件削除
+    setBusy(true)
+    const targets = [...items]
+    setItems([]) // 楽観的 UI
+    try {
+      const results = await Promise.allSettled(
+        targets.map((it) => deleteStockItem(it.id)),
+      )
+      const failed = results.filter((r) => r.status === 'rejected')
+      if (failed.length > 0) {
+        console.warn(`[stock] ${failed.length} 件の削除が失敗しました`)
+        await load()
+      }
+    } finally {
+      setBusy(false)
+      setConfirmingAll(false)
+    }
   }
 
   function handleItemMouseDown(e: React.MouseEvent, itemId: string) {
@@ -72,6 +110,23 @@ export default function StockTab({
       >
         {isOverStock ? 'ここにドロップ' : 'セルをドラッグしてストックに追加'}
       </div>
+
+      {/* すべて削除ボタン (件数付き、2 クリック確認) */}
+      {!loading && items.length > 0 && (
+        <div className="shrink-0 flex justify-end">
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={handleDeleteAll}
+            disabled={busy}
+            title={confirmingAll ? 'もう一度押すとすべて削除されます' : 'ストックをすべて削除'}
+          >
+            {confirmingAll
+              ? `本当に全削除? (${items.length}件)`
+              : `すべて削除 (${items.length}件)`}
+          </Button>
+        </div>
+      )}
 
       {/* アイテム一覧 — ダッシュボードと同形式の正方形タイル */}
       <div className="flex-1 overflow-y-auto">
