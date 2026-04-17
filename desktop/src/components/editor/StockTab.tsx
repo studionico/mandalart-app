@@ -92,26 +92,28 @@ export default function StockTab({
               key={item.id}
               onMouseDown={(e) => handleItemMouseDown(e, item.id)}
               className={`
-                border border-gray-200 rounded-xl p-3 flex items-start gap-2 group cursor-grab select-none
+                border border-gray-200 rounded-xl p-3 group cursor-grab select-none overflow-hidden
                 hover:border-gray-300 active:cursor-grabbing
                 ${isSourceDragging ? 'opacity-40' : ''}
               `}
             >
-              {/* ミニプレビュー */}
-              <div className="grid grid-cols-3 gap-0.5 w-10 h-10 shrink-0">
-                {Array.from({ length: GRID_CELL_COUNT }).map((_, i) => (
-                  <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-100' : 'bg-gray-100'}`} />
-                ))}
+              <div className="flex items-start gap-2">
+                {/* ミニプレビュー */}
+                <div className="grid grid-cols-3 gap-0.5 w-10 h-10 shrink-0">
+                  {Array.from({ length: GRID_CELL_COUNT }).map((_, i) => (
+                    <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-100' : 'bg-gray-100'}`} />
+                  ))}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{item.snapshot.cell.text || '（テキストなし）'}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {new Date(item.created_at).toLocaleDateString('ja-JP')}
+                  </p>
+                </div>
               </div>
 
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{item.snapshot.cell.text || '（テキストなし）'}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {new Date(item.created_at).toLocaleDateString('ja-JP')}
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button size="sm" variant="secondary" onClick={() => onPaste(item)}>
                   貼付
                 </Button>
