@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import EditorPage from './pages/EditorPage'
+import ErrorBoundary from './components/ErrorBoundary'
 import UpdateDialog from './components/UpdateDialog'
 import { useGlobalShortcut } from './hooks/useGlobalShortcut'
 import { useAppUpdate } from './hooks/useAppUpdate'
@@ -14,13 +15,15 @@ export default function App() {
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   return (
-    <HashRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/mandalart/:id" element={<EditorPage />} />
-      </Routes>
-      <UpdateDialog status={status} onInstall={downloadAndInstall} onDismiss={dismiss} />
-    </HashRouter>
+    <ErrorBoundary>
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/mandalart/:id" element={<EditorPage />} />
+        </Routes>
+        <UpdateDialog status={status} onInstall={downloadAndInstall} onDismiss={dismiss} />
+      </HashRouter>
+    </ErrorBoundary>
   )
 }
