@@ -1,9 +1,7 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
-import { GRID_CELL_COUNT } from '@/constants/grid'
 import type { StockItem } from '@/types'
-import Button from '@/components/ui/Button'
 
 type Props = {
   onPaste: (item: StockItem) => void
@@ -75,8 +73,8 @@ export default function StockTab({
         {isOverStock ? 'ここにドロップ' : 'セルをドラッグしてストックに追加'}
       </div>
 
-      {/* アイテム一覧 */}
-      <div className="flex-1 flex flex-col gap-2 overflow-y-auto">
+      {/* アイテム一覧 — ダッシュボードと同形式の正方形タイル */}
+      <div className="flex-1 overflow-y-auto">
         {loading && <div className="text-xs text-gray-400 py-4 text-center">読み込み中...</div>}
 
         {!loading && items.length === 0 && (
@@ -85,45 +83,61 @@ export default function StockTab({
           </div>
         )}
 
-        {items.map((item) => {
-          const isSourceDragging = dragSourceId === `stock:${item.id}`
-          return (
-            <div
-              key={item.id}
-              onMouseDown={(e) => handleItemMouseDown(e, item.id)}
-              className={`
-                border border-gray-200 rounded-xl p-3 group cursor-grab select-none overflow-hidden
-                hover:border-gray-300 active:cursor-grabbing
-                ${isSourceDragging ? 'opacity-40' : ''}
-              `}
-            >
-              <div className="flex items-start gap-2">
-                {/* ミニプレビュー */}
-                <div className="grid grid-cols-3 gap-0.5 w-10 h-10 shrink-0">
-                  {Array.from({ length: GRID_CELL_COUNT }).map((_, i) => (
-                    <div key={i} className={`rounded-sm ${i === 4 ? 'bg-blue-100' : 'bg-gray-100'}`} />
-                  ))}
+        <div className="grid gap-2 grid-cols-[repeat(auto-fill,80px)] justify-center">
+          {items.map((item) => {
+            const isSourceDragging = dragSourceId === `stock:${item.id}`
+            const text = item.snapshot.cell.text || '（テキストなし）'
+            return (
+              <div
+                key={item.id}
+                onMouseDown={(e) => handleItemMouseDown(e, item.id)}
+                className={`
+                  relative w-[80px] h-[80px] bg-white dark:bg-gray-900
+                  border-2 border-black dark:border-white rounded-xl
+                  shadow-sm hover:shadow-md transition-shadow
+                  cursor-grab active:cursor-grabbing select-none
+                  group overflow-hidden
+                  ${isSourceDragging ? 'opacity-40' : ''}
+                `}
+                title={text}
+              >
+                <div
+                  className="w-full h-full flex items-start justify-start p-2 text-left break-all leading-tight text-gray-800 dark:text-gray-100 font-medium"
+                  style={{ fontSize: 10 }}
+                >
+                  <span className="block w-full line-clamp-5 whitespace-pre-wrap">
+                    {text}
+                  </span>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{item.snapshot.cell.text || '（テキストなし）'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {new Date(item.created_at).toLocaleDateString('ja-JP')}
-                  </p>
+                {/* 作成日: hover 時のみ下部 */}
+                <div className="absolute bottom-0.5 left-1 right-1 text-[8px] text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
+                  {new Date(item.created_at).toLocaleDateString('ja-JP')}
+                </div>
+
+                {/* アクション: hover 時に右上 */}
+                <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onPaste(item) }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-4 h-4 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[8px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center justify-center"
+                    title="貼付"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDelete(item.id) }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-4 h-4 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[8px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
+                    title="削除"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
-
-              <div className="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button size="sm" variant="secondary" onClick={() => onPaste(item)}>
-                  貼付
-                </Button>
-                <Button size="sm" variant="danger" onClick={() => handleDelete(item.id)}>
-                  削除
-                </Button>
-              </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )
