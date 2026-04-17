@@ -42,6 +42,8 @@ export type StockItem = {
 
 export type CellSnapshot = {
   cell: Pick<Cell, 'text' | 'image_path' | 'color'>
+  /** ストック元セルの position。中心 (4) の場合は所属グリッド全体をスナップショットしている */
+  position?: number
   children: GridSnapshot[]
 }
 
