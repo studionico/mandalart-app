@@ -320,8 +320,8 @@ export default function Cell({
           : size === 'small'
             ? ''
             : childCount > 0
-              ? 'rounded-lg border-2 border-black dark:border-white shadow-sm'
-              : 'rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm'
+              ? 'rounded-lg border-2 border-black dark:border-gray-300 shadow-sm'
+              : 'rounded-lg border border-gray-300 dark:border-gray-700 shadow-sm'
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut || isDragSource ? 'opacity-40' : ''}

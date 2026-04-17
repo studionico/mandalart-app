@@ -1317,7 +1317,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   const rootCenter = viewSwitch.rootCells.find((c) => c.position === CENTER_POSITION)
                   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
                   const innerWrapperBase =
-                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-600 rounded-xl overflow-hidden min-h-0 min-w-0'
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-700 rounded-xl overflow-hidden min-h-0 min-w-0'
                   const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
 
                   // 共通: 周辺 9×9 ブロックをレンダリングする関数 (fade-in / fade-out 用)
@@ -1331,8 +1331,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       ? (viewSwitch!.childCountsByCellId.get(rootCell.id) ?? 0) > 0
                       : false
                     const blockBorder = hasMeaningfulSub
-                      ? 'border-2 border-black dark:border-white'
-                      : 'border-2 border-gray-300 dark:border-gray-600'
+                      ? 'border-2 border-black dark:border-gray-300'
+                      : 'border-2 border-gray-300 dark:border-gray-700'
 
                     // 子サブグリッドあり: 9 セルすべて描画
                     if (sub) {
@@ -1774,7 +1774,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
                   // 各ブロック内の小サブグリッドラッパー共通クラス
                   const innerWrapperBase =
-                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-600 rounded-xl overflow-hidden min-h-0 min-w-0'
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-700 rounded-xl overflow-hidden min-h-0 min-w-0'
                   const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
                   return (
                     <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
@@ -1823,8 +1823,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         const blockBorder = isCenterBlock
                           ? 'border-[6px] border-black dark:border-white'
                           : hasMeaningfulSub
-                            ? 'border-2 border-black dark:border-white'
-                            : 'border-2 border-gray-300 dark:border-gray-600'
+                            ? 'border-2 border-black dark:border-gray-300'
+                            : 'border-2 border-gray-300 dark:border-gray-700'
 
                         // 中央ブロックの内側セル
                         if (isCenterBlock) {
