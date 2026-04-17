@@ -1135,6 +1135,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       return
     }
     if (clipboard.sourceCellId === target.id) return
+    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可
+    if (!isCenterPosition(target.position)) {
+      const center = dndCells.find(
+        (c) => c.grid_id === target.grid_id && c.position === CENTER_POSITION,
+      )
+      if (!center || isCellEmpty(center)) {
+        setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
+        return
+      }
+    }
     try {
       await pasteCell(clipboard.sourceCellId, target.id, clipboard.mode)
       if (clipboard.mode === 'cut') clipboard.clear()
@@ -1154,8 +1164,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setToast({ message: 'ペースト先のセルをインライン編集中にしてください (またはドラッグ&ドロップしてください)', type: 'info' })
       return
     }
-    await pasteFromStock(item.id, targetCellId)
-    reload()
+    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可
+    const targetCell = dndCells.find((c) => c.id === targetCellId)
+    if (targetCell && !isCenterPosition(targetCell.position)) {
+      const center = dndCells.find(
+        (c) => c.grid_id === targetCell.grid_id && c.position === CENTER_POSITION,
+      )
+      if (!center || isCellEmpty(center)) {
+        setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
+        return
+      }
+    }
+    try {
+      await pasteFromStock(item.id, targetCellId)
+      reload()
+    } catch (e) {
+      setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
+    }
   }
 
   // エクスポート

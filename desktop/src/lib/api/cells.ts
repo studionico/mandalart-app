@@ -86,6 +86,24 @@ export async function pasteCell(
   mode: 'cut' | 'copy',
 ): Promise<void> {
   if (sourceCellId === targetCellId) return
+
+  // 防御チェック: 周辺セルなのに中心セルが空ならペースト不可
+  const targetRows = await query<{ grid_id: string; position: number }>(
+    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [targetCellId],
+  )
+  const target = targetRows[0]
+  if (target && target.position !== CENTER_POSITION) {
+    const centerRows = await query<{ text: string; image_path: string | null }>(
+      'SELECT text, image_path FROM cells WHERE grid_id = ? AND position = ? AND deleted_at IS NULL',
+      [target.grid_id, CENTER_POSITION],
+    )
+    const center = centerRows[0]
+    if (!center || (center.text.trim() === '' && center.image_path === null)) {
+      throw new Error('中心セルが空のグリッドの周辺セルにはペーストできません')
+    }
+  }
+
   await copyCellSubtree(sourceCellId, targetCellId)
 
   if (mode === 'cut') {

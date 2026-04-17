@@ -2,9 +2,26 @@ import { useState, useCallback, useRef } from 'react'
 import type { Cell } from '@/types'
 import { resolveDndAction, type DndAction } from '@/lib/utils/dnd'
 import { isCellEmpty } from '@/lib/utils/grid'
+import { CENTER_POSITION, isCenterPosition } from '@/constants/grid'
 import { swapCellContent, swapCellSubtree, copyCellSubtree } from '@/lib/api/cells'
 import { query, execute, now } from '@/lib/db'
 import type { UndoOperation } from '@/store/undoStore'
+
+/**
+ * ストックからのドロップ先として有効かどうかを判定する。
+ * - セルが空でなければ不可 (既存ルール: 空セルのみ受け入れ)
+ * - 中心セル (position 4) 自体は常に OK
+ * - 周辺セルは、同一グリッドの中心セルが非空の場合のみ OK
+ *   (中心セルが空 → 周辺は disabled、という入力バリデーションルール)
+ */
+function isDroppableTarget(cell: Cell, allCells: Cell[]): boolean {
+  if (!isCellEmpty(cell)) return false
+  if (isCenterPosition(cell.position)) return true
+  const center = allCells.find(
+    (c) => c.grid_id === cell.grid_id && c.position === CENTER_POSITION,
+  )
+  return center != null && !isCellEmpty(center)
+}
 
 export type DndUndoable = UndoOperation & { description: string }
 
@@ -103,10 +120,10 @@ export function useDragAndDrop(
       const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
       let overCellId: string | null = cellEl?.dataset.cellId ?? null
 
-      // ストック → セル: 空セルのみ有効なドロップ先としてハイライト
+      // ストック → セル: 空セル + 中心セルが非空の場合のみ有効なドロップ先としてハイライト
       if (sourceRef.current?.kind === 'stock' && overCellId) {
         const t = cellsRef.current.find((c) => c.id === overCellId)
-        if (!t || !isCellEmpty(t)) overCellId = null
+        if (!t || !isDroppableTarget(t, cellsRef.current)) overCellId = null
       }
 
       setDragOverId(overCellId)
@@ -151,10 +168,10 @@ export function useDragAndDrop(
             .catch(console.error)
         }
       } else {
-        // ストック → セル: 空セルのみ許可（入れ替えなし）
+        // ストック → セル: 空セル + 中心セルが非空の場合のみ許可（入れ替えなし）
         if (!targetId) return
         const target = cellsRef.current.find((c) => c.id === targetId)
-        if (!target || !isCellEmpty(target)) return
+        if (!target || !isDroppableTarget(target, cellsRef.current)) return
         onStockPaste?.(src.itemId, targetId)
       }
     }

@@ -36,13 +36,27 @@ export async function pasteFromStock(stockItemId: string, targetCellId: string):
   const snapshot: CellSnapshot = JSON.parse(rows[0].snapshot)
 
   // ターゲットの所属マンダラート ID を取得
-  const targetCells = await query<{ grid_id: string }>(
-    'SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL', [targetCellId]
+  const targetCells = await query<{ grid_id: string; position: number }>(
+    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL', [targetCellId]
   )
-  const targetGrid = targetCells[0]
-  if (!targetGrid) return
+  const targetCell = targetCells[0]
+  if (!targetCell) return
+
+  // 防御チェック: 周辺セルなのに中心セルが空ならペースト不可
+  // (UI 側でも isDroppableTarget でガードしているが、API 層でもダブルチェックする)
+  if (targetCell.position !== CENTER_POSITION) {
+    const centerRows = await query<{ text: string; image_path: string | null }>(
+      'SELECT text, image_path FROM cells WHERE grid_id = ? AND position = ? AND deleted_at IS NULL',
+      [targetCell.grid_id, CENTER_POSITION],
+    )
+    const center = centerRows[0]
+    if (!center || (center.text.trim() === '' && center.image_path === null)) {
+      throw new Error('中心セルが空のグリッドの周辺セルにはペーストできません')
+    }
+  }
+
   const grids = await query<{ mandalart_id: string }>(
-    'SELECT mandalart_id FROM grids WHERE id = ? AND deleted_at IS NULL', [targetGrid.grid_id]
+    'SELECT mandalart_id FROM grids WHERE id = ? AND deleted_at IS NULL', [targetCell.grid_id]
   )
   const mandalartId = grids[0]?.mandalart_id
   if (!mandalartId) return
