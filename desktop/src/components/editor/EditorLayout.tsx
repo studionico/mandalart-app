@@ -864,6 +864,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       }
     }
 
+    // バリデーション: サブグリッドに入力のある周辺セルは空にできない
+    // (周辺セル X に子グリッドがあり、そこに意味ある周辺入力がある場合、X は
+    // そのサブグリッドの「中心」と等価。X を空にすると配下のテーマが孤立する)
+    if (cell.position !== CENTER_POSITION && isCellEmpty({ text: params.text, image_path: params.image_path })) {
+      const meaningfulSubCount = childCounts.get(cell.id) ?? 0
+      if (meaningfulSubCount > 0) {
+        setToast({ message: 'サブグリッドに入力がある場合、このセルを空にできません', type: 'error' })
+        return
+      }
+    }
+
     const previous = { text: cell.text, image_path: cell.image_path, color: cell.color }
     // 空 → 非空 transition の場合、updateCell が propagateUndoneUp を走らせて
     // 祖先の done=1 を解除する。useGrid.updateCellLocal は編集したセル 1 つだけ
