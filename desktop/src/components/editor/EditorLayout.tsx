@@ -19,7 +19,7 @@ import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid } from '@/lib/api/grids'
-import { updateCell, pasteCell, toggleCellDone, seedCellWithDone } from '@/lib/api/cells'
+import { updateCell, pasteCell, toggleCellDone } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
@@ -213,16 +213,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const map = new Map<string, number>()
     await Promise.all(
       cells.map(async (c) => {
+        // 新モデル (X=C 統一): ドリル先 grid は center_cell_id = this cell の行。
+        // 自グリッド (root での自己参照) は除外するため id != cell.grid_id を条件に入れる。
         const rows = await query<{ cnt: number }>(
           `SELECT COUNT(DISTINCT g.id) AS cnt
            FROM grids g
            JOIN cells sub ON sub.grid_id = g.id
-           WHERE g.parent_cell_id = ?
+           WHERE g.center_cell_id = ?
+             AND g.id != ?
              AND g.deleted_at IS NULL
              AND sub.position != 4
              AND sub.deleted_at IS NULL
              AND (sub.text != '' OR sub.image_path IS NOT NULL)`,
-          [c.id],
+          [c.id, c.grid_id],
         )
         map.set(c.id, rows[0]?.cnt ?? 0)
       }),
@@ -600,8 +603,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (gridData && cell.grid_id !== gridData.id) {
       const subGrid = await getGrid(cell.grid_id)
       if (!subGrid) return
-      const parentCellId = subGrid.parent_cell_id
-      if (!parentCellId) return
+      // 新モデル: subGrid の親 peripheral は subGrid.center_cell_id が指す cell
+      const parentCellId = subGrid.center_cell_id
       const parentCell = gridData.cells.find((c) => c.id === parentCellId)
       if (!parentCell) return
 
@@ -757,27 +760,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // orbit は gridData が firstChild.id に追いついた時点で useEffect がクリア
     } else if (!isCellEmpty(cell)) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
-      const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
+      // 新モデル: center_cell_id = cell.id (親の周辺セルがそのまま子グリッドの中心になる)
+      // 中心の text/image/color/done は親セルそのものなので別途コピー不要
+      const newGrid = await createGrid({ mandalartId, centerCellId: cell.id, sortOrder: 0 })
 
-      const centerCell = newGrid.cells.find((c) => c.position === CENTER_POSITION)
-      const populatedCells = centerCell && !isCellEmpty(cell)
-        ? newGrid.cells.map((c) =>
-            c.position === CENTER_POSITION
-              ? { ...c, text: cell.text, image_path: cell.image_path, color: cell.color, done: !!cell.done }
-              : { ...c, done: !!cell.done },
-          )
-        : newGrid.cells.map((c) => ({ ...c, done: !!cell.done }))
-      if (centerCell && !isCellEmpty(cell)) {
-        // 新規子グリッドの中央セルを親のテキスト+done で atomic 初期化。
-        // updateCell 経由だと空→非空 transition で propagateUndoneUp が走り
-        // 親 (= clicked cell) が uncheck されてしまうので seedCellWithDone を使う。
-        await seedCellWithDone(centerCell.id, {
-          text: cell.text,
-          image_path: cell.image_path,
-          color: cell.color,
-          done: !!cell.done,
-        })
-      }
+      // newGrid.cells は 9 要素で提供される (中心は親 cell、周辺 8 は新規 empty)
+      const populatedCells = newGrid.cells
 
       if (viewMode === '3x3') {
         const targetCenter = populatedCells.find((c) => c.position === CENTER_POSITION)
@@ -910,14 +898,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const isEmpty = !center || isCellEmpty(center)
     if (!isEmpty) return false
     try {
-      // 削除前にグリッド情報 (parent_cell_id) を取得しておく
+      // 削除前にグリッド情報を取得しておく。
+      // 新モデル: gridWithCells.center_cell_id が親 peripheral (drilled grid の場合) か
+      // 自グリッドの position=4 cell (root の場合) を指す。root かどうかは center cell の
+      // grid_id で判定する。
       const gridWithCells = await getGrid(gridId)
-      const parentCellId = gridWithCells.parent_cell_id
+      const parentCellId = gridWithCells.center_cell_id
+      const parentCell = gridWithCells.cells.find((c) => c.id === parentCellId)
+      const isRootSelfReferenced = parentCell?.grid_id === gridWithCells.id
 
       await deleteGrid(gridId)
 
-      // 削除後、他の兄弟 (並列を含む) が 1 つも残っていなければドリル元セルも空にする
-      if (parentCellId) {
+      // 削除後、drilled grid で他の兄弟 (並列含む) が残っていなければドリル元セルも空にする
+      if (!isRootSelfReferenced && parentCellId) {
         const siblings = await getChildGrids(parentCellId)
         if (siblings.length === 0) {
           await updateCell(parentCellId, { text: '', image_path: null, color: null })
@@ -1033,27 +1026,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   async function handleAddParallel() {
     if (slide) return
-    const parentCellId = breadcrumb[breadcrumb.length - 1]?.cellId ?? null
-    const newGrid = await createGrid({ mandalartId, parentCellId, sortOrder: parallelGrids.length })
 
-    // 元 (現在表示中) のグリッドの中心セル内容を新しい並列グリッドの中心セルに自動コピーする
-    const originCenter = gridData?.cells.find((c) => c.position === CENTER_POSITION)
-    const newCenter = newGrid.cells.find((c) => c.position === CENTER_POSITION)
-    let toCells: Cell[] = newGrid.cells
-    if (originCenter && newCenter && !isCellEmpty(originCenter)) {
-      await updateCell(newCenter.id, {
-        text: originCenter.text,
-        image_path: originCenter.image_path,
-        color: originCenter.color,
-      })
-      // アニメーション用のセル配列にも反映させる (まだ newGrid.cells は古い状態)
-      toCells = newGrid.cells.map((c) =>
-        c.position === CENTER_POSITION
-          ? { ...c, text: originCenter.text, image_path: originCenter.image_path, color: originCenter.color }
-          : c,
-      )
-    }
+    // 新モデル: 並列グリッドは元グリッドと同じ center_cell_id を共有する
+    // (中心が DB レベルで自動同期されるので手動コピー不要)
+    const originCenterCellId = gridData?.center_cell_id ?? null
+    if (!originCenterCellId) return
+    const newGrid = await createGrid({
+      mandalartId,
+      centerCellId: originCenterCellId,
+      sortOrder: parallelGrids.length,
+    })
 
+    // newGrid.cells は getGrid 経由で center merged な 9 要素を持つ
+    const toCells: Cell[] = newGrid.cells
     const fromCells = gridData?.cells ?? []
 
     // 並列追加直後はその新しいグリッドが currentGrid になるので、breadcrumb 末尾も追従させる
