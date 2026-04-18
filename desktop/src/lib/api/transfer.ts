@@ -26,6 +26,9 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
     // 自 grid に属する cells を取得。child grid の場合は center 行を含まないので、
     // export は center_cell_id の cell を別途読み込んで 9 cells 化する (import 側との
     // 後方互換のため)。
+    // child grid では親の cell を position=CENTER_POSITION として merge する
+    // (DB 上の position は親内位置だが、snapshot としては中心 = 4 にしないと import
+    //  で position=4 の位置に復元されない)。
     const ownCells = await query<Cell>(
       'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
       [gId],
@@ -37,7 +40,7 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
         'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
         [grid.center_cell_id],
       )
-      if (centers[0]) allCells.push(centers[0])
+      if (centers[0]) allCells.push({ ...centers[0], position: CENTER_POSITION })
     }
     allCells.sort((a, b) => a.position - b.position)
 

@@ -3,6 +3,21 @@ import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
 import type { Grid, Cell } from '../../types'
 
 /**
+ * getGrid の内部ヘルパ。
+ * 親グリッドに属する center cell (例: 親 grid の position=7 にあった cell X) を
+ * 子グリッドの cells 配列へ入れるときに、UI 上は「中心 (position=4)」として
+ * 扱わせたい。DB の position (=親内位置) をそのまま使うと:
+ *   - 描画で中心スロットが空、親 X の元位置 (7 等) に二重表示
+ *   - handleCellDrill の center click 判定 (position === CENTER_POSITION) が失敗して
+ *     中心クリックで親に戻れない
+ * ため、merged view では position を CENTER_POSITION に上書きする。
+ * updateCell は id ベースで行うので DB 上の position は親グリッド値のまま保たれる。
+ */
+function withCenterPosition(cell: Cell): Cell {
+  return { ...cell, position: CENTER_POSITION }
+}
+
+/**
  * 並列ルートグリッド群を列挙する。
  *
  * 新モデル (migration 004 以降):
@@ -63,17 +78,23 @@ export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
 
   // center cell が自 grid に含まれているか確認 (root なら含まれる、子なら含まれない)
   const hasCenter = ownCells.some((c) => c.id === grid.center_cell_id)
-  if (!hasCenter) {
-    const centers = await query<Cell>(
-      'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
-      [grid.center_cell_id],
-    )
-    if (centers[0]) {
-      ownCells.push(centers[0])
-    }
+  if (hasCenter) {
+    // root grid: center cell は既に position=4 で入っている
+    ownCells.sort((a, b) => a.position - b.position)
+    return { ...grid, cells: ownCells }
   }
-  ownCells.sort((a, b) => a.position - b.position)
-  return { ...grid, cells: ownCells }
+
+  // 子 grid: 親の cell を「中心 (position=4)」として merge する
+  const centers = await query<Cell>(
+    'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [grid.center_cell_id],
+  )
+  const merged: Cell[] = [...ownCells]
+  if (centers[0]) {
+    merged.push(withCenterPosition(centers[0]))
+  }
+  merged.sort((a, b) => a.position - b.position)
+  return { ...grid, cells: merged }
 }
 
 /**
