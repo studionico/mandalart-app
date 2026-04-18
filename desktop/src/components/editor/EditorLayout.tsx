@@ -388,40 +388,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           highlightPosition: null,
         })
 
-        // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in
-        // 現在の viewMode に合わせて 3×3 (セル単位) か 9×9 (サブグリッド単位) のどちらかを発火
+        // 初回表示は即時描画 (initial orbit アニメーションは廃止)。
+        // 以前はダッシュボード→エディタ遷移時に中心→周辺の fade-in 演出を入れていたが、
+        // useGrid の gridData ロードと setOrbit の間に「アニメなしのベアグリッドが一瞬見える」
+        // フラッシュが発生しており、演出のメリットよりも違和感が勝っていた。
+        // childCounts はバッチクエリで即取得して反映する (外枠遅延もなくなる)。
         const childCountsByCellId = await fetchChildCountsFor(cells)
+        setChildCounts(childCountsByCellId)
         if (viewMode === '9x9') {
           const targetSubGrids = await fetchSubGridsFor(cells)
-          setOrbit9({
-            targetRootCells: cells,
-            targetSubGrids,
-            targetGridId: root.id,
-            childCountsByCellId,
-            movingToPosition: null, // 移動ブロックなし
-            movingFromPosition: 4, // 未使用
-            direction: 'initial',
-          })
-          await new Promise((r) =>
-            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
-          )
-          setChildCounts(childCountsByCellId)
           setSubGrids(targetSubGrids)
-          setOrbit9(null)
-        } else {
-          setOrbit({
-            targetCells: cells,
-            targetGridId: root.id,
-            childCountsByCellId,
-            movingCellId: null,
-            movingFromPosition: 4, // 未使用 (moving cell なし)
-            direction: 'initial',
-          })
-          await new Promise((r) =>
-            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
-          )
-          setChildCounts(childCountsByCellId)
-          setOrbit(null)
         }
       } catch (e) {
         console.error('EditorLayout init error:', e)
