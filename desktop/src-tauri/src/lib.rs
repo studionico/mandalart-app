@@ -25,6 +25,12 @@ pub fn run() {
                             sql: include_str!("../migrations/003_cell_done.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 4,
+                            description: "unify X and C: replace grids.parent_cell_id with grids.center_cell_id",
+                            sql: include_str!("../migrations/004_unify_center.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

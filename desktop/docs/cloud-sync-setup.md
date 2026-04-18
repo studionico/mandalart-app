@@ -88,6 +88,24 @@ ALTER TABLE cells ADD COLUMN done BOOLEAN NOT NULL DEFAULT FALSE;
 
 ローカル側は migration 003 で自動追加されます。
 
+### 必須スキーマ変更: X と C の統一 (`center_cell_id`)
+
+旧スキーマの `grids.parent_cell_id` を廃止し、代わりに `grids.center_cell_id TEXT NOT NULL` を採用します (migration 004 に対応)。子グリッドは自グリッド内に `position=4` の cell 行を持たなくなり、その代わり `center_cell_id` で親グリッドの drill 元 cell を直接参照します。
+
+本アプリはまだ一般公開していないため、**既存データを破棄して再作成**することを前提とします。Supabase 側では以下を実行してください:
+
+```sql
+-- 既存データを保持する必要がなければ、3 テーブルを一旦 TRUNCATE してから DDL を適用
+TRUNCATE TABLE cells, grids, mandalarts CASCADE;
+
+-- カラム入れ替え
+ALTER TABLE grids DROP COLUMN parent_cell_id;
+ALTER TABLE grids ADD COLUMN center_cell_id TEXT NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_grids_center_cell ON grids(center_cell_id, sort_order);
+```
+
+ローカル側は migration 004 で自動的に全テーブルを DROP & CREATE します (既存の `mandalart.db` ファイルは再作成されます)。
+
 ---
 
 ## ステップ 4: Auth 設定

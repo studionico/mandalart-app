@@ -2,6 +2,12 @@ export type Mandalart = {
   id: string
   user_id: string
   title: string
+  /**
+   * 並列ルートグリッド群が共有する中心セルの id。
+   * 並列ルートグリッド (mandalart 直下の parallel grids) は全員この cell を
+   * center_cell_id として指す → 中心変更が DB レベルで全並列に反映される。
+   */
+  root_cell_id: string
   // ルート中心セル (position=4) の image_path を join で取得したもの。
   // mandalarts テーブル自体には保存していないので、SELECT の仕方に応じて無い場合もある。
   image_path?: string | null
@@ -13,7 +19,13 @@ export type Mandalart = {
 export type Grid = {
   id: string
   mandalart_id: string
-  parent_cell_id: string | null
+  /**
+   * このグリッドの中心セル (position=4 相当) を指す cells.id。
+   * - root グリッド: 自グリッド (grid_id == 自 id) の position=4 の cell
+   * - 子グリッド: 親グリッドに属する drill 元 cell (旧 X)。子グリッド内に position=4 行は存在しない
+   * - 並列グリッド: 同じ center_cell_id を共有する複数の grid (sort_order で順序付け)
+   */
+  center_cell_id: string
   sort_order: number
   memo: string | null
   created_at: string
@@ -68,7 +80,7 @@ export type GridSnapshot = {
    * このグリッドに紐付く他のグリッド (sub-grids + parallel grids)。
    *  - parentPosition が 0..8 の子: 自分のセル N の下にぶら下がるサブグリッド
    *  - parentPosition が undefined の子: 自分と並列な兄弟グリッド
-   *    (parent_cell_id を共有し、sort_order で順序付け)
+   *    (center_cell_id を共有し、sort_order で順序付け)
    */
   children: GridSnapshot[]
 }
