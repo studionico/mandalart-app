@@ -130,7 +130,7 @@ src/
 │   │   ├── cells.ts          # 更新 (ルート中心セル自動 title 同期) / swap / copy / paste
 │   │   ├── stock.ts          # ストック CRUD + スナップショット構築
 │   │   ├── storage.ts        # 画像ファイルを $APPDATA/images/ に保存 + blob URL 変換
-│   │   ├── transfer.ts       # exportToJSON / exportToCSV / importFromJSON / importIntoCell / parseTextToSnapshot
+│   │   ├── transfer.ts       # exportToJSON / exportToMarkdown / exportToIndentText / importFromJSON / importIntoCell / parseTextToSnapshot
 │   │   └── auth.ts           # Supabase Auth 連携 (メール + OAuth + deep link)
 │   ├── sync/                 # クラウド同期
 │   │   ├── push.ts           # per-row upsert + 失敗集約
@@ -141,7 +141,7 @@ src/
 │   ├── utils/
 │   │   ├── grid.ts           # isCellEmpty / hasPeripheralContent / getCenterCell
 │   │   ├── dnd.ts            # resolveDndAction (D&D ルール判定)
-│   │   └── export.ts         # PNG / PDF / JSON / CSV ダウンロード
+│   │   └── export.ts         # PNG / PDF ダウンロード + downloadJSON / downloadText (Markdown / インデントテキスト用)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり)
 │   ├── realtime.ts           # Supabase Realtime (postgres_changes) 購読
 │   └── offline.ts            # オフラインスタブ (将来の pending updates 用)

@@ -205,9 +205,12 @@ deleteCellImage(path: string): Promise<void>
 // 子グリッドには parentPosition が記録されるので round-trip 可能
 exportToJSON(gridId: string): Promise<GridSnapshot>
 
-// 指定グリッド以下をフラットな CSV で取得
-// 列: position, text, color, depth
-exportToCSV(gridId: string): Promise<string>
+// 指定グリッド以下を Markdown 見出し形式でエクスポート (round-trip 可能)
+// Level 1..6 は `#` 見出し、7 以降は `- ` 箇条書きにフォールバック
+exportToMarkdown(gridId: string): Promise<string>
+
+// 指定グリッド以下をインデントテキスト形式でエクスポート (2 スペースインデント)
+exportToIndentText(gridId: string): Promise<string>
 
 // GridSnapshot を新規マンダラートとしてインポート
 // 中心セルのテキストがタイトルになる

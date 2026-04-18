@@ -2,8 +2,14 @@ import { query, execute, generateId, now } from '@/lib/db'
 import type { GridSnapshot, Mandalart, Cell, Grid } from '@/types'
 import { parseTextToSnapshot } from '@/lib/import-parser'
 import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
+import { TAB_ORDER } from '@/constants/tabOrder'
 
 export { parseTextToSnapshot }
+
+// エクスポート時の周辺セル出力順は Tab 移動順から中心 (4) を除いた並び。
+// インポート (import-parser) と対称にすることでエクスポート → インポートの round-trip で
+// セル配置が保たれる。
+const PERIPHERAL_POSITIONS = TAB_ORDER.filter((p) => p !== CENTER_POSITION)
 
 /**
  * グリッドとその配下の全ての子孫を GridSnapshot 形式でエクスポートする。
@@ -73,21 +79,97 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
   return fetchSnapshot(gridId, grids[0]?.sort_order ?? 0, undefined)
 }
 
-export async function exportToCSV(gridId: string): Promise<string> {
-  const snapshot = await exportToJSON(gridId)
-  const rows: string[] = ['position,text,color,depth']
+/**
+ * 内部表現: tree of { text, children } — import-parser の ParsedNode と同形。
+ * エクスポート (Markdown / Indent) はこれを経由して文字列化することで、
+ * import ↔ export を対称に保つ。
+ */
+type ExportNode = { text: string; children: ExportNode[] }
 
-  function flatten(s: GridSnapshot, depth: number) {
-    for (const cell of s.cells) {
-      rows.push(`${cell.position},"${cell.text.replace(/"/g, '""')}",${cell.color ?? ''},${depth}`)
-    }
-    for (const child of s.children) {
-      flatten(child, depth + 1)
+function snapshotToExportNode(snap: GridSnapshot): ExportNode {
+  const byPosition = new Map(snap.cells.map((c) => [c.position, c]))
+  const centerText = byPosition.get(CENTER_POSITION)?.text ?? ''
+
+  // 子グリッドを parentPosition でグルーピング + 並列 (undefined) を分離
+  const subsByPos = new Map<number, GridSnapshot[]>()
+  const parallels: GridSnapshot[] = []
+  for (const child of snap.children) {
+    if (child.parentPosition === undefined) {
+      parallels.push(child)
+    } else {
+      const arr = subsByPos.get(child.parentPosition) ?? []
+      arr.push(child)
+      subsByPos.set(child.parentPosition, arr)
     }
   }
 
-  flatten(snapshot, 0)
-  return rows.join('\n')
+  const children: ExportNode[] = []
+  // 周辺セルを PERIPHERAL_POSITIONS 順に展開 (空セルは省略)
+  for (const pos of PERIPHERAL_POSITIONS) {
+    const cell = byPosition.get(pos)
+    const text = cell?.text ?? ''
+    if (text.trim() === '') continue
+    // このセルにぶら下がるサブグリッド群 (drilled) の peripherals を孫として再帰展開。
+    // サブグリッド snapshot の中心セルは X=C 統一によりこのセルと同じテキスト/行なので、
+    // 孫として含めると重複するため `.children` だけ取り出す。
+    const subs = subsByPos.get(pos) ?? []
+    const grandchildren = subs.flatMap((sg) => snapshotToExportNode(sg).children)
+    children.push({ text, children: grandchildren })
+  }
+
+  // 並列グリッド: 同じ中心を共有する兄弟 grid として扱う。
+  // インポート側は 8 個を超えた子を overflow として並列に束ねていたので、
+  // エクスポートでは逆変換としてそれらを平坦化して同じ階層の peripherals に戻す。
+  for (const parallel of parallels) {
+    children.push(...snapshotToExportNode(parallel).children)
+  }
+
+  return { text: centerText, children }
+}
+
+/**
+ * Markdown 見出し形式でエクスポート。
+ * Level 1..6 は `#` 見出し、7 以降は箇条書き (`- `) にフォールバック (Markdown 仕様の制約)。
+ */
+export async function exportToMarkdown(gridId: string): Promise<string> {
+  const snapshot = await exportToJSON(gridId)
+  const root = snapshotToExportNode(snapshot)
+
+  const lines: string[] = []
+  function walk(node: ExportNode, level: number): void {
+    if (level <= 6) {
+      lines.push(`${'#'.repeat(level)} ${node.text}`)
+    } else {
+      const indent = '  '.repeat(level - 7)
+      lines.push(`${indent}- ${node.text}`)
+    }
+    for (const child of node.children) {
+      if (level < 6) lines.push('') // 見出し同士は空行で区切る (Markdown 慣習)
+      walk(child, level + 1)
+    }
+  }
+  walk(root, 1)
+  return lines.join('\n')
+}
+
+/**
+ * インデントテキスト形式でエクスポート (2 スペースインデント)。
+ * インポート側 (parseIndentText) がスペース / タブ双方に対応しているので round-trip 可能。
+ */
+export async function exportToIndentText(gridId: string): Promise<string> {
+  const snapshot = await exportToJSON(gridId)
+  const root = snapshotToExportNode(snapshot)
+
+  const lines: string[] = []
+  function walk(node: ExportNode, depth: number): void {
+    const indent = '  '.repeat(depth)
+    lines.push(`${indent}${node.text}`)
+    for (const child of node.children) {
+      walk(child, depth + 1)
+    }
+  }
+  walk(root, 0)
+  return lines.join('\n')
 }
 
 export async function importFromJSON(snapshot: GridSnapshot): Promise<Mandalart> {

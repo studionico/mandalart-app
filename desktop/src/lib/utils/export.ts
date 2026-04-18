@@ -27,8 +27,12 @@ export function downloadJSON(data: unknown, filename = 'mandalart.json'): void {
   URL.revokeObjectURL(link.href)
 }
 
-export function downloadCSV(csv: string, filename = 'mandalart.csv'): void {
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+/**
+ * プレーンテキスト系 (Markdown / インデントテキスト) のダウンロード。
+ * 拡張子は呼び出し側で filename に含める (例: `mandalart.md`, `mandalart.txt`)。
+ */
+export function downloadText(content: string, filename: string, mime = 'text/plain;charset=utf-8'): void {
+  const blob = new Blob([content], { type: mime })
   const link = document.createElement('a')
   link.download = filename
   link.href = URL.createObjectURL(blob)

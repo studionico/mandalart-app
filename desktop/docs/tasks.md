@@ -35,7 +35,7 @@
 - [x] `src/lib/api/cells.ts`（updateCell / swapCellContent / swapCellSubtree / copyCellSubtree）
 - [x] `src/lib/api/stock.ts`（getStockItems / addToStock / deleteStockItem / pasteFromStock）
 - [x] `src/lib/api/storage.ts`（uploadCellImage / getCellImageUrl / deleteCellImage — 暫定実装）
-- [x] `src/lib/api/transfer.ts`（exportToJSON / exportToCSV / importFromJSON / importIntoCell）
+- [x] `src/lib/api/transfer.ts`（exportToJSON / exportToMarkdown / exportToIndentText / importFromJSON / importIntoCell）
 - [x] `src/lib/api/auth.ts`（スタブ — ローカルモードのみ）
 - [x] `src/lib/realtime.ts`（スタブ）
 - [x] `src/lib/offline.ts`（スタブ）
@@ -46,7 +46,7 @@
 
 - [x] `src/lib/utils/grid.ts`（isCellEmpty / hasPeripheralContent / getCenterCell）
 - [x] `src/lib/utils/dnd.ts`（D&D ルール判定）
-- [x] `src/lib/utils/export.ts`（exportAsPNG / exportAsPDF / downloadJSON / downloadCSV）
+- [x] `src/lib/utils/export.ts`（exportAsPNG / exportAsPDF / downloadJSON / downloadText）
 - [x] `src/lib/import-parser.ts`（テキスト → GridSnapshot パーサー）
 
 ---
@@ -216,8 +216,10 @@
 - [x] PNG エクスポート（html2canvas）
 - [x] PDF エクスポート（jsPDF）
 - [x] JSON エクスポート
-- [x] CSV エクスポート
+- [x] Markdown エクスポート (インポートと対称、round-trip 可能)
+- [x] インデントテキストエクスポート (インポートと対称、round-trip 可能)
 - [x] エクスポートメニュー UI
+- 旧 CSV エクスポートは廃止 (フラット構造でインポートと非対称だったため)
 
 ---
 

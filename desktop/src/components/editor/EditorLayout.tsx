@@ -23,8 +23,8 @@ import { pasteCell, toggleCellDone } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
-import { exportAsPNG, exportAsPDF, downloadJSON, downloadCSV } from '@/lib/utils/export'
-import { exportToJSON, exportToCSV } from '@/lib/api/transfer'
+import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
+import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
 import { nextTabPosition } from '@/constants/tabOrder'
 import {
@@ -1249,8 +1249,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }
 
-  // エクスポート
-  async function handleExport(format: 'png' | 'pdf' | 'json' | 'csv') {
+  // エクスポート (インポートと揃え、JSON / Markdown / インデントテキストに加え、視覚出力として PNG / PDF)
+  async function handleExport(format: 'png' | 'pdf' | 'json' | 'markdown' | 'indent') {
     setExportMenu(false)
     if (!currentGridId) return
     if (format === 'png' && gridRef.current) {
@@ -1260,9 +1260,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     } else if (format === 'json') {
       const data = await exportToJSON(currentGridId)
       downloadJSON(data)
-    } else if (format === 'csv') {
-      const csv = await exportToCSV(currentGridId)
-      downloadCSV(csv)
+    } else if (format === 'markdown') {
+      const md = await exportToMarkdown(currentGridId)
+      downloadText(md, 'mandalart.md', 'text/markdown;charset=utf-8')
+    } else if (format === 'indent') {
+      const txt = await exportToIndentText(currentGridId)
+      downloadText(txt, 'mandalart.txt')
     }
   }
 
@@ -1353,14 +1356,22 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               エクスポート ▾
             </Button>
             {exportMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 min-w-[120px]">
-                {['png', 'pdf', 'json', 'csv'].map((fmt) => (
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 min-w-[140px]">
+                {(
+                  [
+                    { fmt: 'png', label: 'PNG' },
+                    { fmt: 'pdf', label: 'PDF' },
+                    { fmt: 'json', label: 'JSON' },
+                    { fmt: 'markdown', label: 'Markdown' },
+                    { fmt: 'indent', label: 'インデントテキスト' },
+                  ] as const
+                ).map(({ fmt, label }) => (
                   <button
                     key={fmt}
-                    onClick={() => handleExport(fmt as 'png' | 'pdf' | 'json' | 'csv')}
-                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 first:rounded-t-xl last:rounded-b-xl uppercase"
+                    onClick={() => handleExport(fmt)}
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 first:rounded-t-xl last:rounded-b-xl"
                   >
-                    {fmt}
+                    {label}
                   </button>
                 ))}
               </div>
