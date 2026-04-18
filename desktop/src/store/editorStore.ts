@@ -67,7 +67,7 @@ type EditorState = {
   showCheckbox: boolean  // セル左上チェックボックス UI の表示 ON/OFF
 
   setMandalartId: (id: string) => void
-  setCurrentGrid: (gridId: string) => void
+  setCurrentGrid: (gridId: string | null) => void
   setViewMode: (mode: ViewMode) => void
   pushBreadcrumb: (item: BreadcrumbItem) => void
   popBreadcrumbTo: (gridId: string) => void

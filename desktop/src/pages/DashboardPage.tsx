@@ -57,8 +57,14 @@ export default function DashboardPage() {
   // ダッシュボードからエディタへ遷移する際は常に 3×3 モードで開く。
   // 直前に 9×9 を見ていたマンダラートを閉じて別のマンダラートを開いた場合でも、
   // エディタの入口を一貫させたいので必ずリセットする。
+  // また、currentGridId を null に落とすことで、次に EditorLayout が mount したときに
+  // useGrid が stale な gridId で gridData を先行ロードしてしまうのを防ぐ
+  // (stale ロードが起きると init effect の setOrbit より早く通常 render が走り、
+  //  初回表示 orbit アニメがスキップされる)。
   function openMandalart(id: string) {
-    useEditorStore.getState().setViewMode('3x3')
+    const store = useEditorStore.getState()
+    store.setViewMode('3x3')
+    store.setCurrentGrid(null)
     navigate(`/mandalart/${id}`)
   }
 
