@@ -499,7 +499,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const {
     dragSourceId, dragOverId, isOverStock, isDragging,
     handleDragStart, handleStockItemDragStart,
-    dragPosition, sourceCellRect, sourceElement,
+    dragPosition, sourceCellRect, sourceElement, dragGrabOffset,
   } = useDragAndDrop(
     dndCells,
     reloadAll,
@@ -2215,13 +2215,15 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           ソース DOM 要素を cloneNode して描画することで、フォントウェイト・境界・色・
           テキスト配置などセルそのままの見た目を完全再現する。
           position: fixed + pointerEvents: none で判定イベントを通過させる。 */}
-      {isDragging && dragPosition && sourceElement && (
+      {isDragging && dragPosition && sourceElement && dragGrabOffset && (
         <DragGhost
           element={sourceElement}
           x={dragPosition.x}
           y={dragPosition.y}
-          width={sourceElement.getBoundingClientRect().width || sourceCellRect?.width}
-          height={sourceElement.getBoundingClientRect().height || sourceCellRect?.height}
+          offsetX={dragGrabOffset.x}
+          offsetY={dragGrabOffset.y}
+          width={sourceCellRect?.width}
+          height={sourceCellRect?.height}
         />
       )}
     </div>
@@ -2230,15 +2232,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
 /**
  * ドラッグゴースト: source 要素を cloneNode して position:fixed で描画する。
- * CSS variable で指定されたサイズに合わせてクローンを縮尺なしで描画、
- * wobble アニメで rotate する (外側 wrapper は translate でマウス位置に追従)。
+ * `offsetX` / `offsetY` は grab 時点のセル内オフセット。
+ * これを使ってマウスカーソルがセル内の掴んだ位置のままになるよう配置する
+ * (translate(-50%, -50%) でセル中心をカーソルに合わせる方式だと、左上や中央に
+ *  スナップして不自然に見える)。
  */
 function DragGhost({
-  element, x, y, width, height,
+  element, x, y, offsetX, offsetY, width, height,
 }: {
   element: HTMLElement
   x: number
   y: number
+  offsetX: number
+  offsetY: number
   width?: number
   height?: number
 }) {
@@ -2254,7 +2260,6 @@ function DragGhost({
     clone.style.margin = '0'
     clone.style.position = 'static'
     clone.style.pointerEvents = 'none'
-    // 子に inert な属性が付いていてもゴーストでは問題ない
     container.innerHTML = ''
     container.appendChild(clone)
   }, [element, width, height])
@@ -2263,14 +2268,16 @@ function DragGhost({
     <div
       style={{
         position: 'fixed',
-        left: x,
-        top: y,
-        transform: 'translate(-50%, -50%)',
+        // 掴んだ位置をカーソルに合わせる (cursor = 元セル内の offset 位置)
+        left: x - offsetX,
+        top: y - offsetY,
         pointerEvents: 'none',
         zIndex: 9999,
         width: width ?? 80,
         height: height ?? 80,
         animation: `drag-wobble ${DRAG_WOBBLE_PERIOD_MS}ms ease-in-out infinite`,
+        // drag-wobble は rotate のみ。origin を掴んだ点にしておくとブレない
+        transformOrigin: `${offsetX}px ${offsetY}px`,
         // 浮遊感を出すための影
         filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))',
       }}

@@ -350,6 +350,8 @@ export default function Cell({
     }
   }, [sourceCellRect])
 
+  // transition は shorthand ではなく長形式で指定する (Tailwind の transition-* クラスと
+  // 競合しないようにするため)。ease-in-out で前進・後退ともに symmetrical な見え方に。
   const dragStyle: React.CSSProperties = {}
   if (isDragSource) {
     dragStyle.visibility = 'hidden'
@@ -359,13 +361,17 @@ export default function Cell({
       const dx = sourceCellRect.left - own.left
       const dy = sourceCellRect.top - own.top
       dragStyle.transform = `translate(${dx}px, ${dy}px)`
-      dragStyle.transition = `transform ${DRAG_TARGET_SHIFT_MS}ms ease-out`
+      dragStyle.transitionProperty = 'transform'
+      dragStyle.transitionDuration = `${DRAG_TARGET_SHIFT_MS}ms`
+      dragStyle.transitionTimingFunction = 'ease-in-out'
       dragStyle.zIndex = 5
     }
   } else if (sourceCellRect) {
     // ドラッグ中だが自分はホバーされていない → 元位置へスムーズに戻る
     dragStyle.transform = 'translate(0, 0)'
-    dragStyle.transition = `transform ${DRAG_TARGET_SHIFT_MS}ms ease-out`
+    dragStyle.transitionProperty = 'transform'
+    dragStyle.transitionDuration = `${DRAG_TARGET_SHIFT_MS}ms`
+    dragStyle.transitionTimingFunction = 'ease-in-out'
   }
 
   return (
@@ -390,7 +396,7 @@ export default function Cell({
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut ? 'opacity-40' : ''}
-        ${isDragOver && !isDisabled && !sourceCellRect ? '!bg-gray-200 dark:!bg-gray-800' : ''}
+        ${isDragOver && !isDisabled && !sourceCellRect ? '!bg-gray-50 dark:!bg-gray-950' : ''}
         group
       `}
       onMouseDown={handleMouseDown}

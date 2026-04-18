@@ -126,6 +126,9 @@ export function useDragAndDrop(
   const [sourceStockSnapshot, setSourceStockSnapshot] = useState<CellSnapshot | null>(null)
   /** ゴーストの見た目を「ドラッグ前のセルそのまま」にするため、元要素を cloneNode 用に公開 */
   const [sourceElement, setSourceElement]   = useState<HTMLElement | null>(null)
+  /** grab 時点でのセル内オフセット (マウスがセルのどこを掴んだか)。
+   *  ゴーストを top-left にスナップせず、掴んだ相対位置を保ったまま追従させるために使う。 */
+  const [dragGrabOffset, setDragGrabOffset] = useState<{ x: number; y: number } | null>(null)
   const sourceRef = useRef<DragSource | null>(null)
   const cellsRef  = useRef<Cell[]>(cells)
   cellsRef.current = cells
@@ -157,6 +160,11 @@ export function useDragAndDrop(
       setSourceStockSnapshot(source.snapshot)
     }
     setSourceElement(source.element)
+    // grab 位置 (cursor 基準のセル内オフセット) を保存
+    setDragGrabOffset({
+      x: initialMeta.x - source.rect.left,
+      y: initialMeta.y - source.rect.top,
+    })
     // 全セルの layout rect をキャッシュ (この時点では transform 未適用なので layout 座標)
     const rects = new Map<string, DOMRect>()
     document.querySelectorAll<HTMLElement>('[data-cell-id]').forEach((el) => {
@@ -210,6 +218,7 @@ export function useDragAndDrop(
       setSourceCell(null)
       setSourceStockSnapshot(null)
       setSourceElement(null)
+      setDragGrabOffset(null)
       cellLayoutRectsRef.current = new Map()
 
       if (!src) return
@@ -266,5 +275,6 @@ export function useDragAndDrop(
     sourceCell,
     sourceStockSnapshot,
     sourceElement,
+    dragGrabOffset,
   }
 }
