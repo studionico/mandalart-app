@@ -41,6 +41,7 @@ import {
   ANIM_STAGGER_MS,
   SLIDE_DURATION_MS as SLIDE_MS,
   VIEW_SWITCH_TO_9_DELAY_MS as VIEW_SWITCH_TO_9_DELAY,
+  DRAG_WOBBLE_PERIOD_MS,
 } from '@/constants/timing'
 import {
   GRID_SIZE_CHANGE_THRESHOLD_PX,
@@ -498,6 +499,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const {
     dragSourceId, dragOverId, isOverStock, isDragging,
     handleDragStart, handleStockItemDragStart,
+    dragPosition, sourceCellRect, sourceCell, sourceStockSnapshot,
   } = useDragAndDrop(
     dndCells,
     reloadAll,
@@ -2074,6 +2076,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onDragStart={handleDragStart}
                       onContextMenu={handleContextMenu}
                       onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                      sourceCellRect={sourceCellRect}
                     />
                   )}
                   {gridData && viewMode === '9x9' && gridSize > 0 && (
@@ -2206,6 +2209,39 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           action={toast.action}
           onClose={() => setToast(null)}
         />
+      )}
+
+      {/* D&D ゴースト: マウスに追従して揺れる。ソース (cell or stock) 内容を simplified に描画。
+          position: fixed + pointerEvents: none で重なっても判定イベントを通過させる。 */}
+      {isDragging && dragPosition && (sourceCell || sourceStockSnapshot) && (
+        <div
+          style={{
+            position: 'fixed',
+            left: dragPosition.x,
+            top: dragPosition.y,
+            transform: 'translate(-50%, -50%)',
+            pointerEvents: 'none',
+            zIndex: 9999,
+            // ソースセルの元サイズに合わせる (rect が無い場合 = stock はデフォルトサイズ)
+            width: sourceCellRect?.width ?? 80,
+            height: sourceCellRect?.height ?? 80,
+          }}
+        >
+          <div
+            className="w-full h-full rounded-lg border-2 border-black dark:border-white bg-white dark:bg-gray-900 shadow-2xl overflow-hidden p-2 flex items-start justify-start text-left text-gray-800 dark:text-gray-100 font-medium"
+            style={{
+              animation: `drag-wobble ${DRAG_WOBBLE_PERIOD_MS}ms ease-in-out infinite`,
+              fontSize: Math.max(10, Math.min(18, (sourceCellRect?.width ?? 80) / 8)),
+              lineHeight: 1.25,
+            }}
+          >
+            <span className="block w-full whitespace-pre-wrap break-all line-clamp-5">
+              {sourceCell
+                ? (sourceCell.text || '（テキストなし）')
+                : (sourceStockSnapshot?.cell.text || '（テキストなし）')}
+            </span>
+          </div>
+        </div>
       )}
     </div>
   )

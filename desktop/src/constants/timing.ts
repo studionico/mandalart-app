@@ -36,6 +36,13 @@ export const VIEW_SWITCH_TO_9_DELAY_MS = 200
 /** Supabase realtime 受信後の reload を間引く debounce (ms) */
 export const SYNC_DEBOUNCE_MS = 300
 
+// --- D&D アニメーション ---
+
+/** ドラッグゴースト (マウス追従浮遊セル) の揺れ周期 (ms)。ゆったりの 3 往復/秒くらい */
+export const DRAG_WOBBLE_PERIOD_MS = 700
+/** D&D ターゲットが source 位置へスライドする transition 時間 (ms) */
+export const DRAG_TARGET_SHIFT_MS = 220
+
 // --- UI 確認ダイアログ ---
 
 /**

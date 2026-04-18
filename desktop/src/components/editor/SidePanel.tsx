@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import MemoTab from './MemoTab'
 import StockTab from './StockTab'
-import type { StockItem } from '@/types'
+import type { StockItem, CellSnapshot } from '@/types'
 
 type Tab = 'memo' | 'stock'
 
@@ -12,7 +12,11 @@ type Props = {
   isDragging?: boolean
   isOverStock?: boolean
   stockReloadKey?: number
-  onStockItemDragStart?: (itemId: string) => void
+  onStockItemDragStart?: (
+    itemId: string,
+    snapshot: CellSnapshot | null,
+    meta: { rect: DOMRect; x: number; y: number },
+  ) => void
   dragSourceId?: string | null
 }
 

@@ -18,9 +18,11 @@ type Props = {
   onCommitInlineEdit: (cell: Cell, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: Cell) => void
-  onDragStart?: (cell: Cell) => void
+  onDragStart?: (cell: Cell, meta: { rect: DOMRect; x: number; y: number }) => void
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
   onToggleDone?: (cell: Cell) => void
+  /** D&D 中のソースセルの元位置 — ホバー target が swap 予告で移動する先 */
+  sourceCellRect?: DOMRect | null
 }
 
 export default function GridView3x3({
@@ -29,6 +31,7 @@ export default function GridView3x3({
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
   onDrill, onDragStart, onContextMenu, onToggleDone,
+  sourceCellRect,
 }: Props) {
   const center = getCenterCell(cells)
   const centerEmpty = !center || isCellEmpty(center)
@@ -65,6 +68,7 @@ export default function GridView3x3({
             onDragStart={onDragStart}
             onContextMenu={onContextMenu}
             onToggleDone={onToggleDone}
+            sourceCellRect={sourceCellRect}
           />
         )
       })}

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
 import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
-import { CLICK_DELAY_MS } from '@/constants/timing'
+import { CLICK_DELAY_MS, DRAG_TARGET_SHIFT_MS } from '@/constants/timing'
 import {
   CELL_BASE_FONT_PX,
   CELL_TEXT_INSET_NORMAL_PX,
@@ -28,8 +28,14 @@ type Props = {
   onCommitInlineEdit: (cell: CellType, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: CellType) => void
-  onDragStart?: (cell: CellType) => void
+  onDragStart?: (cell: CellType, meta: { rect: DOMRect; x: number; y: number }) => void
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
+  /**
+   * D&D 中のソースセルの元位置 (画面座標)。非 null のときで isDragOver=true の
+   * セルは、自分のいる位置からソース元位置へ transform で "swap 予告" 移動する。
+   * ストック由来ドラッグでは null (= 移動しない)。
+   */
+  sourceCellRect?: DOMRect | null
   /** 指定すると左上にチェックボックスを表示。指定なしなら非表示 (= 機能 OFF / size='small' / アニメ中)。 */
   onToggleDone?: (cell: CellType) => void
   size?: 'normal' | 'small'
@@ -48,6 +54,7 @@ export default function Cell({
   onDragStart, onContextMenu, onToggleDone,
   size = 'normal',
   wrapperStyle,
+  sourceCellRect,
 }: Props) {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
@@ -197,7 +204,11 @@ export default function Cell({
         didDrag.current = true
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup',   onUp)
-        onDragStart?.(cell)
+        // ドラッグゴーストの初期位置 / ターゲットの swap 予告計算に必要なので rect を渡す
+        const rect = cellRef.current?.getBoundingClientRect()
+        if (rect) {
+          onDragStart?.(cell, { rect, x: e2.clientX, y: e2.clientY })
+        }
       }
     }
 
@@ -317,11 +328,50 @@ export default function Cell({
   const baseFontPx = size === 'small' ? CELL_BASE_FONT_PX / GRID_SIDE : CELL_BASE_FONT_PX
   const fontStyle: React.CSSProperties = { fontSize: `${baseFontPx * fontScale}px`, lineHeight: 1.25 }
 
+  // D&D アニメーション用の計算。
+  // - isDragSource: マウス追従ゴーストが別途描画されるので本体は visibility:hidden
+  //   (レイアウトは占有したままスペースを残し、target が swap 予告で動く先を維持)
+  // - isDragOver && sourceCellRect: 自分の位置からソース元位置へ transform でスライド
+  //   (ホバー解除時は transform=0 へ遷移して元に戻る)
+  //
+  // 自セルの "layout 位置" (transform 適用前の getBoundingClientRect) を drag 開始時に 1 回
+  // キャッシュする。getBoundingClientRect は現在の transform を反映するため、ホバー中の
+  // 再レンダで読み取ると「もう source 位置にある」と誤認して translate(0) に縮退するバグを
+  // 避ける。drag が終わったら破棄する (次回 drag で再キャプチャ)。
+  const ownLayoutRectRef = useRef<DOMRect | null>(null)
+  useLayoutEffect(() => {
+    if (sourceCellRect) {
+      if (!ownLayoutRectRef.current && cellRef.current) {
+        ownLayoutRectRef.current = cellRef.current.getBoundingClientRect()
+      }
+    } else {
+      ownLayoutRectRef.current = null
+    }
+  }, [sourceCellRect])
+
+  const dragStyle: React.CSSProperties = {}
+  if (isDragSource) {
+    dragStyle.visibility = 'hidden'
+  } else if (isDragOver && sourceCellRect) {
+    const own = ownLayoutRectRef.current ?? cellRef.current?.getBoundingClientRect()
+    if (own) {
+      const dx = sourceCellRect.left - own.left
+      const dy = sourceCellRect.top - own.top
+      dragStyle.transform = `translate(${dx}px, ${dy}px)`
+      dragStyle.transition = `transform ${DRAG_TARGET_SHIFT_MS}ms ease-out`
+      dragStyle.zIndex = 5
+    }
+  } else if (sourceCellRect) {
+    // ドラッグ中だが自分はホバーされていない → 元位置へスムーズに戻る
+    dragStyle.transform = 'translate(0, 0)'
+    dragStyle.transition = `transform ${DRAG_TARGET_SHIFT_MS}ms ease-out`
+  }
+
   return (
     <div
       ref={cellRef}
       data-cell-id={cell.id}
-      style={wrapperStyle}
+      style={{ ...wrapperStyle, ...dragStyle }}
       className={`
         relative select-none overflow-hidden
         min-h-0 min-w-0
@@ -338,8 +388,8 @@ export default function Cell({
               : 'rounded-lg border border-gray-300 dark:border-gray-700 shadow-sm'
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
-        ${isCut || isDragSource ? 'opacity-40' : ''}
-        ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
+        ${isCut ? 'opacity-40' : ''}
+        ${isDragOver && !isDisabled && !sourceCellRect ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         group
       `}
       onMouseDown={handleMouseDown}

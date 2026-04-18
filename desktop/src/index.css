@@ -87,3 +87,12 @@ html {
   from { opacity: 1; }
   to   { opacity: 0; }
 }
+
+/* D&D ドラッグ中のマウス追従ゴーストの揺れ。
+   rotate のみを担当し、位置決め (translate -50% -50% など) は外側 wrapper に任せる
+   ことで、外側 translate との干渉を避ける。 */
+@keyframes drag-wobble {
+  0%   { transform: rotate(-3deg); }
+  50%  { transform: rotate(3deg); }
+  100% { transform: rotate(-3deg); }
+}

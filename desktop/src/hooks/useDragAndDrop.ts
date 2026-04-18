@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import type { Cell } from '@/types'
+import type { Cell, CellSnapshot } from '@/types'
 import { resolveDndAction, type DndAction } from '@/lib/utils/dnd'
 import { isCellEmpty } from '@/lib/utils/grid'
 import { CENTER_POSITION, isCenterPosition } from '@/constants/grid'
@@ -27,9 +27,6 @@ export type DndUndoable = UndoOperation & { description: string }
 
 /**
  * D&D アクションを実行し、Undo/Redo 用のクロージャを返す。
- * - SWAP_SUBTREE / SWAP_CONTENT は対称操作なので undo = redo = 同じ呼び出し。
- * - COPY_SUBTREE は target の事前状態 + 新規作成された grid ID を記録し、
- *   undo でそれらを削除・復元する。
  */
 async function executeAction(action: DndAction): Promise<DndUndoable | null> {
   switch (action.type) {
@@ -83,17 +80,26 @@ async function executeAction(action: DndAction): Promise<DndUndoable | null> {
   }
 }
 
+export type DragStartMeta = {
+  /** ソース要素の画面上の位置 (getBoundingClientRect) */
+  rect: DOMRect
+  /** mousedown 時 / threshold 到達時のカーソル座標 */
+  x: number
+  y: number
+}
+
 type DragSource =
-  | { kind: 'cell'; cell: Cell }
-  | { kind: 'stock'; itemId: string }
+  | { kind: 'cell'; cell: Cell; rect: DOMRect }
+  | { kind: 'stock'; itemId: string; snapshot: CellSnapshot | null; rect: DOMRect }
 
 /**
  * HTML5 DnD の代わりに mousedown/mousemove/mouseup で D&D を実装。
  * Tauri の WebKit では HTML5 DnD の drop イベントが信頼できないため。
  *
- * サポートするソース:
- *  - セル → セル（同一 / 跨ぎ） / ストック
- *  - ストックアイテム → セル
+ * アニメーション連動のため以下も追加で公開する:
+ *  - dragPosition: 現在のカーソル位置 (fixed ゴースト描画用)
+ *  - sourceCellRect: セル由来ドラッグ時の元位置 (ホバー中のターゲットが swap 予告で動く先)
+ *  - sourceCell / sourceStockSnapshot: ゴースト preview の内容
  */
 export function useDragAndDrop(
   cells: Cell[],
@@ -105,16 +111,33 @@ export function useDragAndDrop(
   const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   const [dragOverId, setDragOverId]     = useState<string | null>(null)
   const [isOverStock, setIsOverStock]   = useState(false)
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null)
+  const [sourceCellRect, setSourceCellRect] = useState<DOMRect | null>(null)
+  const [sourceCell, setSourceCell]         = useState<Cell | null>(null)
+  const [sourceStockSnapshot, setSourceStockSnapshot] = useState<CellSnapshot | null>(null)
   const sourceRef = useRef<DragSource | null>(null)
   const cellsRef  = useRef<Cell[]>(cells)
   cellsRef.current = cells
 
-  const beginDrag = useCallback((source: DragSource) => {
+  const beginDrag = useCallback((source: DragSource, initialMeta: DragStartMeta) => {
     sourceRef.current = source
     setDragSourceId(source.kind === 'cell' ? source.cell.id : `stock:${source.itemId}`)
+    setDragPosition({ x: initialMeta.x, y: initialMeta.y })
+    if (source.kind === 'cell') {
+      setSourceCellRect(source.rect)
+      setSourceCell(source.cell)
+      setSourceStockSnapshot(null)
+    } else {
+      // ストック由来: target 移動アニメは不要なので sourceCellRect は null に
+      setSourceCellRect(null)
+      setSourceCell(null)
+      setSourceStockSnapshot(source.snapshot)
+    }
     document.body.style.cursor = 'grabbing'
 
     function onMouseMove(e: MouseEvent) {
+      setDragPosition({ x: e.clientX, y: e.clientY })
+
       const el      = document.elementFromPoint(e.clientX, e.clientY)
       const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
       const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
@@ -124,6 +147,10 @@ export function useDragAndDrop(
       if (sourceRef.current?.kind === 'stock' && overCellId) {
         const t = cellsRef.current.find((c) => c.id === overCellId)
         if (!t || !isDroppableTarget(t, cellsRef.current)) overCellId = null
+      }
+      // セル → 同一セル は NOOP (自分自身にはホバーしない扱い)
+      if (sourceRef.current?.kind === 'cell' && overCellId === sourceRef.current.cell.id) {
+        overCellId = null
       }
 
       setDragOverId(overCellId)
@@ -140,6 +167,10 @@ export function useDragAndDrop(
       setDragSourceId(null)
       setDragOverId(null)
       setIsOverStock(false)
+      setDragPosition(null)
+      setSourceCellRect(null)
+      setSourceCell(null)
+      setSourceStockSnapshot(null)
 
       if (!src) return
 
@@ -149,12 +180,10 @@ export function useDragAndDrop(
       const targetId = cellEl?.dataset.cellId ?? null
 
       if (src.kind === 'cell') {
-        // ストックドロップゾーン
         if (stockEl) {
           onStockDrop?.(src.cell.id)
           return
         }
-        // セル間 D&D
         if (!targetId || targetId === src.cell.id) return
         const target = cellsRef.current.find((c) => c.id === targetId)
         if (!target) return
@@ -168,7 +197,6 @@ export function useDragAndDrop(
             .catch(console.error)
         }
       } else {
-        // ストック → セル: 空セル + 中心セルが非空の場合のみ許可（入れ替えなし）
         if (!targetId) return
         const target = cellsRef.current.find((c) => c.id === targetId)
         if (!target || !isDroppableTarget(target, cellsRef.current)) return
@@ -181,11 +209,12 @@ export function useDragAndDrop(
   }, [onComplete, onStockDrop, onStockPaste, pushUndo])
 
   const handleDragStart = useCallback(
-    (cell: Cell) => beginDrag({ kind: 'cell', cell }),
+    (cell: Cell, meta: DragStartMeta) => beginDrag({ kind: 'cell', cell, rect: meta.rect }, meta),
     [beginDrag],
   )
   const handleStockItemDragStart = useCallback(
-    (itemId: string) => beginDrag({ kind: 'stock', itemId }),
+    (itemId: string, snapshot: CellSnapshot | null, meta: DragStartMeta) =>
+      beginDrag({ kind: 'stock', itemId, snapshot, rect: meta.rect }, meta),
     [beginDrag],
   )
 
@@ -196,5 +225,9 @@ export function useDragAndDrop(
     isDragging: dragSourceId !== null,
     handleDragStart,
     handleStockItemDragStart,
+    dragPosition,
+    sourceCellRect,
+    sourceCell,
+    sourceStockSnapshot,
   }
 }

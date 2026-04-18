@@ -1,15 +1,19 @@
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
 import { CONFIRM_AUTO_RESET_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
-import type { StockItem } from '@/types'
+import type { StockItem, CellSnapshot } from '@/types'
 
 type Props = {
   onPaste: (item: StockItem) => void
   isOverStock?: boolean
   reloadKey?: number
-  onItemDragStart?: (itemId: string) => void
+  onItemDragStart?: (
+    itemId: string,
+    snapshot: CellSnapshot | null,
+    meta: { rect: DOMRect; x: number; y: number },
+  ) => void
   dragSourceId?: string | null
 }
 
@@ -71,6 +75,9 @@ export default function StockTab({
     }
   }
 
+  // 各 stock item の DOM を参照するための ref マップ (ドラッグ開始時の rect 取得用)
+  const itemRefs = useRef<Map<string, HTMLElement>>(new Map())
+
   function handleItemMouseDown(e: React.MouseEvent, itemId: string) {
     if (e.button !== 0) return
     // ボタン上でのクリックはドラッグ開始しない
@@ -86,7 +93,12 @@ export default function StockTab({
       if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
-        onItemDragStart?.(itemId)
+        const el = itemRefs.current.get(itemId)
+        const rect = el?.getBoundingClientRect()
+        const item = items.find((it) => it.id === itemId)
+        if (rect) {
+          onItemDragStart?.(itemId, item?.snapshot ?? null, { rect, x: e2.clientX, y: e2.clientY })
+        }
       }
     }
     function onUp() {
@@ -145,6 +157,10 @@ export default function StockTab({
             return (
               <div
                 key={item.id}
+                ref={(el) => {
+                  if (el) itemRefs.current.set(item.id, el)
+                  else itemRefs.current.delete(item.id)
+                }}
                 onMouseDown={(e) => handleItemMouseDown(e, item.id)}
                 className={`
                   relative w-[80px] h-[80px] bg-white dark:bg-gray-900
@@ -152,8 +168,8 @@ export default function StockTab({
                   shadow-sm hover:shadow-md transition-shadow
                   cursor-grab active:cursor-grabbing select-none
                   group overflow-hidden
-                  ${isSourceDragging ? 'opacity-40' : ''}
                 `}
+                style={isSourceDragging ? { visibility: 'hidden' } : undefined}
                 title={text}
               >
                 <div
