@@ -154,6 +154,15 @@ export default function StockTab({
           {items.map((item) => {
             const isSourceDragging = dragSourceId === `stock:${item.id}`
             const text = item.snapshot.cell.text || '（テキストなし）'
+            // 「意味のあるサブグリッド」= snapshot の children に含まれる grid の
+            // いずれかに、テキスト or 画像を持つセルがある状態。
+            // GridView9x9 の border-black 判定と意味を揃える: 周辺セルに入力がある grid がぶら下がっていれば "drilled grid あり"。
+            const hasDrilledContent = item.snapshot.children.some((g) =>
+              g.cells.some((c) => (c.text?.trim() ?? '') !== '' || c.image_path !== null),
+            )
+            const borderClass = hasDrilledContent
+              ? 'border-2 border-black dark:border-white'
+              : 'border-2 border-gray-300 dark:border-gray-700'
             return (
               <div
                 key={item.id}
@@ -164,7 +173,7 @@ export default function StockTab({
                 onMouseDown={(e) => handleItemMouseDown(e, item.id)}
                 className={`
                   relative w-[80px] h-[80px] bg-white dark:bg-gray-900
-                  border-2 border-black dark:border-white rounded-xl
+                  ${borderClass} rounded-xl
                   shadow-sm hover:shadow-md transition-shadow
                   cursor-grab active:cursor-grabbing select-none
                   group overflow-hidden

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
 import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
-import { CLICK_DELAY_MS, DRAG_TARGET_SHIFT_MS } from '@/constants/timing'
+import { CLICK_DELAY_MS } from '@/constants/timing'
 import {
   CELL_BASE_FONT_PX,
   CELL_TEXT_INSET_NORMAL_PX,
@@ -350,9 +350,12 @@ export default function Cell({
     }
   }, [sourceCellRect])
 
-  // transition は shorthand ではなく長形式で指定する (Tailwind の transition-* クラスと
-  // 競合しないようにするため)。ease-in-out で前進・後退ともに symmetrical な見え方に。
+  // transition 自体は `.drag-target-shifting` クラスで `!important` 付きで定義する。
+  // Tailwind の transition-shadow / transition-colors が同じ要素に付いていて
+  // transition-property が上書きされる可能性があるため、インライン style より確実。
+  // 参考: desktop/src/index.css の drag-target-shifting ルール
   const dragStyle: React.CSSProperties = {}
+  let dragClass = ''
   if (isDragSource) {
     dragStyle.visibility = 'hidden'
   } else if (isDragOver && sourceCellRect) {
@@ -361,17 +364,13 @@ export default function Cell({
       const dx = sourceCellRect.left - own.left
       const dy = sourceCellRect.top - own.top
       dragStyle.transform = `translate(${dx}px, ${dy}px)`
-      dragStyle.transitionProperty = 'transform'
-      dragStyle.transitionDuration = `${DRAG_TARGET_SHIFT_MS}ms`
-      dragStyle.transitionTimingFunction = 'ease-in-out'
       dragStyle.zIndex = 5
+      dragClass = 'drag-target-shifting'
     }
   } else if (sourceCellRect) {
     // ドラッグ中だが自分はホバーされていない → 元位置へスムーズに戻る
     dragStyle.transform = 'translate(0, 0)'
-    dragStyle.transitionProperty = 'transform'
-    dragStyle.transitionDuration = `${DRAG_TARGET_SHIFT_MS}ms`
-    dragStyle.transitionTimingFunction = 'ease-in-out'
+    dragClass = 'drag-target-shifting'
   }
 
   return (
@@ -380,6 +379,7 @@ export default function Cell({
       data-cell-id={cell.id}
       style={{ ...wrapperStyle, ...dragStyle }}
       className={`
+        ${dragClass}
         relative select-none overflow-hidden
         min-h-0 min-w-0
         transition-shadow transition-colors
