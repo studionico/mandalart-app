@@ -262,7 +262,9 @@ async function importIntoGrid(
 
   for (const child of snapshot.children) {
     const parentPos = child.parentPosition
-    if (parentPos === undefined) {
+    // 手書き JSON で `"parentPosition": null` と書かれた場合も並列として扱う
+    // (undefined と null を同じく "未指定" と見なす)
+    if (parentPos === undefined || parentPos === null) {
       // 並列グリッド: 同じ center を共有
       await importIntoGrid(child, mandalartId, centerCellId, child.grid.sort_order, /* isRoot */ false)
       continue

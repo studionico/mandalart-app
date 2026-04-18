@@ -1,0 +1,82 @@
+{
+  "grid": {
+    "sort_order": 0,
+    "memo": "ルートグリッドのメモ\n複数行もテスト\n**Markdown 記号** (# _ *) が入っても壊れないか確認"
+  },
+  "cells": [
+    { "position": 0, "text": "P0: 仕事",   "image_path": null, "color": "red" },
+    { "position": 1, "text": "P1: 健康",   "image_path": null, "color": null },
+    { "position": 2, "text": "P2: 家族",   "image_path": null, "color": null },
+    { "position": 3, "text": "P3: 趣味",   "image_path": null, "color": null },
+    { "position": 4, "text": "メイン目標", "image_path": null, "color": null },
+    { "position": 5, "text": "P5: 学習",   "image_path": null, "color": null },
+    { "position": 6, "text": "P6: お金",   "image_path": null, "color": null },
+    { "position": 7, "text": "P7: 人脈",   "image_path": null, "color": null },
+    { "position": 8, "text": "P8: 習慣",   "image_path": null, "color": null }
+  ],
+  "children": [
+    {
+      "grid": {
+        "sort_order": 1,
+        "memo": "並列ルートのメモ\n（中心は G1 と共有）"
+      },
+      "cells": [
+        { "position": 0, "text": "並列: 視点A-1", "image_path": null, "color": null },
+        { "position": 1, "text": "並列: 視点A-2", "image_path": null, "color": null },
+        { "position": 2, "text": "並列: 視点A-3", "image_path": null, "color": null },
+        { "position": 4, "text": "メイン目標",     "image_path": null, "color": null }
+      ],
+      "children": []
+    },
+    {
+      "grid": {
+        "sort_order": 0,
+        "memo": "P0 サブグリッド: 仕事の深掘りメモ"
+      },
+      "parentPosition": 0,
+      "cells": [
+        { "position": 0, "text": "成果物管理",  "image_path": null, "color": null },
+        { "position": 1, "text": "スキルアップ","image_path": null, "color": null },
+        { "position": 2, "text": "人間関係",    "image_path": null, "color": null },
+        { "position": 3, "text": "業務効率化",  "image_path": null, "color": null },
+        { "position": 4, "text": "P0: 仕事",    "image_path": null, "color": null },
+        { "position": 5, "text": "新規提案",    "image_path": null, "color": null },
+        { "position": 6, "text": "ドキュメント","image_path": null, "color": null },
+        { "position": 7, "text": "トラブル対応","image_path": null, "color": null },
+        { "position": 8, "text": "採用",        "image_path": null, "color": null }
+      ],
+      "children": [
+        {
+          "grid": { "sort_order": 0, "memo": null },
+          "parentPosition": 0,
+          "cells": [
+            { "position": 1, "text": "3階層目: レビュー", "image_path": null, "color": null },
+            { "position": 2, "text": "3階層目: テスト",   "image_path": null, "color": null },
+            { "position": 4, "text": "成果物管理",         "image_path": null, "color": null }
+          ],
+          "children": []
+        },
+        {
+          "grid": { "sort_order": 1, "memo": "P0 並列サブの独自メモ" },
+          "cells": [
+            { "position": 0, "text": "並列サブ: 短期",    "image_path": null, "color": null },
+            { "position": 1, "text": "並列サブ: 中期",    "image_path": null, "color": null },
+            { "position": 2, "text": "並列サブ: 長期",    "image_path": null, "color": null },
+            { "position": 4, "text": "P0: 仕事",          "image_path": null, "color": null }
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "grid": { "sort_order": 0, "memo": null },
+      "parentPosition": 1,
+      "cells": [
+        { "position": 0, "text": "運動",    "image_path": null, "color": null },
+        { "position": 1, "text": "食事",    "image_path": null, "color": null },
+        { "position": 4, "text": "P1: 健康","image_path": null, "color": null }
+      ],
+      "children": []
+    }
+  ]
+}
