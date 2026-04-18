@@ -54,6 +54,12 @@ type Props = {
   userId: string
 }
 
+// 9×9 モードでは cell への入力を一切禁止する (ナビゲーションのみ)。
+// 編集が必要な場合は 3×3 モードに切り替えてから行う。
+const NOOP_EDIT = () => {}
+const NOOP_EDIT_ASYNC = async () => {}
+const PREVENT_CONTEXT_MENU = (e: React.MouseEvent) => e.preventDefault()
+
 export default function EditorLayout({ mandalartId, userId }: Props) {
   const navigate = useNavigate()
   const {
@@ -2053,20 +2059,24 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       rootCells={gridData.cells}
                       subGrids={subGrids}
                       childCounts={childCounts}
-                      cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
-                      dragSourceId={dragSourceId}
-                      dragOverId={dragOverId}
+                      // 9×9 はナビゲーション専用。cut 表示や drag 状態も伝えない
+                      // (そもそも drag / cut は 9×9 から開始できないので常に null だが、
+                      //  view 切替時に 3×3 の状態が残るのを防ぐために明示的に null)
+                      cutCellId={null}
+                      dragSourceId={null}
+                      dragOverId={null}
                       fontScale={fontScale}
-                      inlineEditingCellId={inlineEditingCellId}
+                      inlineEditingCellId={null}
                       userId={userId}
                       mandalartId={mandalartId}
-                      onCellSave={handleSaveCell}
-                      onStartInlineEdit={handleCellStartInlineEdit}
-                      onCommitInlineEdit={handleCellCommitInlineEdit}
-                      onInlineNavigate={handleCellInlineNavigate}
+                      // 編集系は全て no-op に
+                      onCellSave={NOOP_EDIT_ASYNC}
+                      onStartInlineEdit={NOOP_EDIT}
+                      onCommitInlineEdit={NOOP_EDIT_ASYNC}
+                      onInlineNavigate={NOOP_EDIT}
                       onDrill={handleCellDrill}
-                      onDragStart={handleDragStart}
-                      onContextMenu={handleContextMenu}
+                      onDragStart={NOOP_EDIT}
+                      onContextMenu={PREVENT_CONTEXT_MENU}
                     />
                   )}
                 </>
