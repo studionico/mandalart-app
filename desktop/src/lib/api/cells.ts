@@ -7,6 +7,11 @@ export async function updateCell(
   id: string,
   params: { text?: string; image_path?: string | null; color?: string | null }
 ): Promise<Cell> {
+  // 空 → 非空 への遷移を検出するため、更新前のセルを読む
+  const prevRows = await query<Cell>('SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL', [id])
+  const prevCell = prevRows[0]
+  const wasEmpty = prevCell ? isCellEmpty(prevCell) : false
+
   const fields: string[] = []
   const values: unknown[] = []
   if (params.text !== undefined) { fields.push('text = ?'); values.push(params.text) }
@@ -40,7 +45,34 @@ export async function updateCell(
     }
   }
 
+  // 空 → 非空 への遷移 + そのセルが done=0 のとき: 新しいタスクが生まれたので、
+  // 親セルの done=1 を解除して invariant を維持する。
+  // (drill-create の center 初期化で親の done を継承したい場合は、この path を
+  // 通さず seedCellWithDone を使う)
+  if (cell && wasEmpty && !isCellEmpty(cell) && Number(cell.done) !== 1) {
+    await propagateUndoneUp(cell.id, ts)
+  }
+
   return cell
+}
+
+/**
+ * drill-down で新規作成した子グリッドの中心セルを、親セルの内容と done 状態で
+ * 初期化する専用関数。
+ *
+ * updateCell は空→非空 transition 時に propagateUndoneUp を呼んで親を解除するが、
+ * drill-create では「親 done を新 grid に継承する」のが正しい挙動なので、
+ * この関数は propagate を行わず text + done を atomic に設定する。
+ */
+export async function seedCellWithDone(
+  cellId: string,
+  params: { text: string; image_path: string | null; color: string | null; done: boolean }
+): Promise<void> {
+  const ts = now()
+  await execute(
+    'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
+    [params.text, params.image_path, params.color, params.done ? 1 : 0, ts, cellId],
+  )
 }
 
 export async function swapCellContent(cellIdA: string, cellIdB: string): Promise<void> {
@@ -206,15 +238,18 @@ async function copyGridRecursive(
 // ---------------------------------------------------------------------------
 
 /**
- * 指定 grid の全セルの done 状態を一括設定する (子グリッドへの再帰はしない)。
- * drill-down で新規サブグリッドを作った時に、親セルが done なら子グリッド全体も
- * done で初期化する用途。新規 grid には子グリッドが無いので再帰不要。
+ * 指定 grid の非空セルの done 状態を一括設定する (子グリッドへの再帰はしない)。
+ * drill-down で新規サブグリッドを作った時に、親セルが done なら子グリッドの
+ * 非空セル (= 中央セル: 親テキストをコピー済) だけ done で初期化する。
+ * 空の周辺セルは「タスクではない」として触らず done=0 のまま残す。
  */
 export async function setGridDone(gridId: string, done: boolean): Promise<void> {
   const ts = now()
   const flag = done ? 1 : 0
   await execute(
-    'UPDATE cells SET done = ?, updated_at = ? WHERE grid_id = ? AND deleted_at IS NULL AND done != ?',
+    `UPDATE cells SET done = ?, updated_at = ?
+     WHERE grid_id = ? AND deleted_at IS NULL AND done != ?
+       AND (TRIM(text) != '' OR image_path IS NOT NULL)`,
     [flag, ts, gridId, flag],
   )
 }
@@ -289,14 +324,25 @@ async function markSubtreeDone(cellId: string, done: 0 | 1, ts: string): Promise
   }
 }
 
-/** 指定 grid の全セルを done に設定し、周辺セルの子グリッドを再帰処理。 */
+/**
+ * 指定 grid の **非空** セルを done に設定し、非空の周辺セルの子グリッドを再帰処理。
+ *
+ * 空セルを意図的にスキップする理由:
+ *  - 空セルは「タスクではない」ので done 状態を持たない
+ *  - ユーザーが後から空セルに入力した時、done=0 のままなので「新しいタスク (未完了)」
+ *    として checkbox が未チェック表示される (期待挙動)
+ *  - up-cascade 判定側 (areDescendantsAllDone) も空セルを無視するので対称性が保たれる
+ */
 async function markGridSubtreeDone(gridId: string, done: 0 | 1, ts: string): Promise<void> {
   await execute(
-    'UPDATE cells SET done = ?, updated_at = ? WHERE grid_id = ? AND deleted_at IS NULL AND done != ?',
+    `UPDATE cells SET done = ?, updated_at = ?
+     WHERE grid_id = ? AND deleted_at IS NULL AND done != ?
+       AND (TRIM(text) != '' OR image_path IS NOT NULL)`,
     [done, ts, gridId, done],
   )
   const peripheralCells = await query<{ id: string }>(
-    'SELECT id FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL',
+    `SELECT id FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL
+       AND (TRIM(text) != '' OR image_path IS NOT NULL)`,
     [gridId, CENTER_POSITION],
   )
   for (const c of peripheralCells) {

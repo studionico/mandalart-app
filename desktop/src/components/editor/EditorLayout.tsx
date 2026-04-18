@@ -19,7 +19,7 @@ import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid } from '@/lib/api/grids'
-import { updateCell, pasteCell, toggleCellDone, setGridDone } from '@/lib/api/cells'
+import { updateCell, pasteCell, toggleCellDone, seedCellWithDone } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
@@ -759,12 +759,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
 
-      // 親セルが done=true なら、新しい子グリッドの全セルも done=true で
-      // 初期化する (invariant 維持: 親 done ⇔ 子孫全 done)
-      if (cell.done) {
-        await setGridDone(newGrid.id, true)
-      }
-
       const centerCell = newGrid.cells.find((c) => c.position === CENTER_POSITION)
       const populatedCells = centerCell && !isCellEmpty(cell)
         ? newGrid.cells.map((c) =>
@@ -774,10 +768,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           )
         : newGrid.cells.map((c) => ({ ...c, done: !!cell.done }))
       if (centerCell && !isCellEmpty(cell)) {
-        await updateCell(centerCell.id, {
+        // 新規子グリッドの中央セルを親のテキスト+done で atomic 初期化。
+        // updateCell 経由だと空→非空 transition で propagateUndoneUp が走り
+        // 親 (= clicked cell) が uncheck されてしまうので seedCellWithDone を使う。
+        await seedCellWithDone(centerCell.id, {
           text: cell.text,
           image_path: cell.image_path,
           color: cell.color,
+          done: !!cell.done,
         })
       }
 
@@ -867,7 +865,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
 
     const previous = { text: cell.text, image_path: cell.image_path, color: cell.color }
+    // 空 → 非空 transition の場合、updateCell が propagateUndoneUp を走らせて
+    // 祖先の done=1 を解除する。useGrid.updateCellLocal は編集したセル 1 つだけ
+    // React state を更新するので、伝搬先 (同 grid の center + 祖先 grids) の
+    // done 変更が UI に反映されない。reloadAll() で取り直す。
+    const wasEmpty = isCellEmpty(cell)
+    const willBeEmpty = isCellEmpty({ text: params.text, image_path: params.image_path })
+    const emptyToNonEmpty = wasEmpty && !willBeEmpty
+
     await updateCellLocal(cellId, params)
+
+    if (emptyToNonEmpty) {
+      reloadAll()
+    }
 
     pushUndo({
       description: 'セル編集',
