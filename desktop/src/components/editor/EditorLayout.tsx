@@ -600,7 +600,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // そのサブグリッド自体にフォーカスを移す (currentGrid をサブグリッドに切替 + breadcrumb を進める)。
     // view mode は 9×9 のまま維持されるので、そのサブグリッドが中央ブロックに表示され、
     // その子グリッドが周辺ブロックに配置される。
-    if (gridData && cell.grid_id !== gridData.id) {
+    //
+    // 例外: 現在 grid の中心 cell は X=C 統一モデルで親 grid 所属 (cell.grid_id = parent.id)
+    // になるため、cell.grid_id !== gridData.id が true になるが、これは "別サブグリッドの cell"
+    // ではなく "自グリッドの中心" なので、以下の drill-up / home 分岐に流す必要がある。
+    if (gridData && cell.grid_id !== gridData.id && cell.id !== gridData.center_cell_id) {
       const subGrid = await getGrid(cell.grid_id)
       if (!subGrid) return
       // 新モデル: subGrid の親 peripheral は subGrid.center_cell_id が指す cell
