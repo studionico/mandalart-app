@@ -19,7 +19,7 @@ import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid } from '@/lib/api/grids'
-import { updateCell, pasteCell, toggleCellDone } from '@/lib/api/cells'
+import { pasteCell, toggleCellDone } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
@@ -892,37 +892,44 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   /**
-   * 指定グリッドの中心セルが空なら soft-delete する。
-   * さらに、これが最後の子グリッド (= 並列を含めて他に兄弟が無い) だった場合は、
-   * ドリル元のセル (親セル) も連動してクリアする。これをやらないと、
-   * サブグリッドの中心セルを空にしても親セル側に値が残っていて「復活した」
-   * ように見えてしまう (親セルは DB 上別の行なので updateCell では連動しない)。
-   * 呼び出し側は必要に応じて parallelGrids / parallelIndex を更新する。
+   * 指定グリッドが「空」なら soft-delete する。判定基準は grid 種別で異なる:
    *
-   * 判定は呼び出し側の UI state ではなく **DB から再読み込みした merged cells** で行う。
-   * state 側は updateCellLocal などの部分更新で merged center の position override が
-   * 一時的に崩れる可能性があるため、ここで defensive に getGrid を通す。
+   * - **self-centered** (root grid, center_cell_id が自グリッド所属):
+   *   中心セル空 → 削除 (従来通り)。ただし root を削除すると親 cell を
+   *   クリアする対象がないので X クリア処理は行わない
+   * - **非 self-centered** (drilled / 並列) + 他に兄弟がいる:
+   *   自グリッドの peripherals 8 個が全部空 → 削除。中心は親 X と共有で空にできないので、
+   *   周辺が空なら "書かれていない並列" とみなす
+   * - **非 self-centered + 兄弟が自分 1 つだけ (= 単独 drilled)**:
+   *   自動削除しない。"drill してすぐ戻った" だけのユーザーに対して X を保持するため
+   *
+   * 判定は DB から再読み込みした merged cells で行う (state の部分更新で position
+   * override が崩れていても影響を受けないようにするため)。
    */
-  async function cleanupGridIfCenterEmpty(gridId: string): Promise<boolean> {
+  async function cleanupGridIfEmpty(gridId: string): Promise<boolean> {
     try {
       const gridWithCells = await getGrid(gridId)
-      const center = gridWithCells.cells.find((c) => c.position === CENTER_POSITION)
-      const isEmpty = !center || isCellEmpty(center)
-      if (!isEmpty) return false
-
       const parentCellId = gridWithCells.center_cell_id
       const parentCell = gridWithCells.cells.find((c) => c.id === parentCellId)
-      const isRootSelfReferenced = parentCell?.grid_id === gridWithCells.id
+      const isSelfCentered = parentCell?.grid_id === gridWithCells.id
+
+      if (isSelfCentered) {
+        const center = gridWithCells.cells.find((c) => c.position === CENTER_POSITION)
+        if (center && !isCellEmpty(center)) return false
+        await deleteGrid(gridId)
+        return true
+      }
+
+      // 非 self-centered: peripherals (自 grid 所属のセル = parentCellId 以外) が全て空か?
+      const peripherals = gridWithCells.cells.filter((c) => c.id !== parentCellId)
+      if (peripherals.some((c) => !isCellEmpty(c))) return false
+
+      // 他に兄弟が残っているかを確認 (siblings には自身も含まれる)
+      const siblings = await getChildGrids(parentCellId)
+      if (siblings.length <= 1) return false
 
       await deleteGrid(gridId)
-
-      // 削除後、drilled grid で他の兄弟 (並列含む) が残っていなければドリル元セルも空にする
-      if (!isRootSelfReferenced && parentCellId) {
-        const siblings = await getChildGrids(parentCellId)
-        if (siblings.length === 0) {
-          await updateCell(parentCellId, { text: '', image_path: null, color: null })
-        }
-      }
+      // 兄弟が残っているので親セル X はそのまま
       return true
     } catch (e) {
       console.error('cleanup deleteGrid failed:', e)
@@ -935,17 +942,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       navigate('/dashboard')
       return
     }
+    // 唯一の root grid + 中心空 → マンダラート全体を削除する特殊パス。
+    // "self-centered な root" は center_cell_id が自グリッドに属する cell を指す。
     const center = gridData.cells.find((c) => c.position === CENTER_POSITION)
     const centerEmpty = !center || isCellEmpty(center)
-
-    if (centerEmpty) {
-      // 現在のグリッドは「空」= 存在しないものとして削除する。
-      // 唯一のルートグリッドだった場合はマンダラート全体を削除する (以前の挙動を踏襲)。
-      if (breadcrumb.length === 1 && parallelGrids.length === 1) {
-        await deleteMandalart(mandalartId)
-      } else {
-        await cleanupGridIfCenterEmpty(gridData.id)
-      }
+    const isSoleRoot =
+      breadcrumb.length === 1 &&
+      parallelGrids.length === 1 &&
+      gridData.center_cell_id === center?.id
+    if (centerEmpty && isSoleRoot) {
+      await deleteMandalart(mandalartId)
+    } else {
+      // それ以外の "empty" は cleanupGridIfEmpty に判定を委譲
+      await cleanupGridIfEmpty(gridData.id)
     }
     navigate('/dashboard')
   }
@@ -963,7 +972,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // 順序を逆にすると、popBreadcrumbTo で React が再レンダし useGrid が target grid
     // を即座にフェッチしてしまい、cleanup による親セルクリアが反映される前のキャッシュで
     // gridData が固定化される (= 画面上で変化が見えない) ため。
-    await cleanupGridIfCenterEmpty(oldGridId)
+    await cleanupGridIfEmpty(oldGridId)
 
     // target 階層の並列兄弟を再取得して parallelGrids / parallelIndex を現在地に合わせる。
     // これをやらないと、遷移元 (より下位) の parallelGrids が残ったまま target を表示
@@ -1019,7 +1028,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // (アニメーション終了後にまとめて片付けることで、スライド中の視覚には残っているが
     //  データ的には存在しない、という整合を担保)
     if (oldGridId) {
-      const deleted = await cleanupGridIfCenterEmpty(oldGridId)
+      const deleted = await cleanupGridIfEmpty(oldGridId)
       if (deleted) {
         // parallelGrids から除去しつつ、現在地 (next) のインデックスを再計算する。
         // 'next' 方向では old が next より前にあったので index が 1 減る。
