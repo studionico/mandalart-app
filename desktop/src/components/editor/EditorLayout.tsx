@@ -751,7 +751,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       }
 
       setCurrentGrid(firstChild.id)
-      setParallelGrids([firstChild])
+      // 並列グリッドも含めた全兄弟を state に載せないと、← → で切り替えたり
+      // "+" で末尾に追加したりしたときに既存の並列が見えなくなってしまう。
+      setParallelGrids(children)
       setParallelIndex(0)
       pushBreadcrumb({
         gridId: firstChild.id,
