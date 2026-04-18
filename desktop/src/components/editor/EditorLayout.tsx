@@ -650,8 +650,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       return
     }
 
-    // 中央セル（position 4）の特別処理
-    if (cell.position === CENTER_POSITION) {
+    // 中央セル (= 現在 grid の center_cell_id が指す cell) の特別処理。
+    // 9×9 の周辺サブブロックの中央セルは UI 上 position=4 で描画されるが、
+    // X=C 統一モデルでは "親グリッドの周辺 cell" なので id 比較で除外する必要がある。
+    // (position 比較だけだと 9×9 の周辺サブグリッド中心クリックが誤判定される)
+    if (gridData && cell.id === gridData.center_cell_id) {
       if (breadcrumb.length <= 1) {
         // ルートグリッドの中心セル（入力あり）→ ホームへ
         if (!isCellEmpty(cell)) {
