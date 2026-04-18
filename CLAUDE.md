@@ -100,6 +100,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 8. **CSS keyframes の `transform: var(--x)` は WebKit で補間されない** — 固定 keyframes 8 方向で対応。詳細は [`animations.md`](desktop/docs/animations.md)
 9. **環境変数が欠損するとクラッシュ** — `lib/supabase/client.ts` がダミー URL でフォールバックし `isSupabaseConfigured` で gate
 10. **子グリッドには position=4 の cell 行が無い** — drill 先グリッドの中心は親グリッドの drill 元 cell (`grids.center_cell_id`) で直接参照。`cells WHERE grid_id = child.id` は 8 行しか返らない。描画では `getGrid` が親 cell を merge して 9 要素提供する。`setGridDone` のような grid 単位の UPDATE は 8 行のみ対象になる点に注意
+11. **`<a download>.click()` で Tauri のダウンロードは動かない** — ブラウザと違って WebKit はサイレントに握り潰す。ファイル保存は `@tauri-apps/plugin-fs` の `writeFile` + `BaseDirectory.Download` 等で書き、toast で保存先を通知する ([`src/lib/utils/export.ts`](desktop/src/lib/utils/export.ts))
 
 ## ドキュメント一覧
 

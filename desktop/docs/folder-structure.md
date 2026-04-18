@@ -141,7 +141,7 @@ src/
 │   ├── utils/
 │   │   ├── grid.ts           # isCellEmpty / hasPeripheralContent / getCenterCell
 │   │   ├── dnd.ts            # resolveDndAction (D&D ルール判定)
-│   │   └── export.ts         # PNG / PDF ダウンロード + downloadJSON / downloadText (Markdown / インデントテキスト用)
+│   │   └── export.ts         # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり)
 │   ├── realtime.ts           # Supabase Realtime (postgres_changes) 購読
 │   └── offline.ts            # オフラインスタブ (将来の pending updates 用)

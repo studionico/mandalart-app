@@ -1249,23 +1249,34 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }
 
-  // エクスポート (インポートと揃え、JSON / Markdown / インデントテキストに加え、視覚出力として PNG / PDF)
+  // エクスポート (インポートと揃え、JSON / Markdown / インデントテキストに加え、視覚出力として PNG / PDF)。
+  // tauri-plugin-fs で $DOWNLOAD に直接書き、保存先ファイル名を toast で通知する
+  // (Tauri WebKit は <a download> の click による自動ダウンロードをサポートしないため)。
   async function handleExport(format: 'png' | 'pdf' | 'json' | 'markdown' | 'indent') {
     setExportMenu(false)
     if (!currentGridId) return
-    if (format === 'png' && gridRef.current) {
-      await exportAsPNG(gridRef.current)
-    } else if (format === 'pdf' && gridRef.current) {
-      await exportAsPDF(gridRef.current)
-    } else if (format === 'json') {
-      const data = await exportToJSON(currentGridId)
-      downloadJSON(data)
-    } else if (format === 'markdown') {
-      const md = await exportToMarkdown(currentGridId)
-      downloadText(md, 'mandalart.md', 'text/markdown;charset=utf-8')
-    } else if (format === 'indent') {
-      const txt = await exportToIndentText(currentGridId)
-      downloadText(txt, 'mandalart.txt')
+    try {
+      let filename: string | null = null
+      if (format === 'png' && gridRef.current) {
+        filename = await exportAsPNG(gridRef.current)
+      } else if (format === 'pdf' && gridRef.current) {
+        filename = await exportAsPDF(gridRef.current)
+      } else if (format === 'json') {
+        const data = await exportToJSON(currentGridId)
+        filename = await downloadJSON(data)
+      } else if (format === 'markdown') {
+        const md = await exportToMarkdown(currentGridId)
+        filename = await downloadText(md, 'md')
+      } else if (format === 'indent') {
+        const txt = await exportToIndentText(currentGridId)
+        filename = await downloadText(txt, 'txt')
+      }
+      if (filename) {
+        setToast({ message: `ダウンロードフォルダに保存しました: ${filename}`, type: 'success' })
+      }
+    } catch (e) {
+      console.error('[export] failed:', e)
+      setToast({ message: `エクスポートに失敗: ${(e as Error).message}`, type: 'error' })
     }
   }
 

@@ -206,6 +206,8 @@ Shift+Tab は逆順
 
 エクスポート形式は **インポートと対称** に揃え、round-trip 可能なテキスト 3 種 (JSON / Markdown / インデントテキスト) + ビジュアル出力 2 種 (PNG / PDF) を提供する。
 
+ファイルは OS のダウンロードフォルダ (`$DOWNLOAD`) に `mandalart-<YYYYMMDD-HHMMSS>.<拡張子>` で保存され、完了後 toast で保存先ファイル名が通知される。Tauri WebKit は `<a download>` の自動ダウンロードをサポートしないため、`@tauri-apps/plugin-fs` の `writeFile` で直接書き込む実装にしている ([`export.ts`](../src/lib/utils/export.ts))。
+
 | 形式 | 内容 |
 |------|------|
 | PNG | 現在のグリッド表示をそのまま画像出力（html2canvas）|
