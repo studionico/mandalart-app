@@ -61,6 +61,19 @@ src-tauri/
 
 ---
 
+## desktop/samples/ (手動検証用)
+
+```
+samples/
+├── test-fixture.json       # 7 シナリオ (ルート並列 / drilled / memo / color 等) を詰めた GridSnapshot
+└── README.md               # 使い方 + 各形式の round-trip 保持対象テーブル
+```
+
+各エクスポート形式 (JSON / Markdown / インデントテキスト / PNG / PDF) の動作を手動で検証するためのフィクスチャ。
+「インポート → 各形式でエクスポート → 再インポート」の round-trip を 1 ファイルで一気通貫できる。
+
+---
+
 ## desktop/src/ (React フロントエンド)
 
 ```

@@ -203,17 +203,25 @@ deleteCellImage(path: string): Promise<void>
 ```typescript
 // 指定グリッド以下の階層構造を GridSnapshot として取得 (JSON エクスポート用)
 // 子グリッドには parentPosition が記録されるので round-trip 可能
+// 並列グリッドの相互参照は visited Set で検出し無限再帰を回避する
 exportToJSON(gridId: string): Promise<GridSnapshot>
 
 // 指定グリッド以下を Markdown 見出し形式でエクスポート (round-trip 可能)
 // Level 1..6 は `#` 見出し、7 以降は `- ` 箇条書きにフォールバック
+// memo は各見出し直下の `> blockquote` (再 import 時には落ちる)
 exportToMarkdown(gridId: string): Promise<string>
 
 // 指定グリッド以下をインデントテキスト形式でエクスポート (2 スペースインデント)
+// memo は tree 構造と両立しないため省略 (完全保持には JSON を使う)
 exportToIndentText(gridId: string): Promise<string>
 
+// テスト用のピュア関数: GridSnapshot → 文字列 (DB アクセスなし)
+// export* と対で ExportNode tree を構築して文字列化する
+snapshotToMarkdown(snapshot: GridSnapshot): string
+snapshotToIndentText(snapshot: GridSnapshot): string
+
 // GridSnapshot を新規マンダラートとしてインポート
-// 中心セルのテキストがタイトルになる
+// 中心セルのテキストがタイトルになる。parentPosition は `undefined` / `null` どちらでも並列扱い
 importFromJSON(snapshot: GridSnapshot): Promise<Mandalart>
 
 // GridSnapshot を既存セルの配下に挿入
@@ -222,8 +230,13 @@ importIntoCell(cellId: string, snapshot: GridSnapshot): Promise<void>
 
 // テキスト (インデント or Markdown 見出し) を GridSnapshot に変換
 // 先頭の箇条書き記号 (・ • ◦ - * + 1. 1) など) は自動で剥がされる
+// 9 個以上の子は先頭 8 個を peripherals、9 個目以降を 8 件チャンクの並列グリッドへ overflow
 parseTextToSnapshot(text: string): GridSnapshot
 ```
+
+各形式の round-trip 保持対象 (要素 vs 形式) は [`requirements.md`](./requirements.md#エクスポート機能) の
+テーブル参照。検証用フィクスチャは [`desktop/samples/test-fixture.json`](../samples/test-fixture.json) +
+[README](../samples/README.md) にある。
 
 ---
 
