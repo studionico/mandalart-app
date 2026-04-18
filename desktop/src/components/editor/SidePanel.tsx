@@ -15,7 +15,7 @@ type Props = {
   onStockItemDragStart?: (
     itemId: string,
     snapshot: CellSnapshot | null,
-    meta: { rect: DOMRect; x: number; y: number },
+    meta: { rect: DOMRect; x: number; y: number; element: HTMLElement },
   ) => void
   dragSourceId?: string | null
 }

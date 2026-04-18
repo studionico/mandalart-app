@@ -18,7 +18,7 @@ type Props = {
   onCommitInlineEdit: (cell: Cell, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: Cell) => void
-  onDragStart?: (cell: Cell, meta: { rect: DOMRect; x: number; y: number }) => void
+  onDragStart?: (cell: Cell, meta: { rect: DOMRect; x: number; y: number; element: HTMLElement }) => void
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
   onToggleDone?: (cell: Cell) => void
   /** D&D 中のソースセルの元位置 — ホバー target が swap 予告で移動する先 */

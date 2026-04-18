@@ -28,7 +28,7 @@ type Props = {
   onCommitInlineEdit: (cell: CellType, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: CellType) => void
-  onDragStart?: (cell: CellType, meta: { rect: DOMRect; x: number; y: number }) => void
+  onDragStart?: (cell: CellType, meta: { rect: DOMRect; x: number; y: number; element: HTMLElement }) => void
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
   /**
    * D&D 中のソースセルの元位置 (画面座標)。非 null のときで isDragOver=true の
@@ -204,10 +204,11 @@ export default function Cell({
         didDrag.current = true
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup',   onUp)
-        // ドラッグゴーストの初期位置 / ターゲットの swap 予告計算に必要なので rect を渡す
-        const rect = cellRef.current?.getBoundingClientRect()
-        if (rect) {
-          onDragStart?.(cell, { rect, x: e2.clientX, y: e2.clientY })
+        // ドラッグゴーストの初期位置 / ターゲットの swap 予告計算 / cloneNode 用に DOM 要素を渡す
+        const el = cellRef.current
+        const rect = el?.getBoundingClientRect()
+        if (rect && el) {
+          onDragStart?.(cell, { rect, x: e2.clientX, y: e2.clientY, element: el })
         }
       }
     }
@@ -389,7 +390,7 @@ export default function Cell({
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut ? 'opacity-40' : ''}
-        ${isDragOver && !isDisabled && !sourceCellRect ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
+        ${isDragOver && !isDisabled && !sourceCellRect ? '!bg-gray-200 dark:!bg-gray-800' : ''}
         group
       `}
       onMouseDown={handleMouseDown}

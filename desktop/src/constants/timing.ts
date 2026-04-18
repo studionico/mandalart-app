@@ -40,8 +40,9 @@ export const SYNC_DEBOUNCE_MS = 300
 
 /** ドラッグゴースト (マウス追従浮遊セル) の揺れ周期 (ms)。歯切れ良く 2 往復/秒くらい */
 export const DRAG_WOBBLE_PERIOD_MS = 500
-/** D&D ターゲットが source 位置へスライドする transition 時間 (ms) — forward / back 共通 */
-export const DRAG_TARGET_SHIFT_MS = 280
+/** D&D ターゲットが source 位置へスライドする transition 時間 (ms) — forward / back 共通
+ *  目でゆっくり追えるよう 500ms 程度 (短いと戻りが一瞬で分かりにくい) */
+export const DRAG_TARGET_SHIFT_MS = 500
 
 // --- UI 確認ダイアログ ---
 

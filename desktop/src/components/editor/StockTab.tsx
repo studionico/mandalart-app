@@ -12,7 +12,7 @@ type Props = {
   onItemDragStart?: (
     itemId: string,
     snapshot: CellSnapshot | null,
-    meta: { rect: DOMRect; x: number; y: number },
+    meta: { rect: DOMRect; x: number; y: number; element: HTMLElement },
   ) => void
   dragSourceId?: string | null
 }
@@ -96,8 +96,8 @@ export default function StockTab({
         const el = itemRefs.current.get(itemId)
         const rect = el?.getBoundingClientRect()
         const item = items.find((it) => it.id === itemId)
-        if (rect) {
-          onItemDragStart?.(itemId, item?.snapshot ?? null, { rect, x: e2.clientX, y: e2.clientY })
+        if (rect && el) {
+          onItemDragStart?.(itemId, item?.snapshot ?? null, { rect, x: e2.clientX, y: e2.clientY, element: el })
         }
       }
     }

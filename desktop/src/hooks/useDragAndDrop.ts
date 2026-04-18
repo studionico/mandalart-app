@@ -92,11 +92,14 @@ export type DragStartMeta = {
   /** mousedown 時 / threshold 到達時のカーソル座標 */
   x: number
   y: number
+  /** ソースセルの DOM 要素。ゴーストはこれを cloneNode して描画することで、
+   *  フォントウェイト・境界・色・レイアウトなどセルそのままの見た目を再現する。 */
+  element: HTMLElement
 }
 
 type DragSource =
-  | { kind: 'cell'; cell: Cell; rect: DOMRect }
-  | { kind: 'stock'; itemId: string; snapshot: CellSnapshot | null; rect: DOMRect }
+  | { kind: 'cell'; cell: Cell; rect: DOMRect; element: HTMLElement }
+  | { kind: 'stock'; itemId: string; snapshot: CellSnapshot | null; rect: DOMRect; element: HTMLElement }
 
 /**
  * HTML5 DnD の代わりに mousedown/mousemove/mouseup で D&D を実装。
@@ -121,6 +124,8 @@ export function useDragAndDrop(
   const [sourceCellRect, setSourceCellRect] = useState<DOMRect | null>(null)
   const [sourceCell, setSourceCell]         = useState<Cell | null>(null)
   const [sourceStockSnapshot, setSourceStockSnapshot] = useState<CellSnapshot | null>(null)
+  /** ゴーストの見た目を「ドラッグ前のセルそのまま」にするため、元要素を cloneNode 用に公開 */
+  const [sourceElement, setSourceElement]   = useState<HTMLElement | null>(null)
   const sourceRef = useRef<DragSource | null>(null)
   const cellsRef  = useRef<Cell[]>(cells)
   cellsRef.current = cells
@@ -151,6 +156,7 @@ export function useDragAndDrop(
       setSourceCell(null)
       setSourceStockSnapshot(source.snapshot)
     }
+    setSourceElement(source.element)
     // 全セルの layout rect をキャッシュ (この時点では transform 未適用なので layout 座標)
     const rects = new Map<string, DOMRect>()
     document.querySelectorAll<HTMLElement>('[data-cell-id]').forEach((el) => {
@@ -203,6 +209,7 @@ export function useDragAndDrop(
       setSourceCellRect(null)
       setSourceCell(null)
       setSourceStockSnapshot(null)
+      setSourceElement(null)
       cellLayoutRectsRef.current = new Map()
 
       if (!src) return
@@ -237,12 +244,13 @@ export function useDragAndDrop(
   }, [onComplete, onStockDrop, onStockPaste, pushUndo])
 
   const handleDragStart = useCallback(
-    (cell: Cell, meta: DragStartMeta) => beginDrag({ kind: 'cell', cell, rect: meta.rect }, meta),
+    (cell: Cell, meta: DragStartMeta) =>
+      beginDrag({ kind: 'cell', cell, rect: meta.rect, element: meta.element }, meta),
     [beginDrag],
   )
   const handleStockItemDragStart = useCallback(
     (itemId: string, snapshot: CellSnapshot | null, meta: DragStartMeta) =>
-      beginDrag({ kind: 'stock', itemId, snapshot, rect: meta.rect }, meta),
+      beginDrag({ kind: 'stock', itemId, snapshot, rect: meta.rect, element: meta.element }, meta),
     [beginDrag],
   )
 
@@ -257,5 +265,6 @@ export function useDragAndDrop(
     sourceCellRect,
     sourceCell,
     sourceStockSnapshot,
+    sourceElement,
   }
 }

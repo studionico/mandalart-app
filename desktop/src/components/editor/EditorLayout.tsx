@@ -1,5 +1,5 @@
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
 import { useClipboardStore } from '@/store/clipboardStore'
@@ -499,7 +499,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const {
     dragSourceId, dragOverId, isOverStock, isDragging,
     handleDragStart, handleStockItemDragStart,
-    dragPosition, sourceCellRect, sourceCell, sourceStockSnapshot,
+    dragPosition, sourceCellRect, sourceElement,
   } = useDragAndDrop(
     dndCells,
     reloadAll,
@@ -2211,38 +2211,70 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         />
       )}
 
-      {/* D&D ゴースト: マウスに追従して揺れる。ソース (cell or stock) 内容を simplified に描画。
-          position: fixed + pointerEvents: none で重なっても判定イベントを通過させる。 */}
-      {isDragging && dragPosition && (sourceCell || sourceStockSnapshot) && (
-        <div
-          style={{
-            position: 'fixed',
-            left: dragPosition.x,
-            top: dragPosition.y,
-            transform: 'translate(-50%, -50%)',
-            pointerEvents: 'none',
-            zIndex: 9999,
-            // ソースセルの元サイズに合わせる (rect が無い場合 = stock はデフォルトサイズ)
-            width: sourceCellRect?.width ?? 80,
-            height: sourceCellRect?.height ?? 80,
-          }}
-        >
-          <div
-            className="w-full h-full rounded-lg border-2 border-black dark:border-white bg-white dark:bg-gray-900 shadow-2xl overflow-hidden p-2 flex items-start justify-start text-left text-gray-800 dark:text-gray-100 font-medium"
-            style={{
-              animation: `drag-wobble ${DRAG_WOBBLE_PERIOD_MS}ms ease-in-out infinite`,
-              fontSize: Math.max(10, Math.min(18, (sourceCellRect?.width ?? 80) / 8)),
-              lineHeight: 1.25,
-            }}
-          >
-            <span className="block w-full whitespace-pre-wrap break-all line-clamp-5">
-              {sourceCell
-                ? (sourceCell.text || '（テキストなし）')
-                : (sourceStockSnapshot?.cell.text || '（テキストなし）')}
-            </span>
-          </div>
-        </div>
+      {/* D&D ゴースト: マウスに追従して揺れる。
+          ソース DOM 要素を cloneNode して描画することで、フォントウェイト・境界・色・
+          テキスト配置などセルそのままの見た目を完全再現する。
+          position: fixed + pointerEvents: none で判定イベントを通過させる。 */}
+      {isDragging && dragPosition && sourceElement && (
+        <DragGhost
+          element={sourceElement}
+          x={dragPosition.x}
+          y={dragPosition.y}
+          width={sourceElement.getBoundingClientRect().width || sourceCellRect?.width}
+          height={sourceElement.getBoundingClientRect().height || sourceCellRect?.height}
+        />
       )}
     </div>
+  )
+}
+
+/**
+ * ドラッグゴースト: source 要素を cloneNode して position:fixed で描画する。
+ * CSS variable で指定されたサイズに合わせてクローンを縮尺なしで描画、
+ * wobble アニメで rotate する (外側 wrapper は translate でマウス位置に追従)。
+ */
+function DragGhost({
+  element, x, y, width, height,
+}: {
+  element: HTMLElement
+  x: number
+  y: number
+  width?: number
+  height?: number
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  React.useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const clone = element.cloneNode(true) as HTMLElement
+    // 元の visibility:hidden (source が隠れている状態) を無効化
+    clone.style.visibility = 'visible'
+    clone.style.width = `${width ?? element.getBoundingClientRect().width}px`
+    clone.style.height = `${height ?? element.getBoundingClientRect().height}px`
+    clone.style.margin = '0'
+    clone.style.position = 'static'
+    clone.style.pointerEvents = 'none'
+    // 子に inert な属性が付いていてもゴーストでは問題ない
+    container.innerHTML = ''
+    container.appendChild(clone)
+  }, [element, width, height])
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: x,
+        top: y,
+        transform: 'translate(-50%, -50%)',
+        pointerEvents: 'none',
+        zIndex: 9999,
+        width: width ?? 80,
+        height: height ?? 80,
+        animation: `drag-wobble ${DRAG_WOBBLE_PERIOD_MS}ms ease-in-out infinite`,
+        // 浮遊感を出すための影
+        filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))',
+      }}
+      ref={containerRef}
+    />
   )
 }
