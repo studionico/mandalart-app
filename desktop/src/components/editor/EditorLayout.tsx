@@ -213,29 +213,39 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    * 「意味のある子グリッド」= 周辺セル (position != 4) に 1 つでも入力 (text または画像) が
    * あるサブグリッド。ドリル直後にセンターだけ自動コピーされただけの状態はカウントしない。
    * Cell 側の border 表示 (border-2 black = サブグリッドあり) で参照される。
+   *
+   * 以前は cells ごとに別々の SELECT を Promise.all で走らせていたが、セル数 (9〜81) に
+   * 比例してラウンドトリップが増え、"枠が遅れて出てくる" 描画遅延の主因になっていた。
+   * 1 発の IN (...) クエリに統合して全 cell 分をバッチ取得する。
    */
   async function fetchChildCountsFor(cells: Cell[]): Promise<Map<string, number>> {
-    const { query } = await import('@/lib/db')
     const map = new Map<string, number>()
-    await Promise.all(
-      cells.map(async (c) => {
-        // 新モデル (X=C 統一): ドリル先 grid は center_cell_id = this cell の行。
-        // 自グリッド (root での自己参照) は除外するため id != cell.grid_id を条件に入れる。
-        const rows = await query<{ cnt: number }>(
-          `SELECT COUNT(DISTINCT g.id) AS cnt
-           FROM grids g
-           JOIN cells sub ON sub.grid_id = g.id
-           WHERE g.center_cell_id = ?
-             AND g.id != ?
-             AND g.deleted_at IS NULL
-             AND sub.position != 4
-             AND sub.deleted_at IS NULL
-             AND (sub.text != '' OR sub.image_path IS NOT NULL)`,
-          [c.id, c.grid_id],
-        )
-        map.set(c.id, rows[0]?.cnt ?? 0)
-      }),
+    if (cells.length === 0) return map
+    // 全 cell の id を初期値 0 でマップに入れておく (クエリで hit しないセルが欠落しないよう)
+    for (const c of cells) map.set(c.id, 0)
+
+    const { query } = await import('@/lib/db')
+    const cellIds = cells.map((c) => c.id)
+    const placeholders = cellIds.map(() => '?').join(',')
+    // 自グリッド参照 (root center cell が自分のグリッドを center にしているケース) は
+    // self_cell 経由で join して `g.id != self_cell.grid_id` で除外する。
+    const rows = await query<{ cell_id: string; cnt: number }>(
+      `SELECT g.center_cell_id AS cell_id, COUNT(DISTINCT g.id) AS cnt
+       FROM grids g
+       JOIN cells self_cell ON self_cell.id = g.center_cell_id
+       JOIN cells sub ON sub.grid_id = g.id
+       WHERE g.center_cell_id IN (${placeholders})
+         AND g.id != self_cell.grid_id
+         AND g.deleted_at IS NULL
+         AND sub.position != 4
+         AND sub.deleted_at IS NULL
+         AND (sub.text != '' OR sub.image_path IS NOT NULL)
+       GROUP BY g.center_cell_id`,
+      cellIds,
     )
+    for (const r of rows) {
+      map.set(r.cell_id, r.cnt)
+    }
     return map
   }
 
@@ -377,40 +387,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           highlightPosition: null,
         })
 
-        // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in
-        // 現在の viewMode に合わせて 3×3 (セル単位) か 9×9 (サブグリッド単位) のどちらかを発火
+        // 初回表示は即時描画 (initial orbit アニメーションは廃止)。
+        // 以前はダッシュボード→エディタ遷移時に中心→周辺の fade-in 演出を入れていたが、
+        // useGrid の gridData ロードと setOrbit の間に「アニメなしのベアグリッドが一瞬見える」
+        // フラッシュが発生しており、演出のメリットよりも違和感が勝っていた。
+        // childCounts はバッチクエリで即取得して反映する (外枠遅延もなくなる)。
         const childCountsByCellId = await fetchChildCountsFor(cells)
+        setChildCounts(childCountsByCellId)
         if (viewMode === '9x9') {
           const targetSubGrids = await fetchSubGridsFor(cells)
-          setOrbit9({
-            targetRootCells: cells,
-            targetSubGrids,
-            targetGridId: root.id,
-            childCountsByCellId,
-            movingToPosition: null, // 移動ブロックなし
-            movingFromPosition: 4, // 未使用
-            direction: 'initial',
-          })
-          await new Promise((r) =>
-            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
-          )
-          setChildCounts(childCountsByCellId)
           setSubGrids(targetSubGrids)
-          setOrbit9(null)
-        } else {
-          setOrbit({
-            targetCells: cells,
-            targetGridId: root.id,
-            childCountsByCellId,
-            movingCellId: null,
-            movingFromPosition: 4, // 未使用 (moving cell なし)
-            direction: 'initial',
-          })
-          await new Promise((r) =>
-            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
-          )
-          setChildCounts(childCountsByCellId)
-          setOrbit(null)
         }
       } catch (e) {
         console.error('EditorLayout init error:', e)
