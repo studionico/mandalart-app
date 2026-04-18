@@ -368,16 +368,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           return
         }
         const root = roots[0]
-        setCurrentGrid(root.id)
-        setParallelGrids(roots)
-        setParallelIndex(0)
 
-        // ルートグリッドのセルを取得してパンくず初期化
+        // まず cells / childCounts / subGrids を全て prefetch してから setOrbit → setCurrentGrid の順で
+        // state を反映することで、"ベアグリッドが一瞬見える" フラッシュを回避する。
+        // orbit が先に active になっていれば、gridData 反映後の通常 render 経路はスキップされ、
+        // orbit 経路でセルが描画される (事前フェッチ済み childCountsByCellId を使うので border も正しい)。
         const { query } = await import('@/lib/db')
         const cells = await query<import('@/types').Cell>(
           'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
           [root.id],
         )
+        const childCountsByCellId = await fetchChildCountsFor(cells)
+
+        setParallelGrids(roots)
+        setParallelIndex(0)
         resetBreadcrumb({
           gridId: root.id,
           cellId: null,
@@ -387,16 +391,42 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           highlightPosition: null,
         })
 
-        // 初回表示は即時描画 (initial orbit アニメーションは廃止)。
-        // 以前はダッシュボード→エディタ遷移時に中心→周辺の fade-in 演出を入れていたが、
-        // useGrid の gridData ロードと setOrbit の間に「アニメなしのベアグリッドが一瞬見える」
-        // フラッシュが発生しており、演出のメリットよりも違和感が勝っていた。
-        // childCounts はバッチクエリで即取得して反映する (外枠遅延もなくなる)。
-        const childCountsByCellId = await fetchChildCountsFor(cells)
-        setChildCounts(childCountsByCellId)
+        // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in。
+        // orbit を先にセットしてから setCurrentGrid (useGrid ロード開始) する。
+        // こうすると gridData 反映のタイミングに関わらず、orbit 経路が最初から描画される。
         if (viewMode === '9x9') {
           const targetSubGrids = await fetchSubGridsFor(cells)
+          setOrbit9({
+            targetRootCells: cells,
+            targetSubGrids,
+            targetGridId: root.id,
+            childCountsByCellId,
+            movingToPosition: null,
+            movingFromPosition: 4,
+            direction: 'initial',
+          })
+          setCurrentGrid(root.id)
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          setChildCounts(childCountsByCellId)
           setSubGrids(targetSubGrids)
+          setOrbit9(null)
+        } else {
+          setOrbit({
+            targetCells: cells,
+            targetGridId: root.id,
+            childCountsByCellId,
+            movingCellId: null,
+            movingFromPosition: 4,
+            direction: 'initial',
+          })
+          setCurrentGrid(root.id)
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          setChildCounts(childCountsByCellId)
+          setOrbit(null)
         }
       } catch (e) {
         console.error('EditorLayout init error:', e)
