@@ -2065,9 +2065,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   </svg>
                 </button>
               ) : (() => {
-                const centerCell = gridData?.cells.find((c) => c.position === CENTER_POSITION)
-                const centerEmpty = !centerCell || isCellEmpty(centerCell)
-                if (centerEmpty) return null
+                // "+" は周辺セルに 1 つでも入力がある場合のみ表示する。
+                // (中心セルは X=C 統一モデルで drilled grid なら常に親 X の値が入っているため、
+                //  中心空チェックは実質常に通ってしまい、ボタンが常時表示される問題を避ける。
+                //  また "空の並列" を作れないようにすることで、自動削除ルールとも整合する)
+                const peripherals = gridData?.cells.filter((c) => c.position !== CENTER_POSITION) ?? []
+                const hasAnyPeripheralInput = peripherals.some((c) => !isCellEmpty(c))
+                if (!hasAnyPeripheralInput) return null
                 return (
                   <button
                     onClick={handleAddParallel}
