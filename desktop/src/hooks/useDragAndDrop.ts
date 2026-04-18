@@ -5,6 +5,7 @@ import { isCellEmpty } from '@/lib/utils/grid'
 import { CENTER_POSITION, isCenterPosition } from '@/constants/grid'
 import { swapCellContent, swapCellSubtree, copyCellSubtree } from '@/lib/api/cells'
 import { query, execute, now } from '@/lib/db'
+import { DRAG_TARGET_SHIFT_MS } from '@/constants/timing'
 import type { UndoOperation } from '@/store/undoStore'
 
 /**
@@ -132,6 +133,9 @@ export function useDragAndDrop(
   const sourceRef = useRef<DragSource | null>(null)
   const cellsRef  = useRef<Cell[]>(cells)
   cellsRef.current = cells
+  // mouseup 後の sourceCellRect 遅延クリア用タイマー。
+  // 戻りアニメ中に新たなドラッグが始まったら即キャンセルして state を揃える。
+  const clearSourceRectTimerRef = useRef<number | null>(null)
   // D&D 開始時点での全セルの layout rect を固定キャッシュ。
   // 以降の mousemove / mouseup のヒットテストはここに対して矩形内判定を行う。
   // elementFromPoint を使うと target が transform でずれた先を拾うため、ホバー中に
@@ -146,6 +150,11 @@ export function useDragAndDrop(
   }
 
   const beginDrag = useCallback((source: DragSource, initialMeta: DragStartMeta) => {
+    // 前回 drag の遅延クリアが走っていたらキャンセルして、新 drag の state を汚さないようにする
+    if (clearSourceRectTimerRef.current != null) {
+      clearTimeout(clearSourceRectTimerRef.current)
+      clearSourceRectTimerRef.current = null
+    }
     sourceRef.current = source
     setDragSourceId(source.kind === 'cell' ? source.cell.id : `stock:${source.itemId}`)
     setDragPosition({ x: initialMeta.x, y: initialMeta.y })
@@ -210,16 +219,32 @@ export function useDragAndDrop(
 
       const src = sourceRef.current
       sourceRef.current = null
+
+      // 即時にクリアする state:
+      // - dragSourceId: ソースセルの visibility を元に戻す
+      // - dragOverId: ホバーしていた target の戻りアニメを発火
+      // - ghost まわり: 追従描画を止める
       setDragSourceId(null)
       setDragOverId(null)
       setIsOverStock(false)
       setDragPosition(null)
-      setSourceCellRect(null)
-      setSourceCell(null)
-      setSourceStockSnapshot(null)
       setSourceElement(null)
       setDragGrabOffset(null)
-      cellLayoutRectsRef.current = new Map()
+
+      // sourceCellRect と cellLayoutRectsRef は遅延クリアする。
+      // これを残している間、target cell は "else if (sourceCellRect)" 分岐に入り、
+      // drag-target-shifting class + transform:translate(0,0) で元位置への戻り
+      // アニメが DRAG_TARGET_SHIFT_MS 分再生される。
+      if (clearSourceRectTimerRef.current != null) {
+        clearTimeout(clearSourceRectTimerRef.current)
+      }
+      clearSourceRectTimerRef.current = window.setTimeout(() => {
+        setSourceCellRect(null)
+        setSourceCell(null)
+        setSourceStockSnapshot(null)
+        cellLayoutRectsRef.current = new Map()
+        clearSourceRectTimerRef.current = null
+      }, DRAG_TARGET_SHIFT_MS + 50) // transition 終了を確実に待つための余白
 
       if (!src) return
 
