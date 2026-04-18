@@ -33,7 +33,11 @@ export function useGrid(gridId: string | null) {
         if (!prev) return prev
         return {
           ...prev,
-          cells: prev.cells.map((c) => (c.id === cellId ? updated : c)),
+          // state 側の position を保持したまま content を差し替える。
+          // 子 grid の merged center cell は DB 上の position (親グリッド内位置、例 7) とは別に
+          // UI 表示用に CENTER_POSITION (4) で載せているので、DB の値でそのまま上書きすると
+          // 中心スロットが空になりレイアウト・cleanup 判定が崩れる。
+          cells: prev.cells.map((c) => (c.id === cellId ? { ...updated, position: c.position } : c)),
         }
       })
       return updated
@@ -46,7 +50,7 @@ export function useGrid(gridId: string | null) {
       if (!prev) return prev
       return {
         ...prev,
-        cells: prev.cells.map((c) => (c.id === updated.id ? updated : c)),
+        cells: prev.cells.map((c) => (c.id === updated.id ? { ...updated, position: c.position } : c)),
       }
     })
   }, [])

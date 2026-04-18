@@ -898,17 +898,18 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    * サブグリッドの中心セルを空にしても親セル側に値が残っていて「復活した」
    * ように見えてしまう (親セルは DB 上別の行なので updateCell では連動しない)。
    * 呼び出し側は必要に応じて parallelGrids / parallelIndex を更新する。
+   *
+   * 判定は呼び出し側の UI state ではなく **DB から再読み込みした merged cells** で行う。
+   * state 側は updateCellLocal などの部分更新で merged center の position override が
+   * 一時的に崩れる可能性があるため、ここで defensive に getGrid を通す。
    */
-  async function cleanupGridIfCenterEmpty(gridId: string, cells: Cell[]): Promise<boolean> {
-    const center = cells.find((c) => c.position === CENTER_POSITION)
-    const isEmpty = !center || isCellEmpty(center)
-    if (!isEmpty) return false
+  async function cleanupGridIfCenterEmpty(gridId: string): Promise<boolean> {
     try {
-      // 削除前にグリッド情報を取得しておく。
-      // 新モデル: gridWithCells.center_cell_id が親 peripheral (drilled grid の場合) か
-      // 自グリッドの position=4 cell (root の場合) を指す。root かどうかは center cell の
-      // grid_id で判定する。
       const gridWithCells = await getGrid(gridId)
+      const center = gridWithCells.cells.find((c) => c.position === CENTER_POSITION)
+      const isEmpty = !center || isCellEmpty(center)
+      if (!isEmpty) return false
+
       const parentCellId = gridWithCells.center_cell_id
       const parentCell = gridWithCells.cells.find((c) => c.id === parentCellId)
       const isRootSelfReferenced = parentCell?.grid_id === gridWithCells.id
@@ -943,7 +944,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       if (breadcrumb.length === 1 && parallelGrids.length === 1) {
         await deleteMandalart(mandalartId)
       } else {
-        await cleanupGridIfCenterEmpty(gridData.id, gridData.cells)
+        await cleanupGridIfCenterEmpty(gridData.id)
       }
     }
     navigate('/dashboard')
@@ -956,14 +957,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       return
     }
     const oldGridId = gridData.id
-    const oldCells = gridData.cells
 
     // 先に cleanup (DB 上のグリッド削除 + 必要なら親セルのクリア) を完了させてから
     // popBreadcrumbTo を呼ぶ。
     // 順序を逆にすると、popBreadcrumbTo で React が再レンダし useGrid が target grid
     // を即座にフェッチしてしまい、cleanup による親セルクリアが反映される前のキャッシュで
     // gridData が固定化される (= 画面上で変化が見えない) ため。
-    await cleanupGridIfCenterEmpty(oldGridId, oldCells)
+    await cleanupGridIfCenterEmpty(oldGridId)
 
     // target 階層の並列兄弟を再取得して parallelGrids / parallelIndex を現在地に合わせる。
     // これをやらないと、遷移元 (より下位) の parallelGrids が残ったまま target を表示
@@ -1019,7 +1019,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // (アニメーション終了後にまとめて片付けることで、スライド中の視覚には残っているが
     //  データ的には存在しない、という整合を担保)
     if (oldGridId) {
-      const deleted = await cleanupGridIfCenterEmpty(oldGridId, fromCells)
+      const deleted = await cleanupGridIfCenterEmpty(oldGridId)
       if (deleted) {
         // parallelGrids から除去しつつ、現在地 (next) のインデックスを再計算する。
         // 'next' 方向では old が next より前にあったので index が 1 減る。
