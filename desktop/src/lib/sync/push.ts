@@ -61,6 +61,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       id: m.id,
       user_id: userId,
       title: m.title,
+      root_cell_id: m.root_cell_id,
       created_at: m.created_at,
       updated_at: m.updated_at,
       deleted_at: m.deleted_at ?? null,
@@ -79,7 +80,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     const ok = await upsertOne('grids', g.id, {
       id: g.id,
       mandalart_id: g.mandalart_id,
-      parent_cell_id: g.parent_cell_id,
+      center_cell_id: g.center_cell_id,
       sort_order: g.sort_order,
       memo: g.memo,
       created_at: g.created_at,

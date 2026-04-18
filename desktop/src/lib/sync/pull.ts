@@ -22,6 +22,7 @@ async function tryUpdate(label: string, sql: string, params: unknown[]) {
 type CloudMandalart = {
   id: string
   title: string
+  root_cell_id: string
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -29,7 +30,7 @@ type CloudMandalart = {
 type CloudGrid = {
   id: string
   mandalart_id: string
-  parent_cell_id: string | null
+  center_cell_id: string
   sort_order: number
   memo: string | null
   created_at: string
@@ -51,13 +52,6 @@ type CloudCell = {
 
 /**
  * 現在ユーザーの全データを Supabase から取得し、ローカルに反映する。
- * 競合解決: updated_at last-write-wins
- *  - クラウド > ローカル → ローカルを上書き、synced_at を新しい updated_at に
- *  - ローカル >= クラウド → 何もしない（次回 push 時に解決される）
- *  - ローカルに無い → INSERT、synced_at = updated_at
- *
- * deleted_at は cloud 側から pull されたまま local に反映する (soft delete)。
- * SELECT 側で WHERE deleted_at IS NULL フィルタがかかっているので UI には見えない。
  */
 export async function pullAll(): Promise<{ mandalarts: number; grids: number; cells: number }> {
   let mCount = 0
@@ -65,8 +59,8 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
   let cCount = 0
 
   const [m, g, c] = await Promise.all([
-    supabase.from('mandalarts').select('id, title, created_at, updated_at, deleted_at'),
-    supabase.from('grids').select('id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at'),
+    supabase.from('mandalarts').select('id, title, root_cell_id, created_at, updated_at, deleted_at'),
+    supabase.from('grids').select('id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at, deleted_at'),
     supabase.from('cells').select('id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at'),
   ])
   if (m.error) throw m.error
@@ -83,14 +77,14 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     )
     if (local.length === 0) {
       await tryInsert('mandalarts',
-        'INSERT INTO mandalarts (id, title, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?)',
-        [cm.id, cm.title, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
+        'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?)',
+        [cm.id, cm.title, cm.root_cell_id, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
       )
       mCount++
     } else if (cm.updated_at > local[0].updated_at) {
       await tryUpdate('mandalarts',
-        'UPDATE mandalarts SET title=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-        [cm.title, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
+        'UPDATE mandalarts SET title=?, root_cell_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cm.title, cm.root_cell_id, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
       )
       mCount++
     }
@@ -103,14 +97,14 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     )
     if (local.length === 0) {
       await tryInsert('grids',
-        'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
-        [cg.id, cg.mandalart_id, cg.parent_cell_id, cg.sort_order, cg.memo, cg.created_at, cg.updated_at, cg.deleted_at, cg.updated_at],
+        'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        [cg.id, cg.mandalart_id, cg.center_cell_id, cg.sort_order, cg.memo, cg.created_at, cg.updated_at, cg.deleted_at, cg.updated_at],
       )
       gCount++
     } else if (cg.updated_at > local[0].updated_at) {
       await tryUpdate('grids',
-        'UPDATE grids SET mandalart_id=?, parent_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-        [cg.mandalart_id, cg.parent_cell_id, cg.sort_order, cg.memo, cg.updated_at, cg.deleted_at, cg.updated_at, cg.id],
+        'UPDATE grids SET mandalart_id=?, center_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cg.mandalart_id, cg.center_cell_id, cg.sort_order, cg.memo, cg.updated_at, cg.deleted_at, cg.updated_at, cg.id],
       )
       gCount++
     }

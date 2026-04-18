@@ -87,18 +87,18 @@ async function applyMandalartChange(payload: { eventType: string; new: Record<st
     }
     return
   }
-  const m = payload.new as { id: string; title: string; created_at: string; updated_at: string; deleted_at: string | null }
+  const m = payload.new as { id: string; title: string; root_cell_id: string; created_at: string; updated_at: string; deleted_at: string | null }
   if (!m.id) return
   const local = await query<{ updated_at: string }>('SELECT updated_at FROM mandalarts WHERE id = ?', [m.id])
   if (local.length === 0) {
     await execute(
-      'INSERT INTO mandalarts (id, title, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?)',
-      [m.id, m.title, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
+      'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?)',
+      [m.id, m.title, m.root_cell_id, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
     )
   } else if (m.updated_at > local[0].updated_at) {
     await execute(
-      'UPDATE mandalarts SET title=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-      [m.title, m.updated_at, m.deleted_at, m.updated_at, m.id],
+      'UPDATE mandalarts SET title=?, root_cell_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+      [m.title, m.root_cell_id, m.updated_at, m.deleted_at, m.updated_at, m.id],
     )
   }
 }
@@ -118,13 +118,13 @@ async function applyGridChange(payload: { eventType: string; new: Record<string,
   const local = await query<{ updated_at: string }>('SELECT updated_at FROM grids WHERE id = ?', [g.id])
   if (local.length === 0) {
     await execute(
-      'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
-      [g.id, g.mandalart_id, g.parent_cell_id, g.sort_order, g.memo, g.created_at, g.updated_at, g.deleted_at, g.updated_at],
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [g.id, g.mandalart_id, g.center_cell_id, g.sort_order, g.memo, g.created_at, g.updated_at, g.deleted_at, g.updated_at],
     )
   } else if (g.updated_at > local[0].updated_at) {
     await execute(
-      'UPDATE grids SET mandalart_id=?, parent_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-      [g.mandalart_id, g.parent_cell_id, g.sort_order, g.memo, g.updated_at, g.deleted_at, g.updated_at, g.id],
+      'UPDATE grids SET mandalart_id=?, center_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+      [g.mandalart_id, g.center_cell_id, g.sort_order, g.memo, g.updated_at, g.deleted_at, g.updated_at, g.id],
     )
   }
 }
