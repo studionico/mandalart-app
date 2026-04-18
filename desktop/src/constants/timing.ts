@@ -11,10 +11,11 @@
 /**
  * シングル vs ダブルクリックを識別するタイマー (ms)。
  * 入力ありセルはこのぶんの遅延でドリルが始まる (空セルはドリル先が無いので即編集)。
- * 120ms まで短縮したところ double click 判定が効かなくなったため、実用範囲として
- * 200ms に設定する (typical human double click は 100-300ms 間隔)。
+ * 200ms / 300ms 運用で「時々シングルクリックと誤判定される」ケースが残ったため 400ms に緩和。
+ * macOS システム設定の double click 最大間隔 (~500ms) に近く、ゆっくりした double click まで
+ * 確実に拾える。drill レイテンシが +100ms 増えるが体感的には許容範囲。
  */
-export const CLICK_DELAY_MS = 200
+export const CLICK_DELAY_MS = 400
 
 // --- 並列グリッドスライド ---
 

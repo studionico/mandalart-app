@@ -51,6 +51,18 @@ export default function Cell({
 }: Props) {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
+
+  // unmount 時に pending な CLICK_DELAY timer を必ずクリアする。
+  // Cell は 9〜81 個生成されるので、未クリアだと ⌘Q 時に大量の pending timer が残留し
+  // renderer 側の参照保持で window close が遅延する原因になる。
+  useEffect(() => {
+    return () => {
+      if (clickTimer.current) {
+        clearTimeout(clickTimer.current)
+        clickTimer.current = null
+      }
+    }
+  }, [])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cellRef = useRef<HTMLDivElement>(null)
   const { bg, text: textColor } = getColorClasses(cell.color)

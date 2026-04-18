@@ -358,11 +358,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setMandalartId(mandalartId)
   }, [mandalartId, setMandalartId])
 
+  // 非同期処理 (init / drill の setTimeout await) が unmount 後に state を触らないよう
+  // 検査する ref。unmount 時に current = false にして、await 直後のガードで早期 return する。
+  // ⌘Q (window close) 時にアニメ待ちの Promise が resolve しても、setState が空振りして
+  // 外部参照を解放するため、renderer のシャットダウンが滞らない。
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => { isMountedRef.current = false }
+  }, [])
+
   // 初期ロード: ルートグリッドを取得してエディタを初期化
   useEffect(() => {
+    let cancelled = false
     async function init() {
       try {
         const roots = await getRootGrids(mandalartId)
+        if (cancelled) return
         if (roots.length === 0) {
           setToast({ message: 'グリッドが見つかりません', type: 'error' })
           return
@@ -374,11 +386,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         // orbit が先に active になっていれば、gridData 反映後の通常 render 経路はスキップされ、
         // orbit 経路でセルが描画される (事前フェッチ済み childCountsByCellId を使うので border も正しい)。
         const { query } = await import('@/lib/db')
+        if (cancelled) return
         const cells = await query<import('@/types').Cell>(
           'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
           [root.id],
         )
+        if (cancelled) return
         const childCountsByCellId = await fetchChildCountsFor(cells)
+        if (cancelled) return
 
         setParallelGrids(roots)
         setParallelIndex(0)
@@ -396,6 +411,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         // こうすると gridData 反映のタイミングに関わらず、orbit 経路が最初から描画される。
         if (viewMode === '9x9') {
           const targetSubGrids = await fetchSubGridsFor(cells)
+          if (cancelled) return
           setOrbit9({
             targetRootCells: cells,
             targetSubGrids,
@@ -409,6 +425,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           await new Promise((r) =>
             setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
           )
+          if (cancelled) return
           setChildCounts(childCountsByCellId)
           setSubGrids(targetSubGrids)
           setOrbit9(null)
@@ -425,15 +442,18 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           await new Promise((r) =>
             setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
           )
+          if (cancelled) return
           setChildCounts(childCountsByCellId)
           setOrbit(null)
         }
       } catch (e) {
+        if (cancelled) return
         console.error('EditorLayout init error:', e)
         setToast({ message: `読み込みエラー: ${(e as Error).message}`, type: 'error' })
       }
     }
     init()
+    return () => { cancelled = true }
   }, [mandalartId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 子グリッド数を更新 (= 「意味のあるサブグリッド」カウント)
@@ -665,6 +685,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         await new Promise((r) =>
           setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
         )
+        if (!isMountedRef.current) return
       }
 
       setCurrentGrid(deeperGrid.id)
@@ -734,6 +755,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               await new Promise((r) =>
                 setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
               )
+              if (!isMountedRef.current) return
             }
           } else if (viewMode === '9x9') {
             // 9×9 ブロック単位のドリルアップ: 現在の中央ブロック (= 現在 grid) が
@@ -759,6 +781,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               await new Promise((r) =>
                 setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
               )
+              if (!isMountedRef.current) return
             }
           }
           setCurrentGrid(parent.gridId)
@@ -791,6 +814,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         await new Promise((r) =>
           setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
         )
+        if (!isMountedRef.current) return
       }
 
       setCurrentGrid(firstChild.id)
@@ -833,6 +857,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         await new Promise((r) =>
           setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
         )
+        if (!isMountedRef.current) return
       }
 
       setCurrentGrid(newGrid.id)

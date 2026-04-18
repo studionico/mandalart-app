@@ -1,3 +1,5 @@
+use tauri::{Emitter, WindowEvent};
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -45,6 +47,14 @@ pub fn run() {
         // ~/Library/Application Support/jp.mandalart.app/window-state.json)。
         // 初回起動時はこの state が無いので tauri.conf.json の width/height が使われる。
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // ⌘Q / ウィンドウ close 時にフロントエンドへ "before-quit" を発火する。
+        // フロント側の useBeforeQuit が Supabase realtime channel を proactively 解除する。
+        // React の unmount cleanup が間に合わずに webview が落ちるケースに対する保険。
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                let _ = window.emit("before-quit", ());
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
