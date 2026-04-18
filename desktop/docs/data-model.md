@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS cells (
   text        TEXT NOT NULL DEFAULT '',
   image_path  TEXT,                          -- `$APPDATA/images/...` への相対パス
   color       TEXT,                          -- プリセットカラーのキー (例: "red", "blue")
+  done        INTEGER NOT NULL DEFAULT 0,    -- チェックボックス (0 = 未、1 = 完了)
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at   TEXT,
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS cells (
 
 CREATE INDEX IF NOT EXISTS idx_cells_grid       ON cells(grid_id);
 CREATE INDEX IF NOT EXISTS idx_cells_deleted_at ON cells(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_cells_done       ON cells(done);
 ```
 
 ---
@@ -219,6 +221,17 @@ CREATE INDEX IF NOT EXISTS idx_grids_deleted_at      ON grids(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_cells_deleted_at      ON cells(deleted_at);
 ```
 
+### 003_cell_done.sql
+
+cells にチェックボックス用の `done INTEGER` カラム (0/1、boolean として扱う) を追加:
+
+```sql
+ALTER TABLE cells ADD COLUMN done INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_cells_done ON cells(done);
+```
+
+Supabase 側は `BOOLEAN NOT NULL DEFAULT FALSE` を手動で追加する必要がある ([`cloud-sync-setup.md`](./cloud-sync-setup.md) 参照)。階層カスケード (親 → 子全チェック / 子全 → 親自動チェック) は `lib/api/cells.ts` の `toggleCellDone` で実装。
+
 ---
 
 ## FK 制約を張らない理由
@@ -258,6 +271,7 @@ tauri_plugin_sql::Builder::new()
     .add_migrations("sqlite:mandalart.db", vec![
         Migration { version: 1, description: "initial schema", sql: include_str!("../migrations/001_initial.sql"), kind: MigrationKind::Up },
         Migration { version: 2, description: "add deleted_at columns for soft delete", sql: include_str!("../migrations/002_soft_delete.sql"), kind: MigrationKind::Up },
+        Migration { version: 3, description: "add done column to cells", sql: include_str!("../migrations/003_cell_done.sql"), kind: MigrationKind::Up },
     ])
     .build()
 ```

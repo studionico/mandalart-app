@@ -26,6 +26,7 @@ function cell(overrides: Partial<Cell>): Cell {
     text: overrides.text ?? '',
     image_path: overrides.image_path ?? null,
     color: overrides.color ?? null,
+    done: false,
     created_at: '',
     updated_at: '',
     ...overrides,

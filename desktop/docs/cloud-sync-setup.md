@@ -78,6 +78,16 @@ ALTER TABLE cells      ADD COLUMN deleted_at timestamptz;
 
 ローカル側は migration 002 で自動追加されます (`rm ~/Library/Application\ Support/jp.mandalart.app/mandalart.db` で DB を作り直した場合は 001 + 002 が連続実行されます)。
 
+### 必須スキーマ変更: チェックボックス用の `done` カラム
+
+セル単位の「完了状態」を保存するため cells テーブルに `done` カラムを追加してください (migration 003 に対応):
+
+```sql
+ALTER TABLE cells ADD COLUMN done BOOLEAN NOT NULL DEFAULT FALSE;
+```
+
+ローカル側は migration 003 で自動追加されます。
+
 ---
 
 ## ステップ 4: Auth 設定

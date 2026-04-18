@@ -19,6 +19,12 @@ pub fn run() {
                             sql: include_str!("../migrations/002_soft_delete.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 3,
+                            description: "add done column to cells (checkbox feature)",
+                            sql: include_str!("../migrations/003_cell_done.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

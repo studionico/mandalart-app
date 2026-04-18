@@ -104,6 +104,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       text: c.text,
       image_path: c.image_path,
       color: c.color,
+      done: c.done ?? false,
       created_at: c.created_at,
       updated_at: c.updated_at,
       deleted_at: c.deleted_at ?? null,

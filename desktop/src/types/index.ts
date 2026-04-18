@@ -28,6 +28,14 @@ export type Cell = {
   text: string
   image_path: string | null
   color: string | null
+  /**
+   * チェックボックスのチェック状態。
+   * SQLite では INTEGER 0/1、Supabase では BOOLEAN として保持される。
+   * tauri-plugin-sql と @supabase/supabase-js 双方が boolean として返すので
+   * TS 型としては単一の boolean で扱う。
+   * 既存行 (migration 003 適用前) は 0 (false) で埋まる。
+   */
+  done: boolean
   created_at: string
   updated_at: string
   deleted_at?: string | null

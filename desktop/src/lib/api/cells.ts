@@ -1,5 +1,6 @@
 import { query, execute, generateId, now } from '../db'
 import { CENTER_POSITION } from '@/constants/grid'
+import { isCellEmpty } from '@/lib/utils/grid'
 import type { Cell } from '../../types'
 
 export async function updateCell(
@@ -198,4 +199,237 @@ async function copyGridRecursive(
     }
   }
   return newGridId
+}
+
+// ---------------------------------------------------------------------------
+// チェックボックス (done) 関連
+// ---------------------------------------------------------------------------
+
+/**
+ * 指定 grid の全セルの done 状態を一括設定する (子グリッドへの再帰はしない)。
+ * drill-down で新規サブグリッドを作った時に、親セルが done なら子グリッド全体も
+ * done で初期化する用途。新規 grid には子グリッドが無いので再帰不要。
+ */
+export async function setGridDone(gridId: string, done: boolean): Promise<void> {
+  const ts = now()
+  const flag = done ? 1 : 0
+  await execute(
+    'UPDATE cells SET done = ?, updated_at = ? WHERE grid_id = ? AND deleted_at IS NULL AND done != ?',
+    [flag, ts, gridId, flag],
+  )
+}
+
+/**
+ * セルの done 状態をトグルし、階層全体にカスケード適用する。
+ *
+ * マンダラートの階層ツリーの親子関係 (zigzag):
+ *  - 周辺セル P (grid G) の「親」 = G の中心セル
+ *  - 中心セル C (grid G) の「親」 = G.parent_cell_id (祖父 grid の周辺セル)、
+ *                                    ルートグリッドの中心なら親なし
+ *
+ * 「サブツリー」:
+ *  - 中心セル C のサブツリー = C が属する grid の全セル + 各周辺の子グリッドのサブツリー
+ *    (中心セルが grid 全体の代表という semantic — stock.ts の buildCellSnapshot と同じ)
+ *  - 周辺セル P のサブツリー = P + P の子グリッド (あれば) の全セル + その中の周辺の子グリッドのサブツリー
+ *
+ * トグル方向による挙動 (対称):
+ *  - **チェック (0 → 1)**: セル自身のサブツリーを全部 done=1、
+ *    親方向にも「サブツリー全 done なら親も done=1」を再帰的に伝搬
+ *  - **アンチェック (1 → 0)**: セル自身のサブツリーを全部 done=0、
+ *    親方向にも「done なら done=0」を再帰的に伝搬 (invariant 維持)
+ *
+ * updated_at を進めて sync 対象化する。
+ */
+export async function toggleCellDone(cellId: string): Promise<void> {
+  const cells = await query<Cell>('SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL', [cellId])
+  const cell = cells[0]
+  if (!cell) return
+  const nextDone = Number(cell.done) === 1 ? 0 : 1
+  const ts = now()
+
+  // サブツリー全体を done に (チェック/アンチェック どちらも同じ方向の更新)
+  await markSubtreeDone(cellId, nextDone, ts)
+
+  // 親方向への伝搬
+  if (nextDone === 1) {
+    await propagateDoneUp(cellId, ts)
+  } else {
+    await propagateUndoneUp(cellId, ts)
+  }
+}
+
+/**
+ * 指定セルのサブツリー全体を done に設定する。中心セルと周辺セルで subtree の
+ * 定義が異なる (doc 参照)。done は 0 or 1。更新があった行のみ updated_at を進める。
+ */
+async function markSubtreeDone(cellId: string, done: 0 | 1, ts: string): Promise<void> {
+  const cellRows = await query<{ grid_id: string; position: number }>(
+    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
+  const cell = cellRows[0]
+  if (!cell) return
+
+  if (cell.position === CENTER_POSITION) {
+    // 中心セル: 所属グリッド全体 + 周辺の子グリッドのサブツリー
+    await markGridSubtreeDone(cell.grid_id, done, ts)
+  } else {
+    // 周辺セル: 自身 + 子グリッドのサブツリー
+    await execute(
+      'UPDATE cells SET done = ?, updated_at = ? WHERE id = ? AND done != ?',
+      [done, ts, cellId, done],
+    )
+    const childGrids = await query<{ id: string }>(
+      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+      [cellId],
+    )
+    for (const g of childGrids) {
+      await markGridSubtreeDone(g.id, done, ts)
+    }
+  }
+}
+
+/** 指定 grid の全セルを done に設定し、周辺セルの子グリッドを再帰処理。 */
+async function markGridSubtreeDone(gridId: string, done: 0 | 1, ts: string): Promise<void> {
+  await execute(
+    'UPDATE cells SET done = ?, updated_at = ? WHERE grid_id = ? AND deleted_at IS NULL AND done != ?',
+    [done, ts, gridId, done],
+  )
+  const peripheralCells = await query<{ id: string }>(
+    'SELECT id FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL',
+    [gridId, CENTER_POSITION],
+  )
+  for (const c of peripheralCells) {
+    const childGrids = await query<{ id: string }>(
+      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+      [c.id],
+    )
+    for (const g of childGrids) {
+      await markGridSubtreeDone(g.id, done, ts)
+    }
+  }
+}
+
+/**
+ * ツリー上の親セル (zigzag) を取得する。
+ *  - 周辺セル → 同じ grid の中心セル
+ *  - 中心セル → 所属 grid の parent_cell (祖父 grid の周辺セル)、ルートなら null
+ */
+async function getParentCellInTree(
+  cellId: string,
+): Promise<{ id: string; grid_id: string; position: number } | null> {
+  const cellRows = await query<{ grid_id: string; position: number }>(
+    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
+  const cell = cellRows[0]
+  if (!cell) return null
+
+  if (cell.position !== CENTER_POSITION) {
+    // 周辺セル → 同グリッドの中心セル
+    const centers = await query<{ id: string; grid_id: string; position: number }>(
+      'SELECT id, grid_id, position FROM cells WHERE grid_id = ? AND position = ? AND deleted_at IS NULL',
+      [cell.grid_id, CENTER_POSITION],
+    )
+    return centers[0] ?? null
+  }
+  // 中心セル → 所属 grid の parent_cell (なければ null)
+  const grids = await query<{ parent_cell_id: string | null }>(
+    'SELECT parent_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
+    [cell.grid_id],
+  )
+  const parentCellId = grids[0]?.parent_cell_id
+  if (!parentCellId) return null
+  const parents = await query<{ id: string; grid_id: string; position: number }>(
+    'SELECT id, grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [parentCellId],
+  )
+  return parents[0] ?? null
+}
+
+/**
+ * 指定セルの「子孫」(= 自身を除く配下すべて) が全て done=1 か判定する。
+ * これを使うことで「このセルを done=1 にマークしても invariant が崩れないか」を
+ * propagateDoneUp のループで調べる。
+ *
+ * ツリー上の子孫定義:
+ *  - 中心セル C (grid G) の子孫 = G の 8 周辺 + それぞれの周辺の子孫
+ *  - 周辺セル P の子孫 = P の子グリッド (あれば) の中央セルと 8 周辺 + その子孫
+ */
+async function areDescendantsAllDone(cellId: string): Promise<boolean> {
+  const cellRows = await query<{ grid_id: string; position: number }>(
+    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
+  const cell = cellRows[0]
+  if (!cell) return false
+
+  // 空セルは「タスクではない」として判定から除外する (= done 扱い)。
+  // これにより空の周辺セルが多数あっても、入力ある兄弟が全 done なら親も done 判定される。
+  if (cell.position === CENTER_POSITION) {
+    // 中心セルの子孫 = 同じ grid の周辺セル (空は無視) + それぞれの子孫
+    const peripherals = await query<{ id: string; done: number; text: string; image_path: string | null }>(
+      'SELECT id, done, text, image_path FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL',
+      [cell.grid_id, CENTER_POSITION],
+    )
+    for (const p of peripherals) {
+      if (isCellEmpty(p)) continue
+      if (Number(p.done) !== 1) return false
+      if (!(await areDescendantsAllDone(p.id))) return false
+    }
+    return true
+  }
+  // 周辺セルの子孫 = 子グリッド (あれば) の全セル (空は無視) + それぞれの子孫
+  const childGrids = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
+  for (const g of childGrids) {
+    const gridCells = await query<{ id: string; position: number; done: number; text: string; image_path: string | null }>(
+      'SELECT id, position, done, text, image_path FROM cells WHERE grid_id = ? AND deleted_at IS NULL',
+      [g.id],
+    )
+    for (const c of gridCells) {
+      if (isCellEmpty(c)) continue
+      if (Number(c.done) !== 1) return false
+    }
+    // 各周辺セルの子グリッドも再帰 (空セルは飛ばす)
+    for (const c of gridCells) {
+      if (c.position === CENTER_POSITION) continue
+      if (isCellEmpty(c)) continue
+      if (!(await areDescendantsAllDone(c.id))) return false
+    }
+  }
+  return true
+}
+
+/**
+ * セルの done=1 を受けて親方向へ伝搬。
+ * 親のすべての子孫が done=1 (= 親を done にしても invariant OK) なら親も done=1。
+ */
+async function propagateDoneUp(cellId: string, ts: string): Promise<void> {
+  const parent = await getParentCellInTree(cellId)
+  if (!parent) return
+  if (!(await areDescendantsAllDone(parent.id))) return
+  await execute(
+    'UPDATE cells SET done = 1, updated_at = ? WHERE id = ? AND done = 0',
+    [ts, parent.id],
+  )
+  await propagateDoneUp(parent.id, ts)
+}
+
+/** セルの done=0 を受けて親方向へ伝搬: 親が done=1 なら done=0 に解除し再帰。 */
+async function propagateUndoneUp(cellId: string, ts: string): Promise<void> {
+  const parent = await getParentCellInTree(cellId)
+  if (!parent) return
+  const parentDone = await query<{ done: number }>(
+    'SELECT done FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [parent.id],
+  )
+  if (!parentDone[0] || Number(parentDone[0].done) !== 1) return
+  await execute(
+    'UPDATE cells SET done = 0, updated_at = ? WHERE id = ?',
+    [ts, parent.id],
+  )
+  await propagateUndoneUp(parent.id, ts)
 }

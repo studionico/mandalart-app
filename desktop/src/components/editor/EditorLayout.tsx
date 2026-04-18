@@ -19,7 +19,7 @@ import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid } from '@/lib/api/grids'
-import { updateCell, pasteCell } from '@/lib/api/cells'
+import { updateCell, pasteCell, toggleCellDone, setGridDone } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
@@ -58,9 +58,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const navigate = useNavigate()
   const {
     currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
+    showCheckbox,
     setMandalartId, setCurrentGrid, setViewMode,
     pushBreadcrumb, popBreadcrumbTo, resetBreadcrumb, updateBreadcrumbItem,
-    bumpFontLevel, resetFontLevel,
+    bumpFontLevel, resetFontLevel, setShowCheckbox,
   } = useEditorStore()
 
   const { push: pushUndo } = useUndo()
@@ -758,14 +759,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, sortOrder: 0 })
 
+      // 親セルが done=true なら、新しい子グリッドの全セルも done=true で
+      // 初期化する (invariant 維持: 親 done ⇔ 子孫全 done)
+      if (cell.done) {
+        await setGridDone(newGrid.id, true)
+      }
+
       const centerCell = newGrid.cells.find((c) => c.position === CENTER_POSITION)
       const populatedCells = centerCell && !isCellEmpty(cell)
         ? newGrid.cells.map((c) =>
             c.position === CENTER_POSITION
-              ? { ...c, text: cell.text, image_path: cell.image_path, color: cell.color }
-              : c,
+              ? { ...c, text: cell.text, image_path: cell.image_path, color: cell.color, done: !!cell.done }
+              : { ...c, done: !!cell.done },
           )
-        : newGrid.cells
+        : newGrid.cells.map((c) => ({ ...c, done: !!cell.done }))
       if (centerCell && !isCellEmpty(cell)) {
         await updateCell(centerCell.id, {
           text: cell.text,
@@ -1157,6 +1164,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
   handlePasteRef.current = handlePaste
 
+  // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
+  // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。
+  async function handleToggleDone(cell: Cell) {
+    try {
+      await toggleCellDone(cell.id)
+      reloadAll()
+    } catch (e) {
+      setToast({ message: `チェック失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }
+
   async function handleStockPaste(item: StockItem) {
     // インライン編集中のセルを貼り付け先にする (詳細編集モーダル廃止後の動線)
     const targetCellId = inlineEditingCellId
@@ -1241,6 +1259,31 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               A＋
             </button>
           </div>
+
+          {/* チェックボックス表示 ON/OFF トグル */}
+          <button
+            type="button"
+            onClick={() => setShowCheckbox(!showCheckbox)}
+            className={`relative w-10 h-5 rounded-full transition-colors border text-[9px] ${
+              showCheckbox
+                ? 'bg-blue-600 border-blue-600'
+                : 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+            }`}
+            title={showCheckbox ? 'チェックボックス表示中 (クリックで非表示)' : 'チェックボックス非表示 (クリックで表示)'}
+            aria-label="toggle checkbox display"
+          >
+            <span
+              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all flex items-center justify-center ${
+                showCheckbox ? 'left-[22px] text-blue-600' : 'left-0.5 text-gray-400'
+              }`}
+            >
+              {showCheckbox && (
+                <svg viewBox="0 0 16 16" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 8 7 12 13 4" />
+                </svg>
+              )}
+            </span>
+          </button>
 
           {/* 表示モード切替 */}
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
@@ -1960,6 +2003,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onDrill={handleCellDrill}
                       onDragStart={handleDragStart}
                       onContextMenu={handleContextMenu}
+                      onToggleDone={showCheckbox ? handleToggleDone : undefined}
                     />
                   )}
                   {gridData && viewMode === '9x9' && gridSize > 0 && (

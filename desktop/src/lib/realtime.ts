@@ -135,18 +135,19 @@ async function applyCellChange(payload: { eventType: string; new: Record<string,
     if (id) await execute('DELETE FROM cells WHERE id = ?', [id])
     return
   }
-  const c = payload.new as CloudCell & { deleted_at: string | null }
+  const c = payload.new as CloudCell & { deleted_at: string | null; done?: boolean }
   if (!c.id) return
+  const doneFlag = c.done ? 1 : 0
   const local = await query<{ updated_at: string }>('SELECT updated_at FROM cells WHERE id = ?', [c.id])
   if (local.length === 0) {
     await execute(
-      'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [c.id, c.grid_id, c.position, c.text, c.image_path, c.color, c.created_at, c.updated_at, c.deleted_at, c.updated_at],
+      'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [c.id, c.grid_id, c.position, c.text, c.image_path, c.color, doneFlag, c.created_at, c.updated_at, c.deleted_at, c.updated_at],
     )
   } else if (c.updated_at > local[0].updated_at) {
     await execute(
-      'UPDATE cells SET grid_id=?, position=?, text=?, image_path=?, color=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-      [c.grid_id, c.position, c.text, c.image_path, c.color, c.updated_at, c.deleted_at, c.updated_at, c.id],
+      'UPDATE cells SET grid_id=?, position=?, text=?, image_path=?, color=?, done=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+      [c.grid_id, c.position, c.text, c.image_path, c.color, doneFlag, c.updated_at, c.deleted_at, c.updated_at, c.id],
     )
   }
 }

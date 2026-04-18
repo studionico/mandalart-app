@@ -20,6 +20,7 @@ type Props = {
   onDrill: (cell: Cell) => void
   onDragStart?: (cell: Cell) => void
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
+  onToggleDone?: (cell: Cell) => void
 }
 
 export default function GridView3x3({
@@ -27,7 +28,7 @@ export default function GridView3x3({
   fontScale, inlineEditingCellId,
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
-  onDrill, onDragStart, onContextMenu,
+  onDrill, onDragStart, onContextMenu, onToggleDone,
 }: Props) {
   const center = getCenterCell(cells)
   const centerEmpty = !center || isCellEmpty(center)
@@ -63,6 +64,7 @@ export default function GridView3x3({
             onDrill={onDrill}
             onDragStart={onDragStart}
             onContextMenu={onContextMenu}
+            onToggleDone={onToggleDone}
           />
         )
       })}

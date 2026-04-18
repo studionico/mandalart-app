@@ -43,6 +43,7 @@ type CloudCell = {
   text: string
   image_path: string | null
   color: string | null
+  done: boolean
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -66,7 +67,7 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
   const [m, g, c] = await Promise.all([
     supabase.from('mandalarts').select('id, title, created_at, updated_at, deleted_at'),
     supabase.from('grids').select('id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at'),
-    supabase.from('cells').select('id, grid_id, position, text, image_path, color, created_at, updated_at, deleted_at'),
+    supabase.from('cells').select('id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at'),
   ])
   if (m.error) throw m.error
   if (g.error) throw g.error
@@ -122,14 +123,14 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     )
     if (local.length === 0) {
       await tryInsert('cells',
-        'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        [cc.id, cc.grid_id, cc.position, cc.text, cc.image_path, cc.color, cc.created_at, cc.updated_at, cc.deleted_at, cc.updated_at],
+        'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [cc.id, cc.grid_id, cc.position, cc.text, cc.image_path, cc.color, cc.done ? 1 : 0, cc.created_at, cc.updated_at, cc.deleted_at, cc.updated_at],
       )
       cCount++
     } else if (cc.updated_at > local[0].updated_at) {
       await tryUpdate('cells',
-        'UPDATE cells SET grid_id=?, position=?, text=?, image_path=?, color=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-        [cc.grid_id, cc.position, cc.text, cc.image_path, cc.color, cc.updated_at, cc.deleted_at, cc.updated_at, cc.id],
+        'UPDATE cells SET grid_id=?, position=?, text=?, image_path=?, color=?, done=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cc.grid_id, cc.position, cc.text, cc.image_path, cc.color, cc.done ? 1 : 0, cc.updated_at, cc.deleted_at, cc.updated_at, cc.id],
       )
       cCount++
     }

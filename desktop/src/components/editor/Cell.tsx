@@ -9,6 +9,7 @@ import {
 } from '@/constants/layout'
 import { GRID_SIDE } from '@/constants/grid'
 import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
+import { isCellEmpty } from '@/lib/utils/grid'
 
 type Props = {
   cell: CellType
@@ -29,6 +30,8 @@ type Props = {
   onDrill: (cell: CellType) => void
   onDragStart?: (cell: CellType) => void
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
+  /** 指定すると左上にチェックボックスを表示。指定なしなら非表示 (= 機能 OFF / size='small' / アニメ中)。 */
+  onToggleDone?: (cell: CellType) => void
   size?: 'normal' | 'small'
   /** 外側ラッパー div に追加するスタイル (アニメーション制御用) */
   wrapperStyle?: React.CSSProperties
@@ -42,7 +45,7 @@ export default function Cell({
   isInlineEditing, userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
   onDrill,
-  onDragStart, onContextMenu,
+  onDragStart, onContextMenu, onToggleDone,
   size = 'normal',
   wrapperStyle,
 }: Props) {
@@ -296,7 +299,18 @@ export default function Cell({
         : 1
   const targetPadPx = size === 'small' ? CELL_TEXT_INSET_SMALL_PX : CELL_TEXT_INSET_NORMAL_PX
   const textInsetPx = Math.max(0, targetPadPx - borderPx)
-  const textInsetStyle: React.CSSProperties = { inset: `${textInsetPx}px` }
+  // チェックボックス表示条件 (下の JSX と揃える)。trueの場合はテキスト上端を
+  // チェックボックス (top-2=8px + size 16px + 4px margin ≒ 28px) まで下げて
+  // 重なりを避ける。
+  const showCheckbox = !!onToggleDone && !isInlineEditing && size !== 'small' && !isCellEmpty(cell)
+  const CHECKBOX_BOTTOM_PX = 28
+  const topInsetPx = showCheckbox ? Math.max(textInsetPx, CHECKBOX_BOTTOM_PX - borderPx) : textInsetPx
+  const textInsetStyle: React.CSSProperties = {
+    top: `${topInsetPx}px`,
+    right: `${textInsetPx}px`,
+    bottom: `${textInsetPx}px`,
+    left: `${textInsetPx}px`,
+  }
 
   // 9×9 表示のセルは 3×3 表示の約 1/GRID_SIDE の幅しかないので、
   // 同じテキストが同じ行数で読めるようフォントも 1/GRID_SIDE に縮小する
@@ -332,6 +346,32 @@ export default function Cell({
       onClick={handleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, cell) } : undefined}
     >
+      {/* チェックボックス (トグル ON + 非編集中 + 3×3 サイズ + 入力ありセルのみ表示)
+          16×16 の角丸四角。チェック時は白背景 + 黒の ✓ が出る。
+          セルクリック (ドリル / 編集) と干渉させないよう onMouseDown/onClick は stopPropagation。
+          ({cell.done && ...} だと done=0 (integer) の時に React が "0" をそのまま
+          描画する罠があるので、三項演算子で null を返すか、論理反転 !!cell.done を使うこと) */}
+      {showCheckbox && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onToggleDone!(cell) }}
+          className={`absolute top-2 left-2 z-20 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+            cell.done
+              ? 'bg-black dark:bg-white border-black dark:border-white'
+              : 'bg-white dark:bg-gray-900 border-gray-400 dark:border-gray-500 hover:border-gray-700 dark:hover:border-gray-300'
+          }`}
+          title={cell.done ? 'チェック済 (クリックで解除)' : '未チェック (クリックで完了)'}
+          aria-label={cell.done ? 'done' : 'not done'}
+        >
+          {cell.done ? (
+            <svg viewBox="0 0 16 16" className="w-3 h-3 text-white dark:text-black" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 8 7 12 13 4" />
+            </svg>
+          ) : null}
+        </button>
+      )}
+
       {imageUrl && (
         <div className="absolute inset-0 overflow-hidden">
           <img src={imageUrl} alt="" className="w-full h-full object-cover" />
