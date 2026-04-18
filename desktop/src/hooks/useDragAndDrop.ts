@@ -11,16 +11,22 @@ import type { UndoOperation } from '@/store/undoStore'
  * ストックからのドロップ先として有効かどうかを判定する。
  * - セルが空でなければ不可 (既存ルール: 空セルのみ受け入れ)
  * - 中心セル (position 4) 自体は常に OK
- * - 周辺セルは、同一グリッドの中心セルが非空の場合のみ OK
- *   (中心セルが空 → 周辺は disabled、という入力バリデーションルール)
+ * - 周辺セルは、グリッドの中心セルが非空の場合のみ OK
+ *
+ * `allCells` は常に現在表示中の grid の merged 9 cells なので、position=4 で
+ * 1 意に中心が見つかる。grid_id 一致チェックは X=C 統一後の drilled child grid で
+ * merged center の grid_id が親グリッドになるため使えず、ここでは外す。
  */
 function isDroppableTarget(cell: Cell, allCells: Cell[]): boolean {
   if (!isCellEmpty(cell)) return false
   if (isCenterPosition(cell.position)) return true
-  const center = allCells.find(
-    (c) => c.grid_id === cell.grid_id && c.position === CENTER_POSITION,
-  )
+  const center = allCells.find((c) => c.position === CENTER_POSITION)
   return center != null && !isCellEmpty(center)
+}
+
+/** 2D 点 (x, y) が矩形内にあるかの判定 */
+function pointInRect(x: number, y: number, rect: DOMRect): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
 }
 
 export type DndUndoable = UndoOperation & { description: string }
@@ -118,6 +124,18 @@ export function useDragAndDrop(
   const sourceRef = useRef<DragSource | null>(null)
   const cellsRef  = useRef<Cell[]>(cells)
   cellsRef.current = cells
+  // D&D 開始時点での全セルの layout rect を固定キャッシュ。
+  // 以降の mousemove / mouseup のヒットテストはここに対して矩形内判定を行う。
+  // elementFromPoint を使うと target が transform でずれた先を拾うため、ホバー中に
+  // target がカーソル下から抜けて unhover → rehover の振動を起こしてしまう。
+  const cellLayoutRectsRef = useRef<Map<string, DOMRect>>(new Map())
+
+  function hitTestCell(x: number, y: number): string | null {
+    for (const [id, rect] of cellLayoutRectsRef.current) {
+      if (pointInRect(x, y, rect)) return id
+    }
+    return null
+  }
 
   const beginDrag = useCallback((source: DragSource, initialMeta: DragStartMeta) => {
     sourceRef.current = source
@@ -133,15 +151,24 @@ export function useDragAndDrop(
       setSourceCell(null)
       setSourceStockSnapshot(source.snapshot)
     }
+    // 全セルの layout rect をキャッシュ (この時点では transform 未適用なので layout 座標)
+    const rects = new Map<string, DOMRect>()
+    document.querySelectorAll<HTMLElement>('[data-cell-id]').forEach((el) => {
+      const id = el.dataset.cellId
+      if (id) rects.set(id, el.getBoundingClientRect())
+    })
+    cellLayoutRectsRef.current = rects
     document.body.style.cursor = 'grabbing'
 
     function onMouseMove(e: MouseEvent) {
       setDragPosition({ x: e.clientX, y: e.clientY })
 
+      // ストックドロップゾーンは位置が動かないので elementFromPoint でも OK
       const el      = document.elementFromPoint(e.clientX, e.clientY)
-      const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
       const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
-      let overCellId: string | null = cellEl?.dataset.cellId ?? null
+
+      // セルのヒットテストは layout rect cache で (transform 影響を排除)
+      let overCellId: string | null = hitTestCell(e.clientX, e.clientY)
 
       // ストック → セル: 空セル + 中心セルが非空の場合のみ有効なドロップ先としてハイライト
       if (sourceRef.current?.kind === 'stock' && overCellId) {
@@ -162,6 +189,11 @@ export function useDragAndDrop(
       document.removeEventListener('mouseup', onMouseUp)
       document.body.style.cursor = ''
 
+      // ドロップ判定は state クリア前の cellLayoutRectsRef で行う
+      const el      = document.elementFromPoint(e.clientX, e.clientY)
+      const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
+      const targetId = hitTestCell(e.clientX, e.clientY)
+
       const src = sourceRef.current
       sourceRef.current = null
       setDragSourceId(null)
@@ -171,13 +203,9 @@ export function useDragAndDrop(
       setSourceCellRect(null)
       setSourceCell(null)
       setSourceStockSnapshot(null)
+      cellLayoutRectsRef.current = new Map()
 
       if (!src) return
-
-      const el      = document.elementFromPoint(e.clientX, e.clientY)
-      const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
-      const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
-      const targetId = cellEl?.dataset.cellId ?? null
 
       if (src.kind === 'cell') {
         if (stockEl) {
