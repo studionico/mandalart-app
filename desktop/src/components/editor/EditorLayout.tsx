@@ -595,39 +595,49 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // インライン編集中なら抜けてから処理
     setInlineEditingCellId(null)
 
-    // 9×9 表示で周辺サブグリッドのセルをクリックした場合
-    // (= cell.grid_id が現在表示中のグリッドと異なる)
-    // そのサブグリッド自体にフォーカスを移す (currentGrid をサブグリッドに切替 + breadcrumb を進める)。
-    // view mode は 9×9 のまま維持されるので、そのサブグリッドが中央ブロックに表示され、
-    // その子グリッドが周辺ブロックに配置される。
+    // 9×9 表示で周辺サブブロックの cell (= cell.grid_id が現在表示 grid と異なる) をクリック。
+    // この cell は親サブグリッド S の周辺セルで、ユーザーの意図は
+    // "clicked cell を中心とした更に深いサブグリッド D にフォーカスする" (= 2 段 drill-down)。
     //
-    // 例外: 現在 grid の中心 cell は X=C 統一モデルで親 grid 所属 (cell.grid_id = parent.id)
-    // になるため、cell.grid_id !== gridData.id が true になるが、これは "別サブグリッドの cell"
-    // ではなく "自グリッドの中心" なので、以下の drill-up / home 分岐に流す必要がある。
+    // breadcrumb は root → S → D の 2 段をまとめて push する。
+    //
+    // 例外: cell.id が現在 grid の center_cell_id に一致する場合は "自グリッドの中心" なので
+    // この分岐はスキップして下の drill-up / home 分岐へ流す。
     if (gridData && cell.grid_id !== gridData.id && cell.id !== gridData.center_cell_id) {
       const subGrid = await getGrid(cell.grid_id)
       if (!subGrid) return
-      // 新モデル: subGrid の親 peripheral は subGrid.center_cell_id が指す cell
       const parentCellId = subGrid.center_cell_id
       const parentCell = gridData.cells.find((c) => c.id === parentCellId)
       if (!parentCell) return
 
-      const siblings = await getChildGrids(parentCellId)
-      const siblingIdx = siblings.findIndex((g) => g.id === subGrid.id)
+      // 空 cell は drill できない (= 何もしない、インライン編集に任せる)
+      if (isCellEmpty(cell)) return
 
-      // 9×9 表示ではサブグリッドブロック単位の orbit を再生してから状態を切替
+      // 深いサブグリッド D を取得 or 作成
+      const deeperChildren = await getChildGrids(cell.id)
+      const deeperGrid =
+        deeperChildren.length > 0
+          ? await getGrid(deeperChildren[0].id)
+          : await getGrid(
+              (await createGrid({ mandalartId, centerCellId: cell.id, sortOrder: 0 })).id,
+            )
+      const deeperSiblings =
+        deeperChildren.length > 0 ? deeperChildren : await getChildGrids(cell.id)
+      const deeperSiblingIdx = deeperSiblings.findIndex((g) => g.id === deeperGrid.id)
+
+      // アニメ: 9×9 なら clicked cell の位置 → 深い grid の中心へ orbit
       if (viewMode === '9x9') {
         const [targetSubGrids, childCountsByCellId] = await Promise.all([
-          fetchSubGridsFor(subGrid.cells),
-          fetchChildCountsFor(subGrid.cells),
+          fetchSubGridsFor(deeperGrid.cells),
+          fetchChildCountsFor(deeperGrid.cells),
         ])
         setOrbit9({
-          targetRootCells: subGrid.cells,
+          targetRootCells: deeperGrid.cells,
           targetSubGrids,
-          targetGridId: subGrid.id,
+          targetGridId: deeperGrid.id,
           childCountsByCellId,
-          movingToPosition: 4, // 周辺 (q) → 中心 (4) へ
-          movingFromPosition: parentCell.position,
+          movingToPosition: 4,
+          movingFromPosition: cell.position,
           direction: 'drill-down',
         })
         await new Promise((r) =>
@@ -635,9 +645,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         )
       }
 
-      setCurrentGrid(subGrid.id)
-      setParallelGrids(siblings.length > 0 ? siblings : [subGrid])
-      setParallelIndex(Math.max(0, siblingIdx))
+      setCurrentGrid(deeperGrid.id)
+      setParallelGrids(deeperSiblings.length > 0 ? deeperSiblings : [deeperGrid])
+      setParallelIndex(Math.max(0, deeperSiblingIdx))
+      // root → S → D の 2 段分を breadcrumb に push する
       pushBreadcrumb({
         gridId: subGrid.id,
         cellId: parentCell.id,
@@ -646,7 +657,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: gridData.cells,
         highlightPosition: parentCell.position,
       })
-      // orbit9 は auto-clear useEffect が gridData.id === subGrid.id を検知してクリア
+      pushBreadcrumb({
+        gridId: deeperGrid.id,
+        cellId: cell.id,
+        label: cell.text,
+        imagePath: cell.image_path,
+        cells: subGrid.cells,
+        highlightPosition: cell.position,
+      })
       return
     }
 
