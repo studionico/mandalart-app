@@ -140,13 +140,12 @@ function snapshotToExportNode(snap: GridSnapshot): ExportNode {
 }
 
 /**
- * Markdown 見出し形式でエクスポート。
+ * GridSnapshot → Markdown 文字列変換のピュア関数 (DB アクセスなし、テスト容易)。
  * - Level 1..6 は `#` 見出し、7 以降は箇条書き (`- `) にフォールバック
  * - 各ノードの memo は見出し直下に blockquote (`> ...`) で出力
  *   (import-parser は見出し行以外を無視するので round-trip でも安全に落ちる)
  */
-export async function exportToMarkdown(gridId: string): Promise<string> {
-  const snapshot = await exportToJSON(gridId)
+export function snapshotToMarkdown(snapshot: GridSnapshot): string {
   const root = snapshotToExportNode(snapshot)
 
   const lines: string[] = []
@@ -158,13 +157,12 @@ export async function exportToMarkdown(gridId: string): Promise<string> {
       lines.push(`${indent}- ${node.text}`)
     }
     if (node.memo && node.memo.trim() !== '') {
-      // memo の複数行は blockquote 内で `> ` を各行に前置する
       for (const memoLine of node.memo.split('\n')) {
         lines.push(`> ${memoLine}`)
       }
     }
     for (const child of node.children) {
-      if (level < 6) lines.push('') // 見出し同士は空行で区切る (Markdown 慣習)
+      if (level < 6) lines.push('')
       walk(child, level + 1)
     }
   }
@@ -172,12 +170,17 @@ export async function exportToMarkdown(gridId: string): Promise<string> {
   return lines.join('\n')
 }
 
-/**
- * インデントテキスト形式でエクスポート (2 スペースインデント)。
- * インポート側 (parseIndentText) がスペース / タブ双方に対応しているので round-trip 可能。
- */
-export async function exportToIndentText(gridId: string): Promise<string> {
+export async function exportToMarkdown(gridId: string): Promise<string> {
   const snapshot = await exportToJSON(gridId)
+  return snapshotToMarkdown(snapshot)
+}
+
+/**
+ * GridSnapshot → インデントテキスト文字列 (2 スペースインデント)。
+ * インポート側 (parseIndentText) がスペース / タブ双方に対応しているので round-trip 可能。
+ * memo は tree 構造と整合しないため省略 (完全保持が必要な場合は JSON を使う)。
+ */
+export function snapshotToIndentText(snapshot: GridSnapshot): string {
   const root = snapshotToExportNode(snapshot)
 
   const lines: string[] = []
@@ -190,6 +193,11 @@ export async function exportToIndentText(gridId: string): Promise<string> {
   }
   walk(root, 0)
   return lines.join('\n')
+}
+
+export async function exportToIndentText(gridId: string): Promise<string> {
+  const snapshot = await exportToJSON(gridId)
+  return snapshotToIndentText(snapshot)
 }
 
 export async function importFromJSON(snapshot: GridSnapshot): Promise<Mandalart> {
