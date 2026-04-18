@@ -1,19 +1,15 @@
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
 import { CONFIRM_AUTO_RESET_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
-import type { StockItem, CellSnapshot } from '@/types'
+import type { StockItem } from '@/types'
 
 type Props = {
   onPaste: (item: StockItem) => void
   isOverStock?: boolean
   reloadKey?: number
-  onItemDragStart?: (
-    itemId: string,
-    snapshot: CellSnapshot | null,
-    meta: { rect: DOMRect; x: number; y: number; element: HTMLElement },
-  ) => void
+  onItemDragStart?: (itemId: string) => void
   dragSourceId?: string | null
 }
 
@@ -75,9 +71,6 @@ export default function StockTab({
     }
   }
 
-  // 各 stock item の DOM を参照するための ref マップ (ドラッグ開始時の rect 取得用)
-  const itemRefs = useRef<Map<string, HTMLElement>>(new Map())
-
   function handleItemMouseDown(e: React.MouseEvent, itemId: string) {
     if (e.button !== 0) return
     // ボタン上でのクリックはドラッグ開始しない
@@ -93,12 +86,7 @@ export default function StockTab({
       if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
-        const el = itemRefs.current.get(itemId)
-        const rect = el?.getBoundingClientRect()
-        const item = items.find((it) => it.id === itemId)
-        if (rect && el) {
-          onItemDragStart?.(itemId, item?.snapshot ?? null, { rect, x: e2.clientX, y: e2.clientY, element: el })
-        }
+        onItemDragStart?.(itemId)
       }
     }
     function onUp() {
@@ -154,31 +142,18 @@ export default function StockTab({
           {items.map((item) => {
             const isSourceDragging = dragSourceId === `stock:${item.id}`
             const text = item.snapshot.cell.text || '（テキストなし）'
-            // 「意味のあるサブグリッド」= snapshot の children に含まれる grid の
-            // いずれかに、テキスト or 画像を持つセルがある状態。
-            // GridView9x9 の border-black 判定と意味を揃える: 周辺セルに入力がある grid がぶら下がっていれば "drilled grid あり"。
-            const hasDrilledContent = item.snapshot.children.some((g) =>
-              g.cells.some((c) => (c.text?.trim() ?? '') !== '' || c.image_path !== null),
-            )
-            const borderClass = hasDrilledContent
-              ? 'border-2 border-black dark:border-white'
-              : 'border-2 border-gray-300 dark:border-gray-700'
             return (
               <div
                 key={item.id}
-                ref={(el) => {
-                  if (el) itemRefs.current.set(item.id, el)
-                  else itemRefs.current.delete(item.id)
-                }}
                 onMouseDown={(e) => handleItemMouseDown(e, item.id)}
                 className={`
                   relative w-[80px] h-[80px] bg-white dark:bg-gray-900
-                  ${borderClass} rounded-xl
+                  border-2 border-black dark:border-white rounded-xl
                   shadow-sm hover:shadow-md transition-shadow
                   cursor-grab active:cursor-grabbing select-none
                   group overflow-hidden
+                  ${isSourceDragging ? 'opacity-40' : ''}
                 `}
-                style={isSourceDragging ? { visibility: 'hidden' } : undefined}
                 title={text}
               >
                 <div

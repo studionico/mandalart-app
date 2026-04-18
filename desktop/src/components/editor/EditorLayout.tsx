@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
 import { useClipboardStore } from '@/store/clipboardStore'
@@ -41,7 +41,6 @@ import {
   ANIM_STAGGER_MS,
   SLIDE_DURATION_MS as SLIDE_MS,
   VIEW_SWITCH_TO_9_DELAY_MS as VIEW_SWITCH_TO_9_DELAY,
-  DRAG_WOBBLE_PERIOD_MS,
 } from '@/constants/timing'
 import {
   GRID_SIZE_CHANGE_THRESHOLD_PX,
@@ -214,39 +213,29 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    * 「意味のある子グリッド」= 周辺セル (position != 4) に 1 つでも入力 (text または画像) が
    * あるサブグリッド。ドリル直後にセンターだけ自動コピーされただけの状態はカウントしない。
    * Cell 側の border 表示 (border-2 black = サブグリッドあり) で参照される。
-   *
-   * 以前は cells ごとに別々の SELECT を Promise.all で走らせていたが、セル数 (9〜81) に
-   * 比例してラウンドトリップが増え、見た目 "枠が遅れて出てくる" ラグの主因になっていた。
-   * 今は 1 発の IN (...) クエリに統合してバッチ取得する。
    */
   async function fetchChildCountsFor(cells: Cell[]): Promise<Map<string, number>> {
-    const map = new Map<string, number>()
-    if (cells.length === 0) return map
-    // 全 cell の id を初期値 0 でマップに入れておく (クエリで hit しないセルが欠落しないよう)
-    for (const c of cells) map.set(c.id, 0)
-
     const { query } = await import('@/lib/db')
-    const cellIds = cells.map((c) => c.id)
-    const placeholders = cellIds.map(() => '?').join(',')
-    // 自グリッド参照 (root center cell が自分のグリッドを center にしているケース) は除外するため、
-    // HAVING で drilled 判定に使う。cells テーブル自体を 2 回参照するが、インデックスが効く。
-    const rows = await query<{ cell_id: string; cnt: number }>(
-      `SELECT g.center_cell_id AS cell_id, COUNT(DISTINCT g.id) AS cnt
-       FROM grids g
-       JOIN cells self_cell ON self_cell.id = g.center_cell_id
-       JOIN cells sub ON sub.grid_id = g.id
-       WHERE g.center_cell_id IN (${placeholders})
-         AND g.id != self_cell.grid_id
-         AND g.deleted_at IS NULL
-         AND sub.position != 4
-         AND sub.deleted_at IS NULL
-         AND (sub.text != '' OR sub.image_path IS NOT NULL)
-       GROUP BY g.center_cell_id`,
-      cellIds,
+    const map = new Map<string, number>()
+    await Promise.all(
+      cells.map(async (c) => {
+        // 新モデル (X=C 統一): ドリル先 grid は center_cell_id = this cell の行。
+        // 自グリッド (root での自己参照) は除外するため id != cell.grid_id を条件に入れる。
+        const rows = await query<{ cnt: number }>(
+          `SELECT COUNT(DISTINCT g.id) AS cnt
+           FROM grids g
+           JOIN cells sub ON sub.grid_id = g.id
+           WHERE g.center_cell_id = ?
+             AND g.id != ?
+             AND g.deleted_at IS NULL
+             AND sub.position != 4
+             AND sub.deleted_at IS NULL
+             AND (sub.text != '' OR sub.image_path IS NOT NULL)`,
+          [c.id, c.grid_id],
+        )
+        map.set(c.id, rows[0]?.cnt ?? 0)
+      }),
     )
-    for (const r of rows) {
-      map.set(r.cell_id, r.cnt)
-    }
     return map
   }
 
@@ -388,16 +377,40 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           highlightPosition: null,
         })
 
-        // 初回表示は即時描画 (initial orbit アニメーションは廃止)。
-        // 以前はダッシュボード→エディタ遷移時に中心→周辺の fade-in 演出を入れていたが、
-        // useGrid の gridData ロードと setOrbit の間に「アニメなしのベアグリッドが一瞬見える」
-        // フラッシュが発生しており、演出のメリットよりも違和感が勝っていた。
-        // childCounts はバッチクエリで即取得して反映する (外枠遅延もなくなる)。
+        // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in
+        // 現在の viewMode に合わせて 3×3 (セル単位) か 9×9 (サブグリッド単位) のどちらかを発火
         const childCountsByCellId = await fetchChildCountsFor(cells)
-        setChildCounts(childCountsByCellId)
         if (viewMode === '9x9') {
           const targetSubGrids = await fetchSubGridsFor(cells)
+          setOrbit9({
+            targetRootCells: cells,
+            targetSubGrids,
+            targetGridId: root.id,
+            childCountsByCellId,
+            movingToPosition: null, // 移動ブロックなし
+            movingFromPosition: 4, // 未使用
+            direction: 'initial',
+          })
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          setChildCounts(childCountsByCellId)
           setSubGrids(targetSubGrids)
+          setOrbit9(null)
+        } else {
+          setOrbit({
+            targetCells: cells,
+            targetGridId: root.id,
+            childCountsByCellId,
+            movingCellId: null,
+            movingFromPosition: 4, // 未使用 (moving cell なし)
+            direction: 'initial',
+          })
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          setChildCounts(childCountsByCellId)
+          setOrbit(null)
         }
       } catch (e) {
         console.error('EditorLayout init error:', e)
@@ -485,7 +498,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const {
     dragSourceId, dragOverId, isOverStock, isDragging,
     handleDragStart, handleStockItemDragStart,
-    dragPosition, sourceCellRect, sourceElement, dragGrabOffset,
   } = useDragAndDrop(
     dndCells,
     reloadAll,
@@ -826,9 +838,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   // インライン編集の開始 (シングルクリック)
-  const handleCellStartInlineEdit = useCallback((cell: Cell) => {
+  function handleCellStartInlineEdit(cell: Cell) {
     setInlineEditingCellId(cell.id)
-  }, [])
+  }
 
   // インライン編集の確定 (blur / Esc / Tab / Cmd+Enter)
   async function handleCellCommitInlineEdit(cell: Cell, text: string) {
@@ -1267,59 +1279,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setToast({ message: `エクスポートに失敗: ${(e as Error).message}`, type: 'error' })
     }
   }
-
-  // Cell に渡すコールバック群の参照を安定化する (React.memo を有効化するため)。
-  // latest-ref パターン: 毎レンダで最新の handler を ref に書き戻し、安定な stable wrapper
-  // 経由で呼び出す。これで Cell の props は参照等価で、親の無関係な state 変化で Cell が
-  // 再描画されなくなる (handler 自体は常に最新のクロージャを呼ぶので stale closure 問題なし)。
-  const handlersRef = useRef({
-    handleCellDrill,
-    handleSaveCell,
-    handleCellStartInlineEdit,
-    handleCellCommitInlineEdit,
-    handleCellInlineNavigate,
-    handleContextMenu,
-    handleToggleDone,
-  })
-  handlersRef.current = {
-    handleCellDrill,
-    handleSaveCell,
-    handleCellStartInlineEdit,
-    handleCellCommitInlineEdit,
-    handleCellInlineNavigate,
-    handleContextMenu,
-    handleToggleDone,
-  }
-  const stableOnDrill = useCallback(
-    (cell: Cell) => handlersRef.current.handleCellDrill(cell),
-    [],
-  )
-  const stableOnCellSave = useCallback(
-    (cellId: string, params: { text: string; image_path: string | null; color: string | null }) =>
-      handlersRef.current.handleSaveCell(cellId, params),
-    [],
-  )
-  const stableOnStartInlineEdit = useCallback(
-    (cell: Cell) => handlersRef.current.handleCellStartInlineEdit(cell),
-    [],
-  )
-  const stableOnCommitInlineEdit = useCallback(
-    (cell: Cell, text: string) => handlersRef.current.handleCellCommitInlineEdit(cell, text),
-    [],
-  )
-  const stableOnInlineNavigate = useCallback(
-    (pos: number, text: string, reverse: boolean) =>
-      handlersRef.current.handleCellInlineNavigate(pos, text, reverse),
-    [],
-  )
-  const stableOnContextMenu = useCallback(
-    (e: React.MouseEvent, cell: Cell) => handlersRef.current.handleContextMenu(e, cell),
-    [],
-  )
-  const stableOnToggleDone = useCallback(
-    (cell: Cell) => handlersRef.current.handleToggleDone(cell),
-    [],
-  )
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 overflow-hidden">
@@ -2107,15 +2066,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       inlineEditingCellId={inlineEditingCellId}
                       userId={userId}
                       mandalartId={mandalartId}
-                      onCellSave={stableOnCellSave}
-                      onStartInlineEdit={stableOnStartInlineEdit}
-                      onCommitInlineEdit={stableOnCommitInlineEdit}
-                      onInlineNavigate={stableOnInlineNavigate}
-                      onDrill={stableOnDrill}
+                      onCellSave={handleSaveCell}
+                      onStartInlineEdit={handleCellStartInlineEdit}
+                      onCommitInlineEdit={handleCellCommitInlineEdit}
+                      onInlineNavigate={handleCellInlineNavigate}
+                      onDrill={handleCellDrill}
                       onDragStart={handleDragStart}
-                      onContextMenu={stableOnContextMenu}
-                      onToggleDone={showCheckbox ? stableOnToggleDone : undefined}
-                      sourceCellRect={sourceCellRect}
+                      onContextMenu={handleContextMenu}
+                      onToggleDone={showCheckbox ? handleToggleDone : undefined}
                     />
                   )}
                   {gridData && viewMode === '9x9' && gridSize > 0 && (
@@ -2249,78 +2207,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           onClose={() => setToast(null)}
         />
       )}
-
-      {/* D&D ゴースト: マウスに追従して揺れる。
-          ソース DOM 要素を cloneNode して描画することで、フォントウェイト・境界・色・
-          テキスト配置などセルそのままの見た目を完全再現する。
-          position: fixed + pointerEvents: none で判定イベントを通過させる。 */}
-      {isDragging && dragPosition && sourceElement && dragGrabOffset && (
-        <DragGhost
-          element={sourceElement}
-          x={dragPosition.x}
-          y={dragPosition.y}
-          offsetX={dragGrabOffset.x}
-          offsetY={dragGrabOffset.y}
-          width={sourceCellRect?.width}
-          height={sourceCellRect?.height}
-        />
-      )}
     </div>
-  )
-}
-
-/**
- * ドラッグゴースト: source 要素を cloneNode して position:fixed で描画する。
- * `offsetX` / `offsetY` は grab 時点のセル内オフセット。
- * これを使ってマウスカーソルがセル内の掴んだ位置のままになるよう配置する
- * (translate(-50%, -50%) でセル中心をカーソルに合わせる方式だと、左上や中央に
- *  スナップして不自然に見える)。
- */
-function DragGhost({
-  element, x, y, offsetX, offsetY, width, height,
-}: {
-  element: HTMLElement
-  x: number
-  y: number
-  offsetX: number
-  offsetY: number
-  width?: number
-  height?: number
-}) {
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  React.useLayoutEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    const clone = element.cloneNode(true) as HTMLElement
-    // 元の visibility:hidden (source が隠れている状態) を無効化
-    clone.style.visibility = 'visible'
-    clone.style.width = `${width ?? element.getBoundingClientRect().width}px`
-    clone.style.height = `${height ?? element.getBoundingClientRect().height}px`
-    clone.style.margin = '0'
-    clone.style.position = 'static'
-    clone.style.pointerEvents = 'none'
-    container.innerHTML = ''
-    container.appendChild(clone)
-  }, [element, width, height])
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        // 掴んだ位置をカーソルに合わせる (cursor = 元セル内の offset 位置)
-        left: x - offsetX,
-        top: y - offsetY,
-        pointerEvents: 'none',
-        zIndex: 9999,
-        width: width ?? 80,
-        height: height ?? 80,
-        animation: `drag-wobble ${DRAG_WOBBLE_PERIOD_MS}ms ease-in-out infinite`,
-        // drag-wobble は rotate のみ。origin を掴んだ点にしておくとブレない
-        transformOrigin: `${offsetX}px ${offsetY}px`,
-        // 浮遊感を出すための影
-        filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))',
-      }}
-      ref={containerRef}
-    />
   )
 }

@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
 import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
 import { CLICK_DELAY_MS } from '@/constants/timing'
@@ -28,14 +28,8 @@ type Props = {
   onCommitInlineEdit: (cell: CellType, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: CellType) => void
-  onDragStart?: (cell: CellType, meta: { rect: DOMRect; x: number; y: number; element: HTMLElement }) => void
+  onDragStart?: (cell: CellType) => void
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
-  /**
-   * D&D 中のソースセルの元位置 (画面座標)。非 null のときで isDragOver=true の
-   * セルは、自分のいる位置からソース元位置へ transform で "swap 予告" 移動する。
-   * ストック由来ドラッグでは null (= 移動しない)。
-   */
-  sourceCellRect?: DOMRect | null
   /** 指定すると左上にチェックボックスを表示。指定なしなら非表示 (= 機能 OFF / size='small' / アニメ中)。 */
   onToggleDone?: (cell: CellType) => void
   size?: 'normal' | 'small'
@@ -46,7 +40,7 @@ type Props = {
 const DRAG_THRESHOLD = 5   // ドラッグ判定の移動距離（px）
 const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
 
-function CellImpl({
+export default function Cell({
   cell, isCenter, isDisabled, isCut, isDragSource, isDragOver, childCount, fontScale,
   isInlineEditing, userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
@@ -54,7 +48,6 @@ function CellImpl({
   onDragStart, onContextMenu, onToggleDone,
   size = 'normal',
   wrapperStyle,
-  sourceCellRect,
 }: Props) {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
@@ -204,12 +197,7 @@ function CellImpl({
         didDrag.current = true
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup',   onUp)
-        // ドラッグゴーストの初期位置 / ターゲットの swap 予告計算 / cloneNode 用に DOM 要素を渡す
-        const el = cellRef.current
-        const rect = el?.getBoundingClientRect()
-        if (rect && el) {
-          onDragStart?.(cell, { rect, x: e2.clientX, y: e2.clientY, element: el })
-        }
+        onDragStart?.(cell)
       }
     }
 
@@ -329,57 +317,12 @@ function CellImpl({
   const baseFontPx = size === 'small' ? CELL_BASE_FONT_PX / GRID_SIDE : CELL_BASE_FONT_PX
   const fontStyle: React.CSSProperties = { fontSize: `${baseFontPx * fontScale}px`, lineHeight: 1.25 }
 
-  // D&D アニメーション用の計算。
-  // - isDragSource: マウス追従ゴーストが別途描画されるので本体は visibility:hidden
-  //   (レイアウトは占有したままスペースを残し、target が swap 予告で動く先を維持)
-  // - isDragOver && sourceCellRect: 自分の位置からソース元位置へ transform でスライド
-  //   (ホバー解除時は transform=0 へ遷移して元に戻る)
-  //
-  // 自セルの "layout 位置" (transform 適用前の getBoundingClientRect) を drag 開始時に 1 回
-  // キャッシュする。getBoundingClientRect は現在の transform を反映するため、ホバー中の
-  // 再レンダで読み取ると「もう source 位置にある」と誤認して translate(0) に縮退するバグを
-  // 避ける。drag が終わったら破棄する (次回 drag で再キャプチャ)。
-  const ownLayoutRectRef = useRef<DOMRect | null>(null)
-  useLayoutEffect(() => {
-    if (sourceCellRect) {
-      if (!ownLayoutRectRef.current && cellRef.current) {
-        ownLayoutRectRef.current = cellRef.current.getBoundingClientRect()
-      }
-    } else {
-      ownLayoutRectRef.current = null
-    }
-  }, [sourceCellRect])
-
-  // transition 自体は `.drag-target-shifting` クラスで `!important` 付きで定義する。
-  // Tailwind の transition-shadow / transition-colors が同じ要素に付いていて
-  // transition-property が上書きされる可能性があるため、インライン style より確実。
-  // 参考: desktop/src/index.css の drag-target-shifting ルール
-  const dragStyle: React.CSSProperties = {}
-  let dragClass = ''
-  if (isDragSource) {
-    dragStyle.visibility = 'hidden'
-  } else if (isDragOver && sourceCellRect) {
-    const own = ownLayoutRectRef.current ?? cellRef.current?.getBoundingClientRect()
-    if (own) {
-      const dx = sourceCellRect.left - own.left
-      const dy = sourceCellRect.top - own.top
-      dragStyle.transform = `translate(${dx}px, ${dy}px)`
-      dragStyle.zIndex = 5
-      dragClass = 'drag-target-shifting'
-    }
-  } else if (sourceCellRect) {
-    // ドラッグ中だが自分はホバーされていない → 元位置へスムーズに戻る
-    dragStyle.transform = 'translate(0, 0)'
-    dragClass = 'drag-target-shifting'
-  }
-
   return (
     <div
       ref={cellRef}
       data-cell-id={cell.id}
-      style={{ ...wrapperStyle, ...dragStyle }}
+      style={wrapperStyle}
       className={`
-        ${dragClass}
         relative select-none overflow-hidden
         min-h-0 min-w-0
         transition-shadow transition-colors
@@ -395,8 +338,8 @@ function CellImpl({
               : 'rounded-lg border border-gray-300 dark:border-gray-700 shadow-sm'
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
-        ${isCut ? 'opacity-40' : ''}
-        ${isDragOver && !isDisabled && !sourceCellRect ? 'bg-gray-50! dark:bg-gray-950!' : ''}
+        ${isCut || isDragSource ? 'opacity-40' : ''}
+        ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         group
       `}
       onMouseDown={handleMouseDown}
@@ -550,12 +493,3 @@ function CellImpl({
     </div>
   )
 }
-
-/**
- * React.memo でラップして、親 (GridView3x3 / EditorLayout) が無関係な state 変更で
- * 再描画しても、Cell 自身の props が参照的に変化していなければ再計算しないようにする。
- * callback props が不安定だと memoize は機能しないので、呼び出し側 (EditorLayout) で
- * useCallback による参照安定化を合わせて行う必要がある (useEvent 的な stable ref パターン
- * を併用するのが理想)。
- */
-export default memo(CellImpl)

@@ -87,21 +87,3 @@ html {
   from { opacity: 1; }
   to   { opacity: 0; }
 }
-
-/* D&D ドラッグ中のマウス追従ゴーストの揺れ。
-   rotate のみを担当し、位置決め (translate -50% -50% など) は外側 wrapper に任せる
-   ことで、外側 translate との干渉を避ける。 */
-@keyframes drag-wobble {
-  0%   { transform: rotate(-3deg); }
-  50%  { transform: rotate(3deg); }
-  100% { transform: rotate(-3deg); }
-}
-
-/* D&D 中にターゲットセルがソース位置へスライドする / ホバー解除で戻るときの transition。
-   Tailwind の transition-shadow / transition-colors が同要素に付いているので、
-   `!important` で確実に transform の transition を優先する。
-   インライン style で transform 値を設定することで値の切替 (translate(0,0) ↔ translate(dx,dy))
-   をハンドリングする。 */
-.drag-target-shifting {
-  transition: transform 700ms ease-in-out !important;
-}
