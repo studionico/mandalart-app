@@ -46,7 +46,7 @@ type SlideState = {
 
 - `parallelGrids` / `parallelIndex` の state は **animation の前** に切り替える (setCurrentGrid 含む)。アニメは純粋に視覚エフェクト
 - `handleParallelNav` / `handleAddParallel` で `breadcrumb` 末尾の `gridId` を追従させる (パンくずリスト末尾ラベルの同期用)
-- `handleAddParallel` は新グリッドの中心セルに現グリッドの中心セル内容を自動コピーする。アニメーション用の `toCells` にも反映させる必要がある (`newGrid.cells` は古い値のため)
+- `handleAddParallel` は新グリッドを元グリッドと同じ `center_cell_id` で作成する (X=C 統一モデル)。中心セルは DB レベルで親 X と共有されるので別途コピー不要。アニメ用の `toCells` は `getGrid` で merged された 9 要素の `newGrid.cells` をそのまま使える
 
 ---
 

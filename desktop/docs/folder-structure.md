@@ -33,7 +33,9 @@ src-tauri/
 │   └── main.rs               # エントリーポイント (lib::run() を呼ぶだけ)
 ├── migrations/
 │   ├── 001_initial.sql       # SQLite 初期スキーマ (FK 制約なし)
-│   └── 002_soft_delete.sql   # deleted_at カラム + インデックス追加
+│   ├── 002_soft_delete.sql   # deleted_at カラム + インデックス追加
+│   ├── 003_cell_done.sql     # cells.done カラム (チェックボックス機能)
+│   └── 004_unify_center.sql  # X と C の統一: parent_cell_id → center_cell_id, mandalarts.root_cell_id 追加 (全テーブル DROP & CREATE)
 ├── capabilities/
 │   └── default.json          # フロントエンドへの権限付与設定
 ├── icons/                    # アプリアイコン

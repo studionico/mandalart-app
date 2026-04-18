@@ -295,7 +295,7 @@ Shift+Tab は逆順
   - 中心セル: `border-[6px] border-black` (黒 6px)
   - 周辺セル (子グリッドあり): `border-2 border-black` (黒 2px)
   - 周辺セル (子グリッドなし): `border border-gray-300` (極細グレー)
-  - 「子グリッドあり」の判定は「子グリッドが存在する」ではなく「子グリッドの**周辺セルに入力がある**」。`fetchChildCountsFor` の SQL で `position != 4 AND (text != '' OR image_path IS NOT NULL)` を条件に `COUNT(DISTINCT grid_id)` を返している。ドリル直後の中心セル自動コピーだけの状態では border は細いまま
+  - 「子グリッドあり」の判定は「子グリッドが存在する」ではなく「子グリッドの**周辺セルに入力がある**」。`fetchChildCountsFor` の SQL で `position != 4 AND (text != '' OR image_path IS NOT NULL)` を条件に `COUNT(DISTINCT grid_id)` を返している。X=C 統一モデルでは drill 先 grid の中心は親セル (X) を共有するので DB に行が無く、ドリル直後は 8 peripherals が全部空 → border は細いまま
   - セル間の余白 (gap) なし。セル同士は隣接して並ぶ
   - 中心セルが空でも周辺セルの見た目は変化しない (以前のグレーアウト挙動は廃止)
 - **9×9 表示**
@@ -331,7 +331,10 @@ Shift+Tab は逆順
 - **戻るボタン `<`**: グリッド左側。`parallelIndex > 0` の場合のみ表示
 - **進むボタン `>`**: グリッド右側。次の並列グリッドが存在する場合のみ表示 (末尾の場合は `+` に切替)
 - **旧 UI 廃止**: 画面上部の `1/2` 表示と下部の「+ 新しいグリッドを追加」ボタンは撤去済み
-- **空グリッドの自動削除**: 離脱時 (並列切替 / パンくず / ホーム) に中心セルが空のグリッドは `cleanupGridIfCenterEmpty` で soft-delete される。最後の子グリッドだった場合はドリル元の親セルも連動して空にする
+- **空グリッドの自動削除**: 離脱時 (並列切替 / パンくず / ホーム) に `cleanupGridIfEmpty` ([`EditorLayout.tsx`](../src/components/editor/EditorLayout.tsx)) が呼ばれ、グリッド種別ごとに以下を判定する:
+  - **self-centered な root grid** (center_cell が自グリッドに属する) — 中心セル空なら soft-delete
+  - **非 self-centered (drilled / 並列) で他に兄弟がある場合** — 周辺 8 セルが全て空なら soft-delete (X=C 統一モデルでは中心は親 X と共有で空にできないため、周辺基準で判定する)
+  - **非 self-centered で兄弟が自分 1 つだけ** — 自動削除しない ("drill してすぐ戻っただけ" のケースで親 X の内容が消えないようにするため)
 
 ### アニメーション
 

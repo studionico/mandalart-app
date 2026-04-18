@@ -143,8 +143,10 @@ swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void>
 // copyCellSubtree で内容とサブツリーを複製し、cut モードなら source を論理削除
 pasteCell(sourceCellId: string, targetCellId: string, mode: 'cut' | 'copy'): Promise<void>
 
-// sourceCellId のサブツリーを targetCellId 配下に再帰的にコピー
-// 中心セル同士のコピー時は「中心セル = 自分がテーマとしているグリッド全体」と解釈してグリッド丸ごと複製
+// sourceCellId のサブツリーを targetCellId 配下に再帰的にコピー。
+// 新モデル (X=C 統一): `SELECT ... FROM grids WHERE center_cell_id = ?` で source の
+// サブツリーを列挙するので、source が root 中心セルなら所属 grid 自体も subtree に含まれ、
+// 結果として "グリッド丸ごと複製" が自動的に実現される (旧モデルの特殊分岐は廃止)。
 copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
 ```
 

@@ -63,7 +63,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
                       ↘ lib/sync/ → Supabase (REST + Realtime)
 ```
 
-- **データモデル**: `mandalarts → grids → cells` の再帰階層。FK 制約なし (後述)。`deleted_at` でソフトデリート
+- **データモデル**: `mandalarts → grids → cells` の再帰階層。FK 制約なし (後述)。`deleted_at` でソフトデリート。**子グリッドは自身の中心セル行を持たず** `grids.center_cell_id` で親グリッドの drill 元 cell を共有する (X=C 統一、migration 004)。並列ルートは `mandalarts.root_cell_id` を共有
 - **同期**: `lib/sync/` で last-write-wins (updated_at 比較)、`lib/realtime.ts` で postgres_changes 購読
 - **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore`)
 - **ルーティング**: HashRouter — `/dashboard`, `/mandalart/:id`。認証ガードなし (ローカル専用モードで全機能使える)
