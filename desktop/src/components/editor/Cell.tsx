@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
 import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
 import { CLICK_DELAY_MS } from '@/constants/timing'
@@ -46,7 +46,7 @@ type Props = {
 const DRAG_THRESHOLD = 5   // ドラッグ判定の移動距離（px）
 const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
 
-export default function Cell({
+function CellImpl({
   cell, isCenter, isDisabled, isCut, isDragSource, isDragOver, childCount, fontScale,
   isInlineEditing, userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
@@ -396,7 +396,7 @@ export default function Cell({
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut ? 'opacity-40' : ''}
-        ${isDragOver && !isDisabled && !sourceCellRect ? '!bg-gray-50 dark:!bg-gray-950' : ''}
+        ${isDragOver && !isDisabled && !sourceCellRect ? 'bg-gray-50! dark:bg-gray-950!' : ''}
         group
       `}
       onMouseDown={handleMouseDown}
@@ -550,3 +550,12 @@ export default function Cell({
     </div>
   )
 }
+
+/**
+ * React.memo でラップして、親 (GridView3x3 / EditorLayout) が無関係な state 変更で
+ * 再描画しても、Cell 自身の props が参照的に変化していなければ再計算しないようにする。
+ * callback props が不安定だと memoize は機能しないので、呼び出し側 (EditorLayout) で
+ * useCallback による参照安定化を合わせて行う必要がある (useEvent 的な stable ref パターン
+ * を併用するのが理想)。
+ */
+export default memo(CellImpl)

@@ -840,9 +840,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   // インライン編集の開始 (シングルクリック)
-  function handleCellStartInlineEdit(cell: Cell) {
+  const handleCellStartInlineEdit = useCallback((cell: Cell) => {
     setInlineEditingCellId(cell.id)
-  }
+  }, [])
 
   // インライン編集の確定 (blur / Esc / Tab / Cmd+Enter)
   async function handleCellCommitInlineEdit(cell: Cell, text: string) {
@@ -1281,6 +1281,59 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setToast({ message: `エクスポートに失敗: ${(e as Error).message}`, type: 'error' })
     }
   }
+
+  // Cell に渡すコールバック群の参照を安定化する (React.memo を有効化するため)。
+  // latest-ref パターン: 毎レンダで最新の handler を ref に書き戻し、安定な stable wrapper
+  // 経由で呼び出す。これで Cell の props は参照等価で、親の無関係な state 変化で Cell が
+  // 再描画されなくなる (handler 自体は常に最新のクロージャを呼ぶので stale closure 問題なし)。
+  const handlersRef = useRef({
+    handleCellDrill,
+    handleSaveCell,
+    handleCellStartInlineEdit,
+    handleCellCommitInlineEdit,
+    handleCellInlineNavigate,
+    handleContextMenu,
+    handleToggleDone,
+  })
+  handlersRef.current = {
+    handleCellDrill,
+    handleSaveCell,
+    handleCellStartInlineEdit,
+    handleCellCommitInlineEdit,
+    handleCellInlineNavigate,
+    handleContextMenu,
+    handleToggleDone,
+  }
+  const stableOnDrill = useCallback(
+    (cell: Cell) => handlersRef.current.handleCellDrill(cell),
+    [],
+  )
+  const stableOnCellSave = useCallback(
+    (cellId: string, params: { text: string; image_path: string | null; color: string | null }) =>
+      handlersRef.current.handleSaveCell(cellId, params),
+    [],
+  )
+  const stableOnStartInlineEdit = useCallback(
+    (cell: Cell) => handlersRef.current.handleCellStartInlineEdit(cell),
+    [],
+  )
+  const stableOnCommitInlineEdit = useCallback(
+    (cell: Cell, text: string) => handlersRef.current.handleCellCommitInlineEdit(cell, text),
+    [],
+  )
+  const stableOnInlineNavigate = useCallback(
+    (pos: number, text: string, reverse: boolean) =>
+      handlersRef.current.handleCellInlineNavigate(pos, text, reverse),
+    [],
+  )
+  const stableOnContextMenu = useCallback(
+    (e: React.MouseEvent, cell: Cell) => handlersRef.current.handleContextMenu(e, cell),
+    [],
+  )
+  const stableOnToggleDone = useCallback(
+    (cell: Cell) => handlersRef.current.handleToggleDone(cell),
+    [],
+  )
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 overflow-hidden">
@@ -2068,14 +2121,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       inlineEditingCellId={inlineEditingCellId}
                       userId={userId}
                       mandalartId={mandalartId}
-                      onCellSave={handleSaveCell}
-                      onStartInlineEdit={handleCellStartInlineEdit}
-                      onCommitInlineEdit={handleCellCommitInlineEdit}
-                      onInlineNavigate={handleCellInlineNavigate}
-                      onDrill={handleCellDrill}
+                      onCellSave={stableOnCellSave}
+                      onStartInlineEdit={stableOnStartInlineEdit}
+                      onCommitInlineEdit={stableOnCommitInlineEdit}
+                      onInlineNavigate={stableOnInlineNavigate}
+                      onDrill={stableOnDrill}
                       onDragStart={handleDragStart}
-                      onContextMenu={handleContextMenu}
-                      onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                      onContextMenu={stableOnContextMenu}
+                      onToggleDone={showCheckbox ? stableOnToggleDone : undefined}
                       sourceCellRect={sourceCellRect}
                     />
                   )}
