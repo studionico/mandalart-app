@@ -64,17 +64,20 @@ export async function getChildGrids(parentCellId: string): Promise<Grid[]> {
  *   を merge して 9 要素にする
  */
 export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
-  const grids = await query<Grid>(
-    'SELECT * FROM grids WHERE id = ? AND deleted_at IS NULL',
-    [id],
-  )
+  // grids 本体と自 grid 所属の cells は互いに独立してクエリできるので Promise.all で並列化
+  // (この関数は drill や画面遷移の critical path にいるので、ラウンドトリップを 1 本減らす)
+  const [grids, ownCells] = await Promise.all([
+    query<Grid>(
+      'SELECT * FROM grids WHERE id = ? AND deleted_at IS NULL',
+      [id],
+    ),
+    query<Cell>(
+      'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
+      [id],
+    ),
+  ])
   const grid = grids[0]
   if (!grid) throw new Error(`Grid not found: ${id}`)
-
-  const ownCells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
-    [id],
-  )
 
   // center cell が自 grid に含まれているか確認 (root なら含まれる、子なら含まれない)
   const hasCenter = ownCells.some((c) => c.id === grid.center_cell_id)
