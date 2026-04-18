@@ -214,29 +214,39 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    * 「意味のある子グリッド」= 周辺セル (position != 4) に 1 つでも入力 (text または画像) が
    * あるサブグリッド。ドリル直後にセンターだけ自動コピーされただけの状態はカウントしない。
    * Cell 側の border 表示 (border-2 black = サブグリッドあり) で参照される。
+   *
+   * 以前は cells ごとに別々の SELECT を Promise.all で走らせていたが、セル数 (9〜81) に
+   * 比例してラウンドトリップが増え、見た目 "枠が遅れて出てくる" ラグの主因になっていた。
+   * 今は 1 発の IN (...) クエリに統合してバッチ取得する。
    */
   async function fetchChildCountsFor(cells: Cell[]): Promise<Map<string, number>> {
-    const { query } = await import('@/lib/db')
     const map = new Map<string, number>()
-    await Promise.all(
-      cells.map(async (c) => {
-        // 新モデル (X=C 統一): ドリル先 grid は center_cell_id = this cell の行。
-        // 自グリッド (root での自己参照) は除外するため id != cell.grid_id を条件に入れる。
-        const rows = await query<{ cnt: number }>(
-          `SELECT COUNT(DISTINCT g.id) AS cnt
-           FROM grids g
-           JOIN cells sub ON sub.grid_id = g.id
-           WHERE g.center_cell_id = ?
-             AND g.id != ?
-             AND g.deleted_at IS NULL
-             AND sub.position != 4
-             AND sub.deleted_at IS NULL
-             AND (sub.text != '' OR sub.image_path IS NOT NULL)`,
-          [c.id, c.grid_id],
-        )
-        map.set(c.id, rows[0]?.cnt ?? 0)
-      }),
+    if (cells.length === 0) return map
+    // 全 cell の id を初期値 0 でマップに入れておく (クエリで hit しないセルが欠落しないよう)
+    for (const c of cells) map.set(c.id, 0)
+
+    const { query } = await import('@/lib/db')
+    const cellIds = cells.map((c) => c.id)
+    const placeholders = cellIds.map(() => '?').join(',')
+    // 自グリッド参照 (root center cell が自分のグリッドを center にしているケース) は除外するため、
+    // HAVING で drilled 判定に使う。cells テーブル自体を 2 回参照するが、インデックスが効く。
+    const rows = await query<{ cell_id: string; cnt: number }>(
+      `SELECT g.center_cell_id AS cell_id, COUNT(DISTINCT g.id) AS cnt
+       FROM grids g
+       JOIN cells self_cell ON self_cell.id = g.center_cell_id
+       JOIN cells sub ON sub.grid_id = g.id
+       WHERE g.center_cell_id IN (${placeholders})
+         AND g.id != self_cell.grid_id
+         AND g.deleted_at IS NULL
+         AND sub.position != 4
+         AND sub.deleted_at IS NULL
+         AND (sub.text != '' OR sub.image_path IS NOT NULL)
+       GROUP BY g.center_cell_id`,
+      cellIds,
     )
+    for (const r of rows) {
+      map.set(r.cell_id, r.cnt)
+    }
     return map
   }
 
