@@ -99,6 +99,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 7. **`window.confirm` が Tauri WebView で動かない** — state ベースの 2 クリック確認 UI で代替 ([`TrashDialog.tsx`](desktop/src/components/dashboard/TrashDialog.tsx))
 8. **CSS keyframes の `transform: var(--x)` は WebKit で補間されない** — 固定 keyframes 8 方向で対応。詳細は [`animations.md`](desktop/docs/animations.md)
 9. **環境変数が欠損するとクラッシュ** — `lib/supabase/client.ts` がダミー URL でフォールバックし `isSupabaseConfigured` で gate
+10. **子グリッドには position=4 の cell 行が無い** — drill 先グリッドの中心は親グリッドの drill 元 cell (`grids.center_cell_id`) で直接参照。`cells WHERE grid_id = child.id` は 8 行しか返らない。描画では `getGrid` が親 cell を merge して 9 要素提供する。`setGridDone` のような grid 単位の UPDATE は 8 行のみ対象になる点に注意
 
 ## ドキュメント一覧
 

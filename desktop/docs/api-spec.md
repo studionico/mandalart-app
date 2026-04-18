@@ -82,19 +82,26 @@ permanentDeleteMandalart(id: string): Promise<void>
 ## lib/api/grids.ts
 
 ```typescript
-// ルートグリッドを sort_order 昇順で取得 (並列グリッドを含む)
+// ルートグリッド (mandalarts.root_cell_id を center とするグリッド) を sort_order 昇順で取得
+// 並列ルートグリッドをすべて含む
 getRootGrids(mandalartId: string): Promise<Grid[]>
 
-// 指定セルを親とするサブグリッドを sort_order 昇順で取得
+// 指定セルを center とする drill 先グリッドを sort_order 昇順で取得
+// 自己参照 (cell の所属 grid と同じ grid) は除外するので、root 中心セルに対して呼んでも
+// 自グリッド自身は返らない
 getChildGrids(parentCellId: string): Promise<Grid[]>
 
-// グリッドとその全セルを取得
+// グリッドとそのセルを常に 9 要素で取得する
+// - root grid: 自 grid_id 配下の 9 cells をそのまま返す
+// - 子 grid: 自 grid_id 配下の 8 peripherals に center_cell_id が指す cell を merge して 9 要素にする
 getGrid(id: string): Promise<Grid & { cells: Cell[] }>
 
-// グリッドを新規作成し、9 つのセルを同時に生成
+// グリッドを新規作成する。
+// - centerCellId = null: root 作成。新 center cell を生成して 9 cells を INSERT
+// - centerCellId 指定: 子 / 並列グリッド作成。center は既存 cell を再利用し 8 peripherals のみ INSERT
 createGrid(params: {
   mandalartId: string
-  parentCellId: string | null
+  centerCellId: string | null
   sortOrder: number
 }): Promise<Grid & { cells: Cell[] }>
 
@@ -102,6 +109,8 @@ createGrid(params: {
 updateGridMemo(id: string, memo: string): Promise<void>
 
 // グリッドとその子孫を再帰的にソフトデリート
+// 自 grid_id の cells のみを対象とするので、子グリッドの center cell
+// (= 親 grid に属する peripheral) は削除されない
 deleteGrid(id: string): Promise<void>
 
 // 並列グリッドの表示順を更新
@@ -126,7 +135,8 @@ updateCell(
 swapCellContent(cellIdA: string, cellIdB: string): Promise<void>
 
 // 2 つのセルのサブツリーごと入れ替える
-// 子グリッドの parent_cell_id を付け替えるだけで実装 (循環 FK 問題を避けるため一時 ID は使わない)
+// 子グリッドの center_cell_id を付け替えるだけで実装 (循環 FK 問題を避けるため一時 ID は使わない)
+// root 中心セルの自グリッド自己参照 (cell の所属 grid = grid 自身の center) は付け替え対象外
 swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void>
 
 // クリップボードからのペースト (カット/コピー)
