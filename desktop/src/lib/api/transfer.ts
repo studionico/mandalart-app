@@ -17,11 +17,19 @@ const PERIPHERAL_POSITIONS = TAB_ORDER.filter((p) => p !== CENTER_POSITION)
  * 記録するので、インポート時に正しい位置に復元できる。
  */
 export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
+  // X=C 統一モデルでは並列グリッド G1 / G2 が同じ center_cell_id を共有するため、
+  // `SELECT grids WHERE center_cell_id = X AND id != 自分` は G1 から見ると G2 を、
+  // G2 から見ると G1 を返す → 相互参照で無限再帰になる。
+  // `visited` に訪問済 grid.id を積んで同じ grid は二度と辿らないようにする。
+  const visited = new Set<string>()
+
   async function fetchSnapshot(
     gId: string,
     sortOrder: number,
     parentPosition: number | undefined,
   ): Promise<GridSnapshot> {
+    visited.add(gId)
+
     const grids = await query<Grid & { memo: string | null }>(
       'SELECT * FROM grids WHERE id = ? AND deleted_at IS NULL',
       [gId],
@@ -52,13 +60,15 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
 
     const children: GridSnapshot[] = []
     for (const cell of allCells) {
-      // このセルを center として指す他の grids (drilled + 並列), 自 grid 除く
+      // このセルを center として指す他の grids。自 grid と訪問済 grid は除く。
       const childGrids = await query<{ id: string; sort_order: number }>(
         'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL ORDER BY sort_order',
         [cell.id, gId],
       )
       for (const cg of childGrids) {
-        children.push(await fetchSnapshot(cg.id, cg.sort_order, cell.position))
+        if (visited.has(cg.id)) continue
+        const parentPos = cell.id === grid.center_cell_id ? undefined : cell.position
+        children.push(await fetchSnapshot(cg.id, cg.sort_order, parentPos))
       }
     }
 
@@ -80,11 +90,11 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
 }
 
 /**
- * 内部表現: tree of { text, children } — import-parser の ParsedNode と同形。
+ * 内部表現: tree of { text, memo?, children } — import-parser の ParsedNode を拡張したもの。
  * エクスポート (Markdown / Indent) はこれを経由して文字列化することで、
- * import ↔ export を対称に保つ。
+ * import ↔ export を対称に保つ (memo は Markdown のみ出力対象、Indent では省略)。
  */
-type ExportNode = { text: string; children: ExportNode[] }
+type ExportNode = { text: string; memo?: string | null; children: ExportNode[] }
 
 function snapshotToExportNode(snap: GridSnapshot): ExportNode {
   const byPosition = new Map(snap.cells.map((c) => [c.position, c]))
@@ -112,9 +122,11 @@ function snapshotToExportNode(snap: GridSnapshot): ExportNode {
     // このセルにぶら下がるサブグリッド群 (drilled) の peripherals を孫として再帰展開。
     // サブグリッド snapshot の中心セルは X=C 統一によりこのセルと同じテキスト/行なので、
     // 孫として含めると重複するため `.children` だけ取り出す。
+    // メモは最初のサブグリッドのものを拾う (並列含め複数あるケースは JSON のみで完全保持)。
     const subs = subsByPos.get(pos) ?? []
     const grandchildren = subs.flatMap((sg) => snapshotToExportNode(sg).children)
-    children.push({ text, children: grandchildren })
+    const subMemo = subs.length > 0 ? subs[0].grid.memo : null
+    children.push({ text, memo: subMemo, children: grandchildren })
   }
 
   // 並列グリッド: 同じ中心を共有する兄弟 grid として扱う。
@@ -124,12 +136,14 @@ function snapshotToExportNode(snap: GridSnapshot): ExportNode {
     children.push(...snapshotToExportNode(parallel).children)
   }
 
-  return { text: centerText, children }
+  return { text: centerText, memo: snap.grid.memo ?? null, children }
 }
 
 /**
  * Markdown 見出し形式でエクスポート。
- * Level 1..6 は `#` 見出し、7 以降は箇条書き (`- `) にフォールバック (Markdown 仕様の制約)。
+ * - Level 1..6 は `#` 見出し、7 以降は箇条書き (`- `) にフォールバック
+ * - 各ノードの memo は見出し直下に blockquote (`> ...`) で出力
+ *   (import-parser は見出し行以外を無視するので round-trip でも安全に落ちる)
  */
 export async function exportToMarkdown(gridId: string): Promise<string> {
   const snapshot = await exportToJSON(gridId)
@@ -142,6 +156,12 @@ export async function exportToMarkdown(gridId: string): Promise<string> {
     } else {
       const indent = '  '.repeat(level - 7)
       lines.push(`${indent}- ${node.text}`)
+    }
+    if (node.memo && node.memo.trim() !== '') {
+      // memo の複数行は blockquote 内で `> ` を各行に前置する
+      for (const memoLine of node.memo.split('\n')) {
+        lines.push(`> ${memoLine}`)
+      }
     }
     for (const child of node.children) {
       if (level < 6) lines.push('') // 見出し同士は空行で区切る (Markdown 慣習)
