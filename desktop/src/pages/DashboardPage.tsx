@@ -4,7 +4,6 @@ import {
   getMandalarts, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts,
 } from '@/lib/api/mandalarts'
-import { createGrid } from '@/lib/api/grids'
 import { signOut } from '@/lib/api/auth'
 import ImportDialog from '@/components/editor/ImportDialog'
 import AuthDialog from '@/components/AuthDialog'
@@ -65,9 +64,8 @@ export default function DashboardPage() {
 
   async function handleCreate() {
     try {
+      // createMandalart は root grid + 9 cells + root_cell_id も atomic に作成する
       const m = await createMandalart()
-      const grid = await createGrid({ mandalartId: m.id, parentCellId: null, sortOrder: 0 })
-      void grid
       openMandalart(m.id)
     } catch (e) {
       alert('エラー: ' + String(e))

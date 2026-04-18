@@ -1,4 +1,4 @@
-import { query, execute, generateId, now } from '../db'
+import { query, execute, now } from '../db'
 import { CENTER_POSITION } from '@/constants/grid'
 import { isCellEmpty } from '@/lib/utils/grid'
 import type { Cell } from '../../types'
@@ -27,52 +27,28 @@ export async function updateCell(
   )
   const cell = rows[0]
 
-  // ルートグリッド (parent_cell_id IS NULL, sort_order = 0) の中心セル (position 4)
-  // が更新されたら、mandalarts.title をそのテキストにミラーする。
-  // title は「ルート中心セルのキャッシュ」として扱い、
-  // ダッシュボードの表示 / 検索 / ソートに使う。
-  if (cell && cell.position === CENTER_POSITION && params.text !== undefined) {
-    const grids = await query<{ mandalart_id: string; parent_cell_id: string | null; sort_order: number }>(
-      'SELECT mandalart_id, parent_cell_id, sort_order FROM grids WHERE id = ?',
-      [cell.grid_id],
+  // ルート中心セル (mandalarts.root_cell_id が指すセル) のテキスト更新を
+  // mandalarts.title にミラーする。title はダッシュボードの表示/検索/ソートで使う。
+  if (cell && params.text !== undefined) {
+    const rootOwners = await query<{ id: string }>(
+      'SELECT id FROM mandalarts WHERE root_cell_id = ? AND deleted_at IS NULL',
+      [id],
     )
-    const grid = grids[0]
-    if (grid && grid.parent_cell_id === null && grid.sort_order === 0) {
+    if (rootOwners[0]) {
       await execute(
         'UPDATE mandalarts SET title = ?, updated_at = ? WHERE id = ?',
-        [params.text, ts, grid.mandalart_id],
+        [params.text, ts, rootOwners[0].id],
       )
     }
   }
 
   // 空 → 非空 への遷移 + そのセルが done=0 のとき: 新しいタスクが生まれたので、
   // 親セルの done=1 を解除して invariant を維持する。
-  // (drill-create の center 初期化で親の done を継承したい場合は、この path を
-  // 通さず seedCellWithDone を使う)
   if (cell && wasEmpty && !isCellEmpty(cell) && Number(cell.done) !== 1) {
     await propagateUndoneUp(cell.id, ts)
   }
 
   return cell
-}
-
-/**
- * drill-down で新規作成した子グリッドの中心セルを、親セルの内容と done 状態で
- * 初期化する専用関数。
- *
- * updateCell は空→非空 transition 時に propagateUndoneUp を呼んで親を解除するが、
- * drill-create では「親 done を新 grid に継承する」のが正しい挙動なので、
- * この関数は propagate を行わず text + done を atomic に設定する。
- */
-export async function seedCellWithDone(
-  cellId: string,
-  params: { text: string; image_path: string | null; color: string | null; done: boolean }
-): Promise<void> {
-  const ts = now()
-  await execute(
-    'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
-    [params.text, params.image_path, params.color, params.done ? 1 : 0, ts, cellId],
-  )
 }
 
 export async function swapCellContent(cellIdA: string, cellIdB: string): Promise<void> {
@@ -88,30 +64,41 @@ export async function swapCellContent(cellIdA: string, cellIdB: string): Promise
     [ca.text, ca.image_path, ca.color, ts, cellIdB])
 }
 
+/**
+ * 2 つの cell のサブツリー (drilled 子グリッド群) を入れ替える。
+ *
+ * 新モデル (center_cell_id ベース):
+ *  - 自グリッドの center = 自セル (= root 中心) の grid は付け替え対象外 (自己参照を壊すため)
+ *  - それ以外の、cell を center として指している grid の center_cell_id を入れ替える
+ */
 export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void> {
-  // 子グリッド ID を先に取得してから付け替える（循環 FK 回避）
+  const [aInfo, bInfo] = await Promise.all([
+    query<{ grid_id: string }>('SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL', [cellIdA]),
+    query<{ grid_id: string }>('SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL', [cellIdB]),
+  ])
+  const gridIdA = aInfo[0]?.grid_id ?? ''
+  const gridIdB = bInfo[0]?.grid_id ?? ''
+
   const gridsOfA = await query<{ id: string }>(
-    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-    [cellIdA],
+    'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
+    [cellIdA, gridIdA],
   )
   const gridsOfB = await query<{ id: string }>(
-    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-    [cellIdB],
+    'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
+    [cellIdB, gridIdB],
   )
   const ts = now()
   for (const g of gridsOfA) {
-    await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdB, ts, g.id])
+    await execute('UPDATE grids SET center_cell_id=?, updated_at=? WHERE id=?', [cellIdB, ts, g.id])
   }
   for (const g of gridsOfB) {
-    await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdA, ts, g.id])
+    await execute('UPDATE grids SET center_cell_id=?, updated_at=? WHERE id=?', [cellIdA, ts, g.id])
   }
   await swapCellContent(cellIdA, cellIdB)
 }
 
 /**
- * クリップボード（カット/コピー）からのペースト。
- * copyCellSubtree で内容と子グリッドを複製し、mode='cut' のときは source を空にする。
- * cut 時の子グリッド整理はソフトデリート（deleted_at 設定）。
+ * クリップボード (カット/コピー) からのペースト。
  */
 export async function pasteCell(
   sourceCellId: string,
@@ -120,17 +107,24 @@ export async function pasteCell(
 ): Promise<void> {
   if (sourceCellId === targetCellId) return
 
-  // 防御チェック: 周辺セルなのに中心セルが空ならペースト不可
   const targetRows = await query<{ grid_id: string; position: number }>(
     'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
     [targetCellId],
   )
   const target = targetRows[0]
   if (target && target.position !== CENTER_POSITION) {
-    const centerRows = await query<{ text: string; image_path: string | null }>(
-      'SELECT text, image_path FROM cells WHERE grid_id = ? AND position = ? AND deleted_at IS NULL',
-      [target.grid_id, CENTER_POSITION],
+    // 新モデル: 中心セル = 所属グリッドの center_cell_id が指すセル
+    const gridRow = await query<{ center_cell_id: string }>(
+      'SELECT center_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
+      [target.grid_id],
     )
+    const centerId = gridRow[0]?.center_cell_id
+    const centerRows = centerId
+      ? await query<{ text: string; image_path: string | null }>(
+          'SELECT text, image_path FROM cells WHERE id = ? AND deleted_at IS NULL',
+          [centerId],
+        )
+      : []
     const center = centerRows[0]
     if (!center || (center.text.trim() === '' && center.image_path === null)) {
       throw new Error('中心セルが空のグリッドの周辺セルにはペーストできません')
@@ -145,10 +139,14 @@ export async function pasteCell(
       'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
       ['', null, null, ts, sourceCellId],
     )
-    // source の子グリッドを再帰的に論理削除
-    const childGrids = await query<{ id: string }>(
-      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    const sourceGridRow = await query<{ grid_id: string }>(
+      'SELECT grid_id FROM cells WHERE id = ?',
       [sourceCellId],
+    )
+    const sourceGridId = sourceGridRow[0]?.grid_id ?? ''
+    const childGrids = await query<{ id: string }>(
+      'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
+      [sourceCellId, sourceGridId],
     )
     for (const cg of childGrids) {
       const { deleteGrid } = await import('./grids')
@@ -157,6 +155,9 @@ export async function pasteCell(
   }
 }
 
+/**
+ * source のサブツリー (drilled 子グリッド群) + content を target に複製する。
+ */
 export async function copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void> {
   const srcs = await query<Cell>(
     'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
@@ -165,69 +166,82 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
   const src = srcs[0]
   if (!src) return
 
-  // 1) ソース側の子グリッドを複製（ターゲット更新より前に実行して
-  //    スナップショットがターゲットの空状態を含むようにする）
-  const childGrids = await query<{ id: string; sort_order: number }>(
-    'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+  // 新モデル: source cell を center として指しているすべての grid を複製。
+  // peripheral なら drilled grids のみ、center (root center 等) なら自グリッドも含まれ、
+  // "grid 全体を subtree として複製する" 旧挙動を自然に再現する。
+  const centeringGrids = await query<{ id: string; sort_order: number }>(
+    'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
     [sourceCellId],
   )
-  for (const cg of childGrids) {
+  for (const cg of centeringGrids) {
     await copyGridRecursive(cg.id, targetCellId, cg.sort_order)
   }
 
-  // 2) 中心セルで子グリッドを持たない場合、
-  //    「その中心セルがテーマとしているグリッド自体」を subtree として複製する。
-  if (src.position === CENTER_POSITION && childGrids.length === 0) {
-    await copyGridRecursive(src.grid_id, targetCellId, 0)
-  }
-
-  // 3) 最後にターゲットのコンテンツを上書き
+  // target に source の content を上書き
   await execute(
     'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
     [src.text, src.image_path, src.color, now(), targetCellId]
   )
 }
 
+/**
+ * sourceGridId のサブツリーを複製し、新しいグリッドの中心を newCenterCellId にする。
+ *
+ * - 新グリッド G' は 8 peripherals のみ INSERT (center は newCenterCellId の既存 cell)
+ * - source 側の center cell (旧 G.center) の content は複製せず skip:
+ *   target cell = newCenterCellId が既に content を持っているか、
+ *   呼び出し側 (copyCellSubtree) が src の content を後で target に上書きする
+ * - 各 source cell の子グリッドを再帰的に複製
+ */
 async function copyGridRecursive(
   sourceGridId: string,
-  newParentCellId: string,
-  sortOrder: number
+  newCenterCellId: string,
+  sortOrder: number,
 ): Promise<string> {
-  // ソース側の状態を INSERT 前にスナップショットする。
-  const grids = await query<{ mandalart_id: string; memo: string | null }>(
-    'SELECT mandalart_id, memo FROM grids WHERE id = ? AND deleted_at IS NULL',
+  const { generateId } = await import('../db')
+  const gridRows = await query<{ mandalart_id: string; memo: string | null; center_cell_id: string }>(
+    'SELECT mandalart_id, memo, center_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
     [sourceGridId],
   )
-  const sg = grids[0]
-  const sourceCells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
-    [sourceGridId],
-  )
-  const childGridsPerCell = new Map<string, { id: string; sort_order: number }[]>()
-  for (const sc of sourceCells) {
-    const cgs = await query<{ id: string; sort_order: number }>(
-      'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-      [sc.id],
-    )
-    childGridsPerCell.set(sc.id, cgs)
-  }
+  const sg = gridRows[0]
+  if (!sg) return ''
 
-  // 新しいグリッドとセルを挿入
+  // getGrid で center merged な 9 cells を取得 (root grid なら 9、child grid でも 9)
+  const { getGrid } = await import('./grids')
+  const sourceGrid = await getGrid(sourceGridId)
+  const sourceCenterId = sg.center_cell_id
+
   const newGridId = generateId()
   const ts = now()
   await execute(
-    'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
-    [newGridId, sg.mandalart_id, newParentCellId, sortOrder, sg.memo, ts, ts]
+    'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
+    [newGridId, sg.mandalart_id, newCenterCellId, sortOrder, sg.memo, ts, ts],
   )
-  for (const sc of sourceCells) {
+
+  // source cell id → new cell id のマッピング
+  const cellIdMap = new Map<string, string>()
+  cellIdMap.set(sourceCenterId, newCenterCellId)
+
+  // 8 peripherals (source の center は skip)
+  for (const sc of sourceGrid.cells) {
+    if (sc.id === sourceCenterId) continue
     const newCellId = generateId()
+    cellIdMap.set(sc.id, newCellId)
     await execute(
-      'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      [newCellId, newGridId, sc.position, sc.text, sc.image_path, sc.color, ts, ts]
+      'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [newCellId, newGridId, sc.position, sc.text, sc.image_path, sc.color, sc.done ? 1 : 0, ts, ts],
     )
-    const cgs = childGridsPerCell.get(sc.id) ?? []
-    for (const cg of cgs) {
-      await copyGridRecursive(cg.id, newCellId, cg.sort_order)
+  }
+
+  // 各 source cell の drilled grids (own grid は除外) を再帰
+  for (const sc of sourceGrid.cells) {
+    const childGrids = await query<{ id: string; sort_order: number }>(
+      'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
+      [sc.id, sourceGridId],
+    )
+    const newParentCellId = cellIdMap.get(sc.id)!
+    for (const cg of childGrids) {
+      await copyGridRecursive(cg.id, newParentCellId, cg.sort_order)
     }
   }
   return newGridId
@@ -239,9 +253,8 @@ async function copyGridRecursive(
 
 /**
  * 指定 grid の非空セルの done 状態を一括設定する (子グリッドへの再帰はしない)。
- * drill-down で新規サブグリッドを作った時に、親セルが done なら子グリッドの
- * 非空セル (= 中央セル: 親テキストをコピー済) だけ done で初期化する。
- * 空の周辺セルは「タスクではない」として触らず done=0 のまま残す。
+ * 新モデル: child grid は 8 cells (center 行なし) なので、この UPDATE は peripherals のみ対象。
+ * root grid は 9 cells なので center も含まれる。
  */
 export async function setGridDone(gridId: string, done: boolean): Promise<void> {
   const ts = now()
@@ -257,35 +270,22 @@ export async function setGridDone(gridId: string, done: boolean): Promise<void> 
 /**
  * セルの done 状態をトグルし、階層全体にカスケード適用する。
  *
- * マンダラートの階層ツリーの親子関係 (zigzag):
- *  - 周辺セル P (grid G) の「親」 = G の中心セル
- *  - 中心セル C (grid G) の「親」 = G.parent_cell_id (祖父 grid の周辺セル)、
- *                                    ルートグリッドの中心なら親なし
+ * 新モデル (center_cell_id ベース) のツリー:
+ *  - Cell C の子 = すべての grid g (WHERE g.center_cell_id = C.id) の peripheral cells
+ *  - Cell C の親 = C.grid_id の grid の center_cell (自分自身なら親なし = root 中心)
  *
- * 「サブツリー」:
- *  - 中心セル C のサブツリー = C が属する grid の全セル + 各周辺の子グリッドのサブツリー
- *    (中心セルが grid 全体の代表という semantic — stock.ts の buildCellSnapshot と同じ)
- *  - 周辺セル P のサブツリー = P + P の子グリッド (あれば) の全セル + その中の周辺の子グリッドのサブツリー
- *
- * トグル方向による挙動 (対称):
- *  - **チェック (0 → 1)**: セル自身のサブツリーを全部 done=1、
- *    親方向にも「サブツリー全 done なら親も done=1」を再帰的に伝搬
- *  - **アンチェック (1 → 0)**: セル自身のサブツリーを全部 done=0、
- *    親方向にも「done なら done=0」を再帰的に伝搬 (invariant 維持)
- *
- * updated_at を進めて sync 対象化する。
+ * (旧モデルの「中心/周辺」二分岐は廃止 — 新モデルでは peripheral と center の役割が
+ *  同じ cell で両立し、ツリー操作は一般化できる)
  */
 export async function toggleCellDone(cellId: string): Promise<void> {
   const cells = await query<Cell>('SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL', [cellId])
   const cell = cells[0]
   if (!cell) return
-  const nextDone = Number(cell.done) === 1 ? 0 : 1
+  const nextDone: 0 | 1 = Number(cell.done) === 1 ? 0 : 1
   const ts = now()
 
-  // サブツリー全体を done に (チェック/アンチェック どちらも同じ方向の更新)
   await markSubtreeDone(cellId, nextDone, ts)
 
-  // 親方向への伝搬
   if (nextDone === 1) {
     await propagateDoneUp(cellId, ts)
   } else {
@@ -294,156 +294,73 @@ export async function toggleCellDone(cellId: string): Promise<void> {
 }
 
 /**
- * 指定セルのサブツリー全体を done に設定する。中心セルと周辺セルで subtree の
- * 定義が異なる (doc 参照)。done は 0 or 1。更新があった行のみ updated_at を進める。
+ * 指定セルのサブツリー全体 (自身 + 子孫) を done に設定する。
+ * 空セルは done 更新の対象外 (= skip) だが、再帰対象にはしない。
  */
 async function markSubtreeDone(cellId: string, done: 0 | 1, ts: string): Promise<void> {
-  const cellRows = await query<{ grid_id: string; position: number }>(
-    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
-    [cellId],
-  )
-  const cell = cellRows[0]
-  if (!cell) return
-
-  if (cell.position === CENTER_POSITION) {
-    // 中心セル: 所属グリッド全体 + 周辺の子グリッドのサブツリー
-    await markGridSubtreeDone(cell.grid_id, done, ts)
-  } else {
-    // 周辺セル: 自身 + 子グリッドのサブツリー
-    await execute(
-      'UPDATE cells SET done = ?, updated_at = ? WHERE id = ? AND done != ?',
-      [done, ts, cellId, done],
-    )
-    const childGrids = await query<{ id: string }>(
-      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-      [cellId],
-    )
-    for (const g of childGrids) {
-      await markGridSubtreeDone(g.id, done, ts)
-    }
-  }
-}
-
-/**
- * 指定 grid の **非空** セルを done に設定し、非空の周辺セルの子グリッドを再帰処理。
- *
- * 空セルを意図的にスキップする理由:
- *  - 空セルは「タスクではない」ので done 状態を持たない
- *  - ユーザーが後から空セルに入力した時、done=0 のままなので「新しいタスク (未完了)」
- *    として checkbox が未チェック表示される (期待挙動)
- *  - up-cascade 判定側 (areDescendantsAllDone) も空セルを無視するので対称性が保たれる
- */
-async function markGridSubtreeDone(gridId: string, done: 0 | 1, ts: string): Promise<void> {
+  // 自身
   await execute(
     `UPDATE cells SET done = ?, updated_at = ?
-     WHERE grid_id = ? AND deleted_at IS NULL AND done != ?
+     WHERE id = ? AND done != ?
        AND (TRIM(text) != '' OR image_path IS NOT NULL)`,
-    [done, ts, gridId, done],
+    [done, ts, cellId, done],
   )
-  const peripheralCells = await query<{ id: string }>(
-    `SELECT id FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL
-       AND (TRIM(text) != '' OR image_path IS NOT NULL)`,
-    [gridId, CENTER_POSITION],
+  // この cell を center とする grid 群の peripherals に再帰
+  const centeringGrids = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL',
+    [cellId],
   )
-  for (const c of peripheralCells) {
-    const childGrids = await query<{ id: string }>(
-      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-      [c.id],
+  for (const g of centeringGrids) {
+    const peripherals = await query<{ id: string }>(
+      `SELECT id FROM cells WHERE grid_id = ? AND id != ? AND deleted_at IS NULL
+         AND (TRIM(text) != '' OR image_path IS NOT NULL)`,
+      [g.id, cellId],
     )
-    for (const g of childGrids) {
-      await markGridSubtreeDone(g.id, done, ts)
+    for (const p of peripherals) {
+      await markSubtreeDone(p.id, done, ts)
     }
   }
 }
 
 /**
- * ツリー上の親セル (zigzag) を取得する。
- *  - 周辺セル → 同じ grid の中心セル
- *  - 中心セル → 所属 grid の parent_cell (祖父 grid の周辺セル)、ルートなら null
+ * ツリー上の親セルを取得する。
+ *  - 自グリッドの center_cell_id が自 cell と同じなら root 中心 → 親なし
+ *  - それ以外は自グリッドの center cell が親
  */
-async function getParentCellInTree(
-  cellId: string,
-): Promise<{ id: string; grid_id: string; position: number } | null> {
-  const cellRows = await query<{ grid_id: string; position: number }>(
-    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+async function getParentCellInTree(cellId: string): Promise<{ id: string } | null> {
+  const cellRows = await query<{ grid_id: string }>(
+    'SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL',
     [cellId],
   )
   const cell = cellRows[0]
   if (!cell) return null
-
-  if (cell.position !== CENTER_POSITION) {
-    // 周辺セル → 同グリッドの中心セル
-    const centers = await query<{ id: string; grid_id: string; position: number }>(
-      'SELECT id, grid_id, position FROM cells WHERE grid_id = ? AND position = ? AND deleted_at IS NULL',
-      [cell.grid_id, CENTER_POSITION],
-    )
-    return centers[0] ?? null
-  }
-  // 中心セル → 所属 grid の parent_cell (なければ null)
-  const grids = await query<{ parent_cell_id: string | null }>(
-    'SELECT parent_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
+  const grids = await query<{ center_cell_id: string }>(
+    'SELECT center_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
     [cell.grid_id],
   )
-  const parentCellId = grids[0]?.parent_cell_id
-  if (!parentCellId) return null
-  const parents = await query<{ id: string; grid_id: string; position: number }>(
-    'SELECT id, grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
-    [parentCellId],
-  )
-  return parents[0] ?? null
+  const centerCellId = grids[0]?.center_cell_id
+  if (!centerCellId || centerCellId === cellId) return null
+  return { id: centerCellId }
 }
 
 /**
- * 指定セルの「子孫」(= 自身を除く配下すべて) が全て done=1 か判定する。
- * これを使うことで「このセルを done=1 にマークしても invariant が崩れないか」を
- * propagateDoneUp のループで調べる。
- *
- * ツリー上の子孫定義:
- *  - 中心セル C (grid G) の子孫 = G の 8 周辺 + それぞれの周辺の子孫
- *  - 周辺セル P の子孫 = P の子グリッド (あれば) の中央セルと 8 周辺 + その子孫
+ * 指定セルの子孫 (= 自身を除く配下すべて) が全て done=1 か判定する。
+ * 空セルは「タスクではない」として判定から除外する (= done 扱い)。
  */
 async function areDescendantsAllDone(cellId: string): Promise<boolean> {
-  const cellRows = await query<{ grid_id: string; position: number }>(
-    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+  const centeringGrids = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL',
     [cellId],
   )
-  const cell = cellRows[0]
-  if (!cell) return false
-
-  // 空セルは「タスクではない」として判定から除外する (= done 扱い)。
-  // これにより空の周辺セルが多数あっても、入力ある兄弟が全 done なら親も done 判定される。
-  if (cell.position === CENTER_POSITION) {
-    // 中心セルの子孫 = 同じ grid の周辺セル (空は無視) + それぞれの子孫
+  for (const g of centeringGrids) {
     const peripherals = await query<{ id: string; done: number; text: string; image_path: string | null }>(
-      'SELECT id, done, text, image_path FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL',
-      [cell.grid_id, CENTER_POSITION],
+      `SELECT id, done, text, image_path FROM cells WHERE grid_id = ? AND id != ? AND deleted_at IS NULL`,
+      [g.id, cellId],
     )
     for (const p of peripherals) {
       if (isCellEmpty(p)) continue
       if (Number(p.done) !== 1) return false
       if (!(await areDescendantsAllDone(p.id))) return false
-    }
-    return true
-  }
-  // 周辺セルの子孫 = 子グリッド (あれば) の全セル (空は無視) + それぞれの子孫
-  const childGrids = await query<{ id: string }>(
-    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-    [cellId],
-  )
-  for (const g of childGrids) {
-    const gridCells = await query<{ id: string; position: number; done: number; text: string; image_path: string | null }>(
-      'SELECT id, position, done, text, image_path FROM cells WHERE grid_id = ? AND deleted_at IS NULL',
-      [g.id],
-    )
-    for (const c of gridCells) {
-      if (isCellEmpty(c)) continue
-      if (Number(c.done) !== 1) return false
-    }
-    // 各周辺セルの子グリッドも再帰 (空セルは飛ばす)
-    for (const c of gridCells) {
-      if (c.position === CENTER_POSITION) continue
-      if (isCellEmpty(c)) continue
-      if (!(await areDescendantsAllDone(c.id))) return false
     }
   }
   return true

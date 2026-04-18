@@ -92,7 +92,7 @@ const PERIPHERAL_POSITIONS = TAB_ORDER.filter((p) => p !== 4)
  *  - 孫がいる周辺セルはその位置から subgrid を生やす (parentPosition=pos)
  *  - 9 個目以降の子は並列グリッドとして返り値の children に追加
  *    (parentPosition=undefined + sort_order 増分、呼び出し側で
- *     このグリッドと同じ parent_cell_id に紐付けられる)
+ *     このグリッドと同じ center_cell_id に紐付けられる)
  */
 function nodeToGrid(
   node: ParsedNode,

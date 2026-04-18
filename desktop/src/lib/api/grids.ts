@@ -1,21 +1,53 @@
 import { query, execute, generateId, now } from '../db'
-import { GRID_CELL_COUNT } from '@/constants/grid'
+import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
 import type { Grid, Cell } from '../../types'
 
+/**
+ * 並列ルートグリッド群を列挙する。
+ *
+ * 新モデル (migration 004 以降):
+ * - 並列ルートは全員 `center_cell_id = mandalarts.root_cell_id` を指す
+ * - sort_order で順序付け
+ */
 export async function getRootGrids(mandalartId: string): Promise<Grid[]> {
   return query<Grid>(
-    'SELECT * FROM grids WHERE mandalart_id = ? AND parent_cell_id IS NULL AND deleted_at IS NULL ORDER BY sort_order',
-    [mandalartId]
+    `SELECT g.* FROM grids g
+     JOIN mandalarts m ON m.id = g.mandalart_id
+     WHERE g.mandalart_id = ?
+       AND g.center_cell_id = m.root_cell_id
+       AND g.deleted_at IS NULL
+     ORDER BY g.sort_order`,
+    [mandalartId],
   )
 }
 
+/**
+ * ある cell を中心 (drill 元) とする子グリッド群 (並列含む) を列挙する。
+ * sort_order 昇順。
+ *
+ * 自己参照 (cell の所属 grid と同じ grid。= root 中心セルがその root grid を center として持つ) は
+ * 「drill 元」としては意味を持たないので除外する。並列グリッドはすべて新規に作られた grid の
+ * 行なので g.id != cell.grid_id となり、通常の drilled children と一緒に返される。
+ */
 export async function getChildGrids(parentCellId: string): Promise<Grid[]> {
   return query<Grid>(
-    'SELECT * FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
-    [parentCellId]
+    `SELECT g.* FROM grids g
+     JOIN cells c ON c.id = ?
+     WHERE g.center_cell_id = ?
+       AND g.id != c.grid_id
+       AND g.deleted_at IS NULL
+     ORDER BY g.sort_order`,
+    [parentCellId, parentCellId],
   )
 }
 
+/**
+ * grid + cells (常に 9 要素) を返す。
+ *
+ * - root grid: 自 grid_id に 9 行 (position 0..8) → そのまま返す
+ * - child grid: 自 grid_id に 8 行 (position 0-3, 5-8) + 親グリッドに属する center cell 1 行
+ *   を merge して 9 要素にする
+ */
 export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
   const grids = await query<Grid>(
     'SELECT * FROM grids WHERE id = ? AND deleted_at IS NULL',
@@ -23,49 +55,74 @@ export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
   )
   const grid = grids[0]
   if (!grid) throw new Error(`Grid not found: ${id}`)
-  const cells = await query<Cell>(
+
+  const ownCells = await query<Cell>(
     'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
     [id],
   )
-  return { ...grid, cells }
+
+  // center cell が自 grid に含まれているか確認 (root なら含まれる、子なら含まれない)
+  const hasCenter = ownCells.some((c) => c.id === grid.center_cell_id)
+  if (!hasCenter) {
+    const centers = await query<Cell>(
+      'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
+      [grid.center_cell_id],
+    )
+    if (centers[0]) {
+      ownCells.push(centers[0])
+    }
+  }
+  ownCells.sort((a, b) => a.position - b.position)
+  return { ...grid, cells: ownCells }
 }
 
+/**
+ * グリッドを新規作成する。
+ *
+ * - `centerCellId = null`: root グリッド作成。新規 center cell を生成し、8 peripherals と共に insert (計 9 cells)。
+ *   戻り値の grid.center_cell_id は自動生成された center cell の id。
+ *   呼び出し側 (createMandalart) は、初回 root 作成時にこの center_cell_id を mandalarts.root_cell_id に保存する。
+ * - `centerCellId` 指定: 子 / 並列グリッド作成。center は既存 cell (親 peripheral or 並列共有中心) を再利用し、
+ *   8 peripherals のみを insert (position=4 の cell 行は作らない)。
+ */
 export async function createGrid(params: {
   mandalartId: string
-  parentCellId: string | null
+  centerCellId: string | null
   sortOrder: number
 }): Promise<Grid & { cells: Cell[] }> {
   const gridId = generateId()
   const ts = now()
-  await execute(
-    'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [gridId, params.mandalartId, params.parentCellId, params.sortOrder, ts, ts]
-  )
 
-  const cellInserts = Array.from({ length: GRID_CELL_COUNT }).map((_, i) => ({
-    id: generateId(), grid_id: gridId, position: i, ts,
-  }))
-  for (const c of cellInserts) {
+  if (params.centerCellId === null) {
+    // root グリッド: 9 cells (center + 8 peripherals)
+    const centerCellId = generateId()
     await execute(
-      'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [c.id, c.grid_id, c.position, '', c.ts, c.ts]
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [gridId, params.mandalartId, centerCellId, params.sortOrder, ts, ts],
     )
+    for (let i = 0; i < GRID_CELL_COUNT; i++) {
+      const cellId = i === CENTER_POSITION ? centerCellId : generateId()
+      await execute(
+        'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [cellId, gridId, i, '', ts, ts],
+      )
+    }
+  } else {
+    // 子 / 並列グリッド: 8 peripherals のみ (center は親 grid の cell を共有)
+    await execute(
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [gridId, params.mandalartId, params.centerCellId, params.sortOrder, ts, ts],
+    )
+    for (let i = 0; i < GRID_CELL_COUNT; i++) {
+      if (i === CENTER_POSITION) continue
+      await execute(
+        'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [generateId(), gridId, i, '', ts, ts],
+      )
+    }
   }
 
-  const cells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
-    [gridId],
-  )
-  const grid: Grid = {
-    id: gridId,
-    mandalart_id: params.mandalartId,
-    parent_cell_id: params.parentCellId,
-    sort_order: params.sortOrder,
-    memo: null,
-    created_at: ts,
-    updated_at: ts,
-  }
-  return { ...grid, cells }
+  return getGrid(gridId)
 }
 
 export async function updateGridMemo(id: string, memo: string): Promise<void> {
@@ -74,18 +131,23 @@ export async function updateGridMemo(id: string, memo: string): Promise<void> {
 
 /**
  * ソフトデリート: grid とその配下のセル・サブグリッドを再帰的に論理削除する。
+ *
+ * 注意 (新モデル):
+ * - 自グリッドの peripherals (grid_id = self.id) は全て soft-delete 対象
+ * - 子グリッド (center_cell_id = peripheral.id で辿る) は再帰 delete
+ * - 子グリッドの center cell は親グリッドに属する (grid_id = parent.id) ので、
+ *   `UPDATE cells SET deleted_at WHERE grid_id = self.id` の対象外となり自動的に保全される
  */
 export async function deleteGrid(id: string): Promise<void> {
   const ts = now()
-  // まず子孫の grids / cells を再帰的に論理削除してから自分自身を消す
   const cells = await query<{ id: string }>(
     'SELECT id FROM cells WHERE grid_id = ? AND deleted_at IS NULL',
     [id],
   )
   for (const c of cells) {
     const subGrids = await query<{ id: string }>(
-      'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
-      [c.id],
+      'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
+      [c.id, id],
     )
     for (const sg of subGrids) {
       await deleteGrid(sg.id)

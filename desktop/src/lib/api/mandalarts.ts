@@ -1,17 +1,13 @@
 import { query, execute, generateId, now } from '../db'
 import { supabase, isSupabaseConfigured } from '../supabase/client'
+import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
 import type { Mandalart, Cell } from '../../types'
 
-// ルート中心セル (position=4) の image_path を相関サブクエリで取得する共通式。
-// mandalarts テーブル自体には image_path を保存していないので、都度 JOIN して引き出す。
+// ルート中心セル (= mandalarts.root_cell_id が指す cell) の image_path を取得する共通式。
+// 新モデルでは root_cell_id を直接参照するだけで済むため、旧 JOIN ベースより単純。
 const ROOT_IMAGE_PATH_SUBQUERY = `(
   SELECT c.image_path FROM cells c
-  WHERE c.grid_id = (
-    SELECT g.id FROM grids g
-    WHERE g.mandalart_id = m.id AND g.parent_cell_id IS NULL AND g.sort_order = 0 AND g.deleted_at IS NULL
-    LIMIT 1
-  )
-  AND c.position = 4 AND c.deleted_at IS NULL
+  WHERE c.id = m.root_cell_id AND c.deleted_at IS NULL
   LIMIT 1
 )`
 
@@ -20,7 +16,7 @@ export async function getMandalarts(): Promise<Mandalart[]> {
     `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
      FROM mandalarts m
      WHERE m.deleted_at IS NULL
-     ORDER BY m.updated_at DESC`
+     ORDER BY m.updated_at DESC`,
   )
 }
 
@@ -32,20 +28,49 @@ export async function getMandalart(id: string): Promise<Mandalart | null> {
   return rows[0] ?? null
 }
 
+/**
+ * マンダラートを新規作成する。ルートグリッド (9 cells: 1 center + 8 peripherals)
+ * も同じトランザクションで作成し、mandalarts.root_cell_id に root 中心セル id を記録する。
+ *
+ * (旧モデルでは DashboardPage 側で createMandalart + createGrid を別々に呼んでいたが、
+ *  root_cell_id NOT NULL のためここで一緒に作る)
+ */
 export async function createMandalart(title = ''): Promise<Mandalart> {
-  const id = generateId()
+  const mandalartId = generateId()
+  const rootGridId = generateId()
+  const rootCenterCellId = generateId()
   const ts = now()
+
   await execute(
-    'INSERT INTO mandalarts (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)',
-    [id, title, ts, ts]
+    'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    [mandalartId, title, rootCenterCellId, ts, ts],
   )
-  return { id, title, created_at: ts, updated_at: ts, user_id: '' }
+  await execute(
+    'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [rootGridId, mandalartId, rootCenterCellId, 0, ts, ts],
+  )
+  for (let i = 0; i < GRID_CELL_COUNT; i++) {
+    const cellId = i === CENTER_POSITION ? rootCenterCellId : generateId()
+    await execute(
+      'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [cellId, rootGridId, i, '', ts, ts],
+    )
+  }
+
+  return {
+    id: mandalartId,
+    title,
+    root_cell_id: rootCenterCellId,
+    created_at: ts,
+    updated_at: ts,
+    user_id: '',
+  }
 }
 
 export async function updateMandalartTitle(id: string, title: string): Promise<void> {
   await execute(
     'UPDATE mandalarts SET title = ?, updated_at = ? WHERE id = ?',
-    [title, now(), id]
+    [title, now(), id],
   )
 }
 
@@ -124,8 +149,6 @@ export async function permanentDeleteMandalart(id: string): Promise<void> {
 
   try {
     // FK CASCADE に頼らず、cells → grids → mandalarts の順で明示削除する。
-    // 循環 FK 問題で parent_cell_id の制約は外している運用なので、
-    // 順序を守れば制約違反は起きない。
     const { data: cloudGrids } = await supabase
       .from('grids')
       .select('id')
@@ -137,23 +160,18 @@ export async function permanentDeleteMandalart(id: string): Promise<void> {
     await supabase.from('grids').delete().eq('mandalart_id', id)
     await supabase.from('mandalarts').delete().eq('id', id)
   } catch (e) {
-    // ネットワーク断 / RLS 等で失敗した場合: ローカルは既に消えている。
-    // 次回オンライン時に再度完全削除を実行すれば cloud も消える。
     console.warn('[permanentDelete] cloud delete failed (local delete already succeeded):', e)
   }
 }
 
 /**
  * タイトルおよびセル本文を対象とした全文検索。
- * マンダラートのタイトル、もしくは配下のいずれかのセルの text に一致するものを返す。
- * LIKE の特殊文字 (%, _, \) はエスケープする。
  */
 export async function searchMandalarts(q: string): Promise<Mandalart[]> {
   const trimmed = q.trim()
   if (!trimmed) {
     return getMandalarts()
   }
-  // バックスラッシュ → %, _ の順でエスケープ
   const escaped = trimmed
     .replace(/\\/g, '\\\\')
     .replace(/%/g, '\\%')
@@ -174,71 +192,70 @@ export async function searchMandalarts(q: string): Promise<Mandalart[]> {
 /**
  * マンダラートを丸ごと複製する。
  * 全グリッド・セルを新しい ID で再帰的に複製する。
- * タイトルはソースのまま (updateCell 経由の auto-sync に任せる)。
+ *
+ * 新モデル対応:
+ * - 各セル / グリッドに対し old→new id の map を構築
+ * - grids.center_cell_id は map[old_center] で置換
+ * - 子グリッドの center_cell_id は親グリッド側の新 cell id を指すため、親→子の順で INSERT する
  */
 export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const src = await getMandalart(sourceId)
   if (!src) throw new Error(`Mandalart not found: ${sourceId}`)
 
-  const newId = generateId()
+  const newMandalartId = generateId()
   const ts = now()
-  await execute(
-    'INSERT INTO mandalarts (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)',
-    [newId, src.title, ts, ts],
-  )
 
-  // ルートグリッドを複製（parent_cell_id IS NULL）
-  const rootGrids = await query<{ id: string; sort_order: number; memo: string | null }>(
-    'SELECT id, sort_order, memo FROM grids WHERE mandalart_id = ? AND parent_cell_id IS NULL AND deleted_at IS NULL ORDER BY sort_order',
+  // Old id → new id mapping (cells と grids の両方)
+  const cellIdMap = new Map<string, string>()
+  const gridIdMap = new Map<string, string>()
+
+  // 全 grids / cells を収集
+  const allGrids = await query<{ id: string; mandalart_id: string; center_cell_id: string; sort_order: number; memo: string | null }>(
+    'SELECT id, mandalart_id, center_cell_id, sort_order, memo FROM grids WHERE mandalart_id = ? AND deleted_at IS NULL',
     [sourceId],
   )
-  for (const g of rootGrids) {
-    await cloneGridRecursive(g.id, newId, null, g.sort_order, g.memo)
-  }
-
-  return { id: newId, title: src.title, created_at: ts, updated_at: ts, user_id: '' }
-}
-
-/**
- * 単一のグリッド + セル + 子孫を新しい mandalart_id へ再帰複製する。
- */
-async function cloneGridRecursive(
-  sourceGridId: string,
-  newMandalartId: string,
-  newParentCellId: string | null,
-  sortOrder: number,
-  memo: string | null,
-): Promise<void> {
-  // 先にソース側の状態をスナップショット（INSERT 後の再帰で自分自身を拾わないため）
-  const sourceCells = await query<Cell>(
-    'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
-    [sourceGridId],
+  const allCells = await query<Cell>(
+    'SELECT c.* FROM cells c JOIN grids g ON g.id = c.grid_id WHERE g.mandalart_id = ? AND c.deleted_at IS NULL',
+    [sourceId],
   )
-  const childrenBySourceCellId = new Map<string, { id: string; sort_order: number; memo: string | null }[]>()
-  for (const sc of sourceCells) {
-    const cgs = await query<{ id: string; sort_order: number; memo: string | null }>(
-      'SELECT id, sort_order, memo FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
-      [sc.id],
-    )
-    childrenBySourceCellId.set(sc.id, cgs)
-  }
 
-  const newGridId = generateId()
-  const ts = now()
+  for (const c of allCells) cellIdMap.set(c.id, generateId())
+  for (const g of allGrids) gridIdMap.set(g.id, generateId())
+
+  // mandalart 作成 (root_cell_id は src のマッピング後)
+  const newRootCellId = cellIdMap.get(src.root_cell_id)
+  if (!newRootCellId) throw new Error(`root_cell_id not found in source cells: ${src.root_cell_id}`)
+
   await execute(
-    'INSERT INTO grids (id, mandalart_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
-    [newGridId, newMandalartId, newParentCellId, sortOrder, memo, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    [newMandalartId, src.title, newRootCellId, ts, ts],
   )
 
-  for (const sc of sourceCells) {
-    const newCellId = generateId()
+  for (const g of allGrids) {
+    const newGridId = gridIdMap.get(g.id)!
+    const newCenterCellId = cellIdMap.get(g.center_cell_id)
+    if (!newCenterCellId) throw new Error(`Grid ${g.id} has orphan center_cell_id ${g.center_cell_id}`)
     await execute(
-      'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      [newCellId, newGridId, sc.position, sc.text, sc.image_path, sc.color, ts, ts],
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
+      [newGridId, newMandalartId, newCenterCellId, g.sort_order, g.memo, ts, ts],
     )
-    const childGrids = childrenBySourceCellId.get(sc.id) ?? []
-    for (const cg of childGrids) {
-      await cloneGridRecursive(cg.id, newMandalartId, newCellId, cg.sort_order, cg.memo)
-    }
+  }
+
+  for (const c of allCells) {
+    const newCellId = cellIdMap.get(c.id)!
+    const newGridId = gridIdMap.get(c.grid_id)!
+    await execute(
+      'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [newCellId, newGridId, c.position, c.text, c.image_path, c.color, c.done ? 1 : 0, ts, ts],
+    )
+  }
+
+  return {
+    id: newMandalartId,
+    title: src.title,
+    root_cell_id: newRootCellId,
+    created_at: ts,
+    updated_at: ts,
+    user_id: '',
   }
 }
