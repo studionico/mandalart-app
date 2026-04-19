@@ -18,7 +18,7 @@ import ImportDialog from './ImportDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
-import { getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid } from '@/lib/api/grids'
+import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
@@ -1104,7 +1104,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       if (isSelfCentered) {
         const center = gridWithCells.cells.find((c) => c.position === CENTER_POSITION)
         if (center && !isCellEmpty(center)) return false
-        await deleteGrid(gridId)
+        // 自動掃除は復元の意図がないので soft-delete ではなく local + cloud の hard-delete を使う
+        // (deleteGrid の soft-delete では cloud に deleted_at 付きゴミが永続的に残るため)
+        await permanentDeleteGrid(gridId)
         return true
       }
 
@@ -1112,10 +1114,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const peripherals = gridWithCells.cells.filter((c) => c.id !== parentCellId)
       if (peripherals.some((c) => !isCellEmpty(c))) return false
 
-      await deleteGrid(gridId)
+      await permanentDeleteGrid(gridId)
       return true
     } catch (e) {
-      console.error('cleanup deleteGrid failed:', e)
+      console.error('cleanup permanentDeleteGrid failed:', e)
       return false
     }
   }

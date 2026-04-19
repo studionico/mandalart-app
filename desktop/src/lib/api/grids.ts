@@ -1,5 +1,6 @@
 import { query, execute, generateId, now } from '../db'
 import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client'
 import type { Grid, Cell } from '../../types'
 
 /**
@@ -203,6 +204,38 @@ export async function updateGridSortOrder(id: string, sortOrder: number): Promis
   await execute('UPDATE grids SET sort_order = ?, updated_at = ? WHERE id = ?', [sortOrder, now(), id])
 }
 
+/**
+ * grid を物理削除する (local + cloud)。
+ *
+ * 用途: 自動掃除 (`cleanupGridIfEmpty`) や整理ボタン (`cleanupOrphanGrids`) のように
+ * 「復元の意図がない削除」で使う。`deleteGrid` の soft-delete では cloud に `deleted_at`
+ * 付き行が永続的に残り、grid 単位の restore UI が存在しないまま storage を食い続けるため。
+ *
+ * mandalart のゴミ箱経由 (`deleteMandalart`) は引き続き `deleteGrid` の soft-delete を
+ * 使う (restore のために残す)。
+ *
+ * 並列グリッドも `center_cell_id` を共有する兄弟。`DELETE FROM cells WHERE grid_id = ?`
+ * は自 grid 所属の 8 peripherals のみを対象とし、共有 center cell は別の grid からも
+ * 参照され続けるので巻き込み削除は起きない。
+ */
+export async function permanentDeleteGrid(id: string): Promise<void> {
+  // 1. local: cells → grid の順で hard delete (自 grid の peripheral cells のみ)
+  await execute('DELETE FROM cells WHERE grid_id = ?', [id])
+  await execute('DELETE FROM grids WHERE id = ?', [id])
+
+  // 2. cloud: 未サインイン / Supabase 未設定なら何もしない
+  if (!isSupabaseConfigured) return
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return
+
+  try {
+    await supabase.from('cells').delete().eq('grid_id', id)
+    await supabase.from('grids').delete().eq('id', id)
+  } catch (e) {
+    console.warn('[permanentDeleteGrid] cloud delete failed (local delete already succeeded):', e)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Orphan cleanup: 「表示上は root から辿れるが、内容が無く削除しても問題ない」
 // 空グリッドを洗い出して soft-delete する。
@@ -337,49 +370,50 @@ export async function findOrphanGrids(): Promise<OrphanStats> {
 }
 
 /**
- * 孤立グリッドと配下のセルを削除する。
+ * 孤立グリッドと配下のセルを物理削除する (local + cloud)。
  *
- * - **未同期行 (synced_at IS NULL)**: hard delete で物理削除する。cloud に行ったことがない
- *   ので削除を伝播する必要がないし、soft-delete で残すと push で RLS 403 を誘発して永遠に
- *   dirty な行になる (orphan bug 由来で特に顕著だった)
- * - **同期済み行 (synced_at IS NOT NULL)**: soft-delete して deleted_at を push で cloud に
- *   伝播する (別デバイスからも見えなくする)
+ * 以前は「未同期 → hard delete / 同期済み → soft delete (cloud に deleted_at 伝播)」に
+ * 分岐していたが、grid / cell 単位の restore UI が存在しないため soft-deleted 行は
+ * cloud に永続的にゴミとして残り続ける問題があった。整理ボタンで掃除する対象なので
+ * 「復元意図なし」と解釈し、local + cloud を一律 hard delete する方針に変更。
  */
 export async function cleanupOrphanGrids(): Promise<{
   gridsDeleted: number
   cellsDeleted: number
 }> {
   const { orphanGridIds, orphanCellIds } = await findOrphanGrids()
-  const ts = now()
   const BATCH = 500
 
-  // cells 先行: hard delete / soft delete に分岐
+  // 1. local: cells → grids の順で hard delete
   for (let i = 0; i < orphanCellIds.length; i += BATCH) {
     const batch = orphanCellIds.slice(i, i + BATCH)
     const ph = batch.map(() => '?').join(',')
-    // 未同期行は物理削除
-    await execute(
-      `DELETE FROM cells WHERE id IN (${ph}) AND synced_at IS NULL`,
-      batch,
-    )
-    // 同期済み行は論理削除 (push で伝播)
-    await execute(
-      `UPDATE cells SET deleted_at = ?, updated_at = ? WHERE id IN (${ph}) AND synced_at IS NOT NULL`,
-      [ts, ts, ...batch],
-    )
+    await execute(`DELETE FROM cells WHERE id IN (${ph})`, batch)
   }
-  // 次に grids: 同様に分岐
   for (let i = 0; i < orphanGridIds.length; i += BATCH) {
     const batch = orphanGridIds.slice(i, i + BATCH)
     const ph = batch.map(() => '?').join(',')
-    await execute(
-      `DELETE FROM grids WHERE id IN (${ph}) AND synced_at IS NULL`,
-      batch,
-    )
-    await execute(
-      `UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id IN (${ph}) AND synced_at IS NOT NULL`,
-      [ts, ts, ...batch],
-    )
+    await execute(`DELETE FROM grids WHERE id IN (${ph})`, batch)
   }
+
+  // 2. cloud: 未サインイン / Supabase 未設定なら何もしない
+  if (!isSupabaseConfigured) return { gridsDeleted: orphanGridIds.length, cellsDeleted: orphanCellIds.length }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return { gridsDeleted: orphanGridIds.length, cellsDeleted: orphanCellIds.length }
+
+  // Supabase の in() は一度に送れる引数数に実用上の上限がある (URI 長) ので同じ BATCH で刻む
+  try {
+    for (let i = 0; i < orphanCellIds.length; i += BATCH) {
+      const batch = orphanCellIds.slice(i, i + BATCH)
+      await supabase.from('cells').delete().in('id', batch)
+    }
+    for (let i = 0; i < orphanGridIds.length; i += BATCH) {
+      const batch = orphanGridIds.slice(i, i + BATCH)
+      await supabase.from('grids').delete().in('id', batch)
+    }
+  } catch (e) {
+    console.warn('[cleanupOrphanGrids] cloud delete failed (local delete already succeeded):', e)
+  }
+
   return { gridsDeleted: orphanGridIds.length, cellsDeleted: orphanCellIds.length }
 }
