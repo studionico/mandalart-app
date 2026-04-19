@@ -19,6 +19,18 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   // エラーを 1 箇所にまとめて最後に投げる。途中で 1 行失敗しても他の行は進められるように
   // per-row upsert で処理する。
   const failures: { table: string; id: string; message: string; code?: string }[] = []
+  // 永続失敗 (retry しても解決しない) を静かに mark synced した行のカウンター。警告サマリに使う。
+  let permanentFailures = 0
+
+  // 永続的に解決できない Postgres エラー:
+  // - 42501: RLS policy 違反 (親 mandalart が cloud に無い / 所有権なし → retry しても常に同じ結果)
+  // - 23503: FK 制約違反 (親 grid が cloud に無い → retry しても同じ)
+  // これらは何度 push しても 403/409 が返るだけで、error spam の原因になる。
+  // ローカルで `synced_at = updated_at` を立てて dirty 判定から外すことで、retry を止める。
+  // データは local に残るので user の作業は失われない (cloud 側との divergence は受け入れる)。
+  function isPermanentFailure(code?: string): boolean {
+    return code === '42501' || code === '23503'
+  }
 
   async function upsertOne(
     table: string,
@@ -26,6 +38,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     row: Record<string, unknown>,
     onSuccess: () => Promise<void>,
     onConflict?: string,
+    updatedAt?: string,
   ): Promise<boolean> {
     // onConflict 指定時は `ON CONFLICT (cols) DO UPDATE` として扱うので primary key (id) ではない
     // カラム組の一意制約違反 (例: cells の (grid_id, position)) でも cloud 側を local で上書きする。
@@ -41,22 +54,25 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       ? await builder.upsert(row, { onConflict })
       : await builder.upsert(row)
     if (error) {
-      // エラー詳細をオブジェクトに畳み込まず、message / code / details / hint を個別に展開して表示
+      const code = (error as { code?: string }).code
+      // 永続失敗: local で synced_at を立てて retry 対象から外す。error ではなく warn で 1 行のみ記録。
+      if (isPermanentFailure(code) && updatedAt) {
+        await execute(`UPDATE ${table} SET synced_at = ? WHERE id = ?`, [updatedAt, id])
+        permanentFailures++
+        console.warn(`[push] ${table} ${id} 永続失敗 (code=${code}) → local synced 扱いで retry 停止`)
+        return false
+      }
+      // 一時的 / 未分類の失敗: 従来どおり error で出して failures に積む
       console.error(
         `[push] ${table} upsert failed`,
         `id=${id}`,
-        `code=${(error as { code?: string }).code ?? '?'}`,
+        `code=${code ?? '?'}`,
         `message=${error.message}`,
         `details=${(error as { details?: string }).details ?? ''}`,
         `hint=${(error as { hint?: string }).hint ?? ''}`,
         'row=', row,
       )
-      failures.push({
-        table,
-        id,
-        message: error.message,
-        code: (error as { code?: string }).code,
-      })
+      failures.push({ table, id, message: error.message, code })
       return false
     }
     await onSuccess()
@@ -107,7 +123,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     }, async () => {
       await execute('UPDATE mandalarts SET synced_at = ? WHERE id = ?', [m.updated_at, m.id])
       mCount++
-    })
+    }, undefined, m.updated_at)
     if (!ok) continue
   }
 
@@ -129,7 +145,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     }, async () => {
       await execute('UPDATE grids SET synced_at = ? WHERE id = ?', [g.updated_at, g.id])
       gCount++
-    })
+    }, undefined, g.updated_at)
     if (!ok) continue
   }
 
@@ -162,8 +178,13 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       // cells は leaf エンティティで他テーブルから id 参照されない (grids.center_cell_id は
       // cells のまま unchange) ので、cloud 側の id がこの upsert で変わっても整合性に影響なし。
       'grid_id,position',
+      c.updated_at,
     )
     if (!ok) continue
+  }
+
+  if (permanentFailures > 0) {
+    console.warn(`[push] ${permanentFailures} 行が永続失敗 (RLS/FK) で local-only に固定されました。cloud との同期は諦めています`)
   }
 
   if (failures.length > 0) {
