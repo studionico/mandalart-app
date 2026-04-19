@@ -290,58 +290,35 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     return null
   }
 
-  // orbit 中に gridData が target に追いついたら orbit をクリアする。
-  // orbit 表示 → 通常表示の切替で古いセルが一瞬見える (= ドリル末の点滅) を防ぐ。
-  // また、通常描画に使う childCounts は別の useEffect が async で再計算するため
-  // 反映まで数 ms 遅れてセルの border 幅が一瞬ずれてちらつく。これを防ぐため
-  // orbit クリアと同時に事前フェッチ済みの childCountsByCellId を childCounts に
-  // 流し込んでおく。
+  // orbit / orbit9 の safety net: 各 drill handler が明示的に setOrbit(null) を呼ぶ前提の
+  // もとで、例外やその他の理由で明示 clear が走らなかった場合の救済としてアニメ最大時間 +
+  // 500ms 経過したら強制 clear する。
   //
-  // 'initial' (ダッシュボードから開いた直後) は resetBreadcrumb により currentGridId が
-  // 既にセットされていて gridData のフェッチが走る。この auto-clear を走らせてしまうと
-  // アニメーション終了前に orbit がクリアされてしまうので、'initial' 中は除外する。
-  // 'initial' 用の orbit クリアは init() 内の setTimeout で明示的に行う。
+  // 'initial' (ダッシュボードから開いた直後) は init() 内の setTimeout で明示 clear するので
+  // ここでは対象外。
   //
-  // fast path で gridData 一致の時は即 clear。遅延や fetch 失敗で追いつかないまま stuck 化
-  // した場合は、アニメ最大時間 + 500ms buffer の safety net で強制 clear する。
-  // (従来は gridData 依存のみで、連続 drill / realtime reload race / useGrid error で
-  // orbit が永続 stuck になり、以降の drill アニメが全て壊れるケースがあった)
+  // 以前は「gridData が targetGridId に追いついたら即 clear」という fast path を持っていたが、
+  // 順序変更で setCurrentGrid が await の前に移った結果、animation 途中で gridData が追い
+  // ついて早すぎるタイミングで orbit が切れてしまうため削除した。
   useEffect(() => {
     if (!orbit || orbit.direction === 'initial') return
-    if (gridData && gridData.id === orbit.targetGridId) {
-      setChildCounts(orbit.childCountsByCellId)
-      setOrbit(null)
-      return
-    }
     const maxMs =
       (orbit.direction === 'drill-up'
         ? ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS
         : ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS) + 500
     const t = setTimeout(() => setOrbit(null), maxMs)
     return () => clearTimeout(t)
-  }, [orbit, gridData, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
+  }, [orbit, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
 
-  // 9×9 orbit も同様に gridData 一致で auto-clear + safety net 強制 clear。
-  // subGrids は useSubGrids 側が async でフェッチするため、切替直後に古い subGrids で
-  // 描画されて「ちらつく」ことがある。事前取得済みの targetSubGrids を setSubGrids で
-  // 注入して初回描画から正しい状態にする。
   useEffect(() => {
     if (!orbit9 || orbit9.direction === 'initial') return
-    if (gridData && gridData.id === orbit9.targetGridId) {
-      setChildCounts(orbit9.childCountsByCellId)
-      setSubGrids(orbit9.targetSubGrids)
-      setOrbit9(null)
-      return
-    }
     const maxMs =
       (orbit9.direction === 'drill-up'
         ? ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS
         : ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS) + 500
     const t = setTimeout(() => setOrbit9(null), maxMs)
     return () => clearTimeout(t)
-    // setSubGrids は stable。dep に含めると useSubGrids の load 再作成で余分発火するので除外
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orbit9, gridData, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
+  }, [orbit9, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
 
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
@@ -682,6 +659,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
       // アニメ: 9×9 なら sub-block の外側位置 (= parentCell.position) → 新中央 (4) へ orbit。
       // cell.position は sub-block 内の内側位置 (0-8) であり 9×9 layout 位置ではないので使えない。
+      //
+      // 順序: setOrbit9 → state 更新 (setCurrentGrid / pushBreadcrumb 等) → await → 明示 clear。
+      // setCurrentGrid を await 前に出すことで、animation 中に gridData fetch が並行して走り
+      // memo / breadcrumb がアニメ開始と同時に target を指すようになる。
+      let pendingClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
       if (viewMode === '9x9') {
         const [targetSubGrids, childCountsByCellId] = await Promise.all([
           fetchSubGridsFor(deeperGrid.cells),
@@ -696,10 +678,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           movingFromPosition: parentCell.position,
           direction: 'drill-down',
         })
-        await new Promise((r) =>
-          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
-        )
-        if (!isMountedRef.current) return
+        pendingClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
       }
 
       setCurrentGrid(deeperGrid.id)
@@ -722,6 +701,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: subGrid.cells,
         highlightPosition: cell.position,
       })
+
+      if (pendingClear9) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingClear9.childCounts)
+        setSubGrids(pendingClear9.subGrids)
+        setOrbit9(null)
+      }
       return
     }
 
@@ -749,7 +738,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             ? await getChildGrids(parent.cellId)
             : await getRootGrids(mandalartId)
           const siblingIdx = siblings.findIndex((g) => g.id === parent.gridId)
-          // 3×3 表示ならドリルアップの軌道アニメーションを再生してから状態を切替
+          // 順序: setOrbit → state 更新 → await → 明示 clear
+          let pendingUpClear3: Map<string, number> | null = null
+          let pendingUpClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
           if (viewMode === '3x3') {
             // 移動セル = 親グリッド内の「ドリル元セル」(= 今の中心が対応しているセル)
             const parentGridData = await getGrid(parent.gridId)
@@ -766,10 +757,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 movingFromPosition: 4, // 現在の中心から親内の対応位置へ移動
                 direction: 'drill-up',
               })
-              await new Promise((r) =>
-                setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
-              )
-              if (!isMountedRef.current) return
+              pendingUpClear3 = childCountsByCellId
             }
           } else if (viewMode === '9x9') {
             // 9×9 ブロック単位のドリルアップ: 現在の中央ブロック (= 現在 grid) が
@@ -792,17 +780,31 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 movingFromPosition: 4, // 現中央ブロックから出発
                 direction: 'drill-up',
               })
-              await new Promise((r) =>
-                setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
-              )
-              if (!isMountedRef.current) return
+              pendingUpClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
             }
           }
+
           setCurrentGrid(parent.gridId)
           setParallelGrids(siblings.length > 0 ? siblings : [])
           setParallelIndex(siblingIdx >= 0 ? siblingIdx : 0)
           popBreadcrumbTo(parent.gridId)
-          // orbit は gridData が parent.gridId に追いついた時点で useEffect がクリア
+
+          if (pendingUpClear3) {
+            await new Promise((r) =>
+              setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
+            )
+            if (!isMountedRef.current) return
+            setChildCounts(pendingUpClear3)
+            setOrbit(null)
+          } else if (pendingUpClear9) {
+            await new Promise((r) =>
+              setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
+            )
+            if (!isMountedRef.current) return
+            setChildCounts(pendingUpClear9.childCounts)
+            setSubGrids(pendingUpClear9.subGrids)
+            setOrbit9(null)
+          }
         }
       }
       return
@@ -814,6 +816,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const firstChild = await getGrid(children[0].id)
       const currentCells = gridData?.cells ?? []
 
+      // 順序: setOrbit → state 更新 → await → 明示 clear
+      let pendingDownClear3: Map<string, number> | null = null
+      let pendingDownClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
       if (viewMode === '3x3') {
         const targetCenter = firstChild.cells.find((c) => c.position === CENTER_POSITION)
         const childCountsByCellId = await fetchChildCountsFor(firstChild.cells)
@@ -825,10 +830,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           movingFromPosition: cell.position, // クリックした周辺セルの位置から中心へ
           direction: 'drill-down',
         })
-        await new Promise((r) =>
-          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
-        )
-        if (!isMountedRef.current) return
+        pendingDownClear3 = childCountsByCellId
       } else if (viewMode === '9x9') {
         // 9×9 中央ブロック内のセル drill-down: 9×9 layout 上の outer 位置 → 新中央 (4) へ。
         // cell.position は merged view の値で、X=C 合流セル (sub-block center) では 4 に
@@ -850,10 +852,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           movingFromPosition: outerPos,
           direction: 'drill-down',
         })
-        await new Promise((r) =>
-          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
-        )
-        if (!isMountedRef.current) return
+        pendingDownClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
       }
 
       setCurrentGrid(firstChild.id)
@@ -869,7 +868,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: currentCells,
         highlightPosition: cell.position,
       })
-      // orbit は gridData が firstChild.id に追いついた時点で useEffect がクリア
+
+      if (pendingDownClear3) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingDownClear3)
+        setOrbit(null)
+      } else if (pendingDownClear9) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingDownClear9.childCounts)
+        setSubGrids(pendingDownClear9.subGrids)
+        setOrbit9(null)
+      }
     } else if (!isCellEmpty(cell)) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       // 新モデル: center_cell_id = cell.id (親の周辺セルがそのまま子グリッドの中心になる)
@@ -879,6 +894,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // newGrid.cells は 9 要素で提供される (中心は親 cell、周辺 8 は新規 empty)
       const populatedCells = newGrid.cells
 
+      // 順序: setOrbit → state 更新 → await → 明示 clear
+      let pendingNewClear3: Map<string, number> | null = null
+      let pendingNewClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
       if (viewMode === '3x3') {
         const targetCenter = populatedCells.find((c) => c.position === CENTER_POSITION)
         // 新規作成したばかりのサブグリッドなので子グリッド 0 件で確定
@@ -893,10 +911,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           movingFromPosition: cell.position,
           direction: 'drill-down',
         })
-        await new Promise((r) =>
-          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
-        )
-        if (!isMountedRef.current) return
+        pendingNewClear3 = childCountsByCellId
       } else if (viewMode === '9x9') {
         // 9×9 で新規サブグリッドを掘り下げ。sub-grid が無い新規作成直後なので
         // targetSubGrids / childCountsByCellId はすべて空で確定。
@@ -917,10 +932,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           movingFromPosition: outerPos,
           direction: 'drill-down',
         })
-        await new Promise((r) =>
-          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
-        )
-        if (!isMountedRef.current) return
+        pendingNewClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
       }
 
       setCurrentGrid(newGrid.id)
@@ -936,7 +948,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         cells: currentCells,
         highlightPosition: cell.position,
       })
-      // orbit は gridData が newGrid.id に追いついた時点で useEffect がクリア
+
+      if (pendingNewClear3) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingNewClear3)
+        setOrbit(null)
+      } else if (pendingNewClear9) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingNewClear9.childCounts)
+        setSubGrids(pendingNewClear9.subGrids)
+        setOrbit9(null)
+      }
     }
     // 空セルでドリルしようとしても何もしない (編集はインラインで)
   }
