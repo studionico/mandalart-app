@@ -29,13 +29,17 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   ): Promise<boolean> {
     // onConflict 指定時は `ON CONFLICT (cols) DO UPDATE` として扱うので primary key (id) ではない
     // カラム組の一意制約違反 (例: cells の (grid_id, position)) でも cloud 側を local で上書きする。
-    const upsertFn = (supabase.from(table) as unknown as {
+    // NOTE: supabase.from(table).upsert を変数に代入してから呼ぶと this 束縛が外れて
+    // `this.cloneRequestState` undefined エラーになるため、必ず method chain で直接呼ぶ。
+    const builder = supabase.from(table) as unknown as {
       upsert: (
         r: Record<string, unknown>,
         opts?: { onConflict?: string },
       ) => Promise<{ error: { message: string; code?: string; details?: string; hint?: string } | null }>
-    }).upsert
-    const { error } = await upsertFn(row, onConflict ? { onConflict } : undefined)
+    }
+    const { error } = onConflict
+      ? await builder.upsert(row, { onConflict })
+      : await builder.upsert(row)
     if (error) {
       // エラー詳細をオブジェクトに畳み込まず、message / code / details / hint を個別に展開して表示
       console.error(
