@@ -190,3 +190,168 @@ export async function deleteGrid(id: string): Promise<void> {
 export async function updateGridSortOrder(id: string, sortOrder: number): Promise<void> {
   await execute('UPDATE grids SET sort_order = ?, updated_at = ? WHERE id = ?', [sortOrder, now(), id])
 }
+
+// ---------------------------------------------------------------------------
+// Orphan cleanup: 「表示上は root から辿れるが、内容が無く削除しても問題ない」
+// 空グリッドを洗い出して soft-delete する。
+//
+// 対象:
+//  1. **過去の無限再帰バグ (pre-b1ce52c 時代) のチェーン残骸** NG_1 → NG_2 → ... → NG_last
+//  2. **auto-cleanup 対象外の「単独 drilled + 空のまま」grid**
+//     cleanupGridIfEmpty (EditorLayout) は「兄弟が自分 1 つだけ (= 単独 drilled)」は削除しない
+//     仕様 (X 保持のため drill してすぐ戻ったグリッドを残す設計)。結果として、ユーザーが
+//     繰り返し drill して中身を埋めなかった場合に「単独の空 grid」が累積する。
+//     この整理機能では cleanupGridIfEmpty が見逃す単独空 grid も削除対象に含める。
+//
+// 判定条件 (以下すべて満たすと orphan):
+//   - root grid ではない (mandalart.root_cell_id != grid.center_cell_id)
+//   - 周辺セルがすべて空 (text = '' AND image_path IS NULL)
+//   - drilled children が全て orphan か、存在しない (反復で畳み込み)
+//
+// root の下で内容が実体として現れる grid (非空 peripheral / 子孫に非空あり) は除外される。
+//
+// パフォーマンス: DB 全体を最初に 3 クエリだけで読み、以降はメモリ内で処理。
+// ---------------------------------------------------------------------------
+
+export type OrphanStats = {
+  orphanGridIds: string[]
+  orphanCellIds: string[]
+  totalGrids: number
+  totalCells: number
+}
+
+export async function findOrphanGrids(): Promise<OrphanStats> {
+  // 1. 必要なデータを 3 クエリだけで一括取得
+  type GridRow = { id: string; mandalart_id: string; center_cell_id: string }
+  type CellRow = { id: string; grid_id: string; position: number; text: string; image_path: string | null }
+  type MandalartRow = { id: string; root_cell_id: string }
+
+  const [allGrids, allCells, allMandalarts] = await Promise.all([
+    query<GridRow>(
+      'SELECT id, mandalart_id, center_cell_id FROM grids WHERE deleted_at IS NULL',
+    ),
+    query<CellRow>(
+      'SELECT id, grid_id, position, text, image_path FROM cells WHERE deleted_at IS NULL',
+    ),
+    query<MandalartRow>(
+      'SELECT id, root_cell_id FROM mandalarts WHERE deleted_at IS NULL',
+    ),
+  ])
+
+  // 2. インデックス構築 (全て O(N) で構築し、以降の反復は O(1) lookup)
+  const rootCellIdByMandalart = new Map<string, string>()
+  for (const m of allMandalarts) rootCellIdByMandalart.set(m.id, m.root_cell_id)
+
+  // grid_id → その grid が所有する cells (all cells, 中心含む)
+  const ownCellsByGrid = new Map<string, CellRow[]>()
+  for (const c of allCells) {
+    const arr = ownCellsByGrid.get(c.grid_id) ?? []
+    arr.push(c)
+    ownCellsByGrid.set(c.grid_id, arr)
+  }
+
+  // center_cell_id → その cell を center にしている grid id 群
+  const gridsByCenterCellId = new Map<string, string[]>()
+  for (const g of allGrids) {
+    const arr = gridsByCenterCellId.get(g.center_cell_id) ?? []
+    arr.push(g.id)
+    gridsByCenterCellId.set(g.center_cell_id, arr)
+  }
+
+  // 各 grid の「drilled children grid ids」= 自 grid の cells を center にしている他 grid
+  const drilledChildrenByGrid = new Map<string, string[]>()
+  for (const g of allGrids) {
+    const ownCells = ownCellsByGrid.get(g.id) ?? []
+    const children: string[] = []
+    for (const cell of ownCells) {
+      const childGrids = gridsByCenterCellId.get(cell.id) ?? []
+      for (const chId of childGrids) {
+        if (chId !== g.id) children.push(chId)
+      }
+    }
+    drilledChildrenByGrid.set(g.id, children)
+  }
+
+  // 3. 候補抽出: "非 root + 全 peripheral が空" な grid
+  function isEmptyPeripherals(gridId: string): boolean {
+    const cells = ownCellsByGrid.get(gridId) ?? []
+    // cells には中心も含まれるので、peripheral (position != 4) だけをチェック
+    const peripherals = cells.filter((c) => c.position !== 4)
+    if (peripherals.length === 0) return true
+    return peripherals.every((c) => c.text === '' && c.image_path === null)
+  }
+  function isRoot(g: GridRow): boolean {
+    return rootCellIdByMandalart.get(g.mandalart_id) === g.center_cell_id
+  }
+  const candidateIds: string[] = []
+  for (const g of allGrids) {
+    if (isRoot(g)) continue
+    if (isEmptyPeripherals(g.id)) candidateIds.push(g.id)
+  }
+
+  // 4. 反復: "drilled children が全て orphan" な候補を畳み込み
+  //    末端 (children なし) は即時 orphan 確定、チェーンは末端から逆向きに伝播する。
+  //    正当な「中身のある子孫がある」drilled grid は、非 orphan な子孫を持つので
+  //    isEmptyPeripherals が true でも ここで orphan 扱いされない。
+  const orphanSet = new Set<string>()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const gid of candidateIds) {
+      if (orphanSet.has(gid)) continue
+      const children = drilledChildrenByGrid.get(gid) ?? []
+      const hasNonOrphanChild = children.some((c) => !orphanSet.has(c))
+      if (!hasNonOrphanChild) {
+        orphanSet.add(gid)
+        changed = true
+      }
+    }
+  }
+
+  const orphanGridIds = [...orphanSet]
+  // 5. orphan grid に属する cells (grid_id が orphan のもの) を抽出
+  const orphanCellIds: string[] = []
+  for (const gid of orphanGridIds) {
+    const cells = ownCellsByGrid.get(gid) ?? []
+    for (const c of cells) orphanCellIds.push(c.id)
+  }
+
+  return {
+    orphanGridIds,
+    orphanCellIds,
+    totalGrids: allGrids.length,
+    totalCells: allCells.length,
+  }
+}
+
+/**
+ * 孤立グリッドと配下のセルを soft-delete する。
+ * 同期経由で cloud 側にも deleted_at が伝播する (RLS に弾かれる行は push エラーとして残るが、
+ * local データの整合性は取れる)。
+ */
+export async function cleanupOrphanGrids(): Promise<{
+  gridsDeleted: number
+  cellsDeleted: number
+}> {
+  const { orphanGridIds, orphanCellIds } = await findOrphanGrids()
+  const ts = now()
+  // cells 先行 (親 grid の deleted_at 設定前に子 cells をマーク)
+  const BATCH = 500
+  for (let i = 0; i < orphanCellIds.length; i += BATCH) {
+    const batch = orphanCellIds.slice(i, i + BATCH)
+    const ph = batch.map(() => '?').join(',')
+    await execute(
+      `UPDATE cells SET deleted_at = ?, updated_at = ? WHERE id IN (${ph})`,
+      [ts, ts, ...batch],
+    )
+  }
+  for (let i = 0; i < orphanGridIds.length; i += BATCH) {
+    const batch = orphanGridIds.slice(i, i + BATCH)
+    const ph = batch.map(() => '?').join(',')
+    await execute(
+      `UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id IN (${ph})`,
+      [ts, ts, ...batch],
+    )
+  }
+  return { gridsDeleted: orphanGridIds.length, cellsDeleted: orphanCellIds.length }
+}

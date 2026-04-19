@@ -794,10 +794,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             }
           }
 
+          // drill-up 経路: 離れる grid (= 現在の gridData) が空なら auto-cleanup する。
+          // これを入れないと「drill → 空のまま中心クリックで戻る」を繰り返すたびに
+          // 空 grid が DB に残り、積み上がる (breadcrumb / parallel-nav 経路では既に
+          // cleanupGridIfEmpty が呼ばれていたが、drill-up 経路が抜けていた)。
+          const oldGridId = gridData.id
           setCurrentGrid(parent.gridId)
           setParallelGrids(siblings.length > 0 ? siblings : [])
           setParallelIndex(siblingIdx >= 0 ? siblingIdx : 0)
           popBreadcrumbTo(parent.gridId)
+          await cleanupGridIfEmpty(oldGridId)
 
           if (pendingUpClear3) {
             await new Promise((r) =>
@@ -1066,11 +1072,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    * - **self-centered** (root grid, center_cell_id が自グリッド所属):
    *   中心セル空 → 削除 (従来通り)。ただし root を削除すると親 cell を
    *   クリアする対象がないので X クリア処理は行わない
-   * - **非 self-centered** (drilled / 並列) + 他に兄弟がいる:
+   * - **非 self-centered** (drilled / 並列):
    *   自グリッドの peripherals 8 個が全部空 → 削除。中心は親 X と共有で空にできないので、
-   *   周辺が空なら "書かれていない並列" とみなす
-   * - **非 self-centered + 兄弟が自分 1 つだけ (= 単独 drilled)**:
-   *   自動削除しない。"drill してすぐ戻った" だけのユーザーに対して X を保持するため
+   *   周辺が空なら "書かれていない並列" とみなす。
+   *   兄弟の有無に関わらず削除する (以前は「単独 drilled」は X 保持のため残していたが、
+   *   空グリッドの累積を招くだけで X 自体や UI には影響しないと判明したため廃止)。
+   *   削除後にユーザーが再 drill した場合は createGrid で新しい空 grid が作られるだけで
+   *   挙動は従来と等価。
    *
    * 判定は DB から再読み込みした merged cells で行う (state の部分更新で position
    * override が崩れていても影響を受けないようにするため)。
@@ -1093,12 +1101,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const peripherals = gridWithCells.cells.filter((c) => c.id !== parentCellId)
       if (peripherals.some((c) => !isCellEmpty(c))) return false
 
-      // 他に兄弟が残っているかを確認 (siblings には自身も含まれる)
-      const siblings = await getChildGrids(parentCellId)
-      if (siblings.length <= 1) return false
-
       await deleteGrid(gridId)
-      // 兄弟が残っているので親セル X はそのまま
       return true
     } catch (e) {
       console.error('cleanup deleteGrid failed:', e)
