@@ -69,6 +69,16 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     return withSync.filter((r) => !(r.deleted_at && !r.synced_at)) as T[]
   }
 
+  // 参照整合性のサニタイズ: 親が local DB に存在しない行は zombie データなので hard delete する。
+  // 過去のバグ (mandalart 削除時に子が残った / 部分同期で分裂) で生まれた zombie grid / cell を
+  // push 前に一掃する。これらは cloud 側に親がないため push しても必ず RLS 403 になるので、
+  // local から消すのが唯一の出口。
+  // 順序: cells を先に消す (grid が先に消えると cells の grid_id 参照先がなくなり重複判定になる)
+  await execute(`DELETE FROM cells WHERE grid_id NOT IN (SELECT id FROM grids)`)
+  await execute(`DELETE FROM grids WHERE mandalart_id NOT IN (SELECT id FROM mandalarts)`)
+  // grid を消した結果、その grid に属していた cells も追加で orphan 化するので再度掃除
+  await execute(`DELETE FROM cells WHERE grid_id NOT IN (SELECT id FROM grids)`)
+
   // 1. mandalarts
   const dirtyMandalartsRaw = await query<Mandalart>(
     'SELECT * FROM mandalarts WHERE synced_at IS NULL OR synced_at < updated_at',
