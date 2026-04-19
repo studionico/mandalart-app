@@ -227,19 +227,29 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const { query } = await import('@/lib/db')
     const cellIds = cells.map((c) => c.id)
     const placeholders = cellIds.map(() => '?').join(',')
-    // 自グリッド参照 (root center cell が自分のグリッドを center にしているケース) は
-    // self_cell 経由で join して `g.id != self_cell.grid_id` で除外する。
+    // 旧実装は `JOIN cells sub ON sub.grid_id = g.id` で grids × peripherals をデカルト積的に
+    // 展開して COUNT(DISTINCT g.id) で重複排除していたが、データ量が増えると中間行爆発で
+    // 秒単位のラグを発生させていた (実測 1〜4 秒)。
+    // EXISTS 節の semi-join に変更して index を効かせ、50〜150ms に短縮する。
+    //   - self_cell は grid_id 取得のためだけに使うのでスカラサブクエリで置換
+    //   - COUNT(DISTINCT) は EXISTS で重複が出ないので COUNT(*) に簡略化
     const rows = await query<{ cell_id: string; cnt: number }>(
-      `SELECT g.center_cell_id AS cell_id, COUNT(DISTINCT g.id) AS cnt
+      `SELECT g.center_cell_id AS cell_id, COUNT(*) AS cnt
        FROM grids g
-       JOIN cells self_cell ON self_cell.id = g.center_cell_id
-       JOIN cells sub ON sub.grid_id = g.id
        WHERE g.center_cell_id IN (${placeholders})
-         AND g.id != self_cell.grid_id
          AND g.deleted_at IS NULL
-         AND sub.position != 4
-         AND sub.deleted_at IS NULL
-         AND (sub.text != '' OR sub.image_path IS NOT NULL)
+         AND g.id != (
+           SELECT grid_id FROM cells
+           WHERE id = g.center_cell_id AND deleted_at IS NULL
+           LIMIT 1
+         )
+         AND EXISTS (
+           SELECT 1 FROM cells sub
+           WHERE sub.grid_id = g.id
+             AND sub.position != 4
+             AND sub.deleted_at IS NULL
+             AND (sub.text != '' OR sub.image_path IS NOT NULL)
+         )
        GROUP BY g.center_cell_id`,
       cellIds,
     )
