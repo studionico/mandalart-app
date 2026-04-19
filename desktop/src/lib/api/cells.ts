@@ -1,4 +1,4 @@
-import { query, execute, now } from '../db'
+import { query, execute, now, generateId } from '../db'
 import { CENTER_POSITION } from '@/constants/grid'
 import { isCellEmpty } from '@/lib/utils/grid'
 import type { Cell } from '../../types'
@@ -158,6 +158,20 @@ export async function pasteCell(
 /**
  * source のサブツリー (drilled 子グリッド群) + content を target に複製する。
  */
+/**
+ * source のサブツリー全体を target にコピーする。
+ *
+ * 実装方針: **mandalart 全 grids + 全 cells を 2 query で先読み → in-memory で BFS + bulk INSERT**
+ *
+ * - 以前の再帰実装は 1 grid あたり ~5 query で 286 grid = ~1400 往復 ≈ 15 秒かかっていた
+ * - BFS レベル単位の読み込みは per-query overhead で 20 query × 200ms ≈ 4.5 秒だった
+ * - 再帰 CTE は SQLite optimizer が効かず逆に 48 秒に悪化した
+ * - 現行の mandalart 全先読み方式は 2 query で完結 ≈ 1.5 秒が JS 層の理論下限
+ *
+ * X=C 統一モデル対策: BFS ループで `sc.id === sourceCenterId` の cell (merged center) を
+ * skip し、peripheral cell 経由だけで child grid を辿る。これで root ↔ drilled-root-center
+ * 間の循環を回避 (トップレベルの topLevelGrids 列挙で全親は既に拾われている)。
+ */
 export async function copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void> {
   const srcs = await query<Cell>(
     'SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL',
@@ -166,98 +180,159 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
   const src = srcs[0]
   if (!src) return
 
-  // 新モデル: source cell を center として指しているすべての grid を複製。
-  // peripheral なら drilled grids のみ、center (root center 等) なら自グリッドも含まれ、
-  // "grid 全体を subtree として複製する" 旧挙動を自然に再現する。
-  const centeringGrids = await query<{ id: string; sort_order: number }>(
-    'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
-    [sourceCellId],
+  // ---- 1. source cell が所属する mandalart の全 grids を 1 query で取得 ----
+  type AnyGrid = {
+    id: string
+    center_cell_id: string
+    sort_order: number
+    mandalart_id: string
+    memo: string | null
+  }
+  const allGridsInMandalart = await query<AnyGrid>(
+    `SELECT id, center_cell_id, sort_order, mandalart_id, memo FROM grids
+     WHERE mandalart_id = (SELECT mandalart_id FROM grids WHERE id = ? AND deleted_at IS NULL LIMIT 1)
+       AND deleted_at IS NULL`,
+    [src.grid_id],
   )
-  for (const cg of centeringGrids) {
-    await copyGridRecursive(cg.id, targetCellId, cg.sort_order)
+
+  // source cell を center とする grid が subtree に存在しない = 何もコピーするものなし
+  const topLevelGrids = allGridsInMandalart.filter((g) => g.center_cell_id === sourceCellId)
+  if (topLevelGrids.length === 0) {
+    await execute(
+      'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
+      [src.text, src.image_path, src.color, now(), targetCellId],
+    )
+    return
   }
 
+  // ---- 2. mandalart 全 cells を IN 句で取得 (single-pass) ----
+  // 2-pass (thin fetch で subtree 特定 → full fetch) を試したが、tauri-plugin-sql の per-row
+  // IPC コストがカラム数に依存せず ~0.6ms/row 定数だったため、クエリ往復を増やすだけ悪化した。
+  // 結論: single-fetch + in-memory BFS で subtree 抽出 + bulk INSERT が JS 層での理論下限。
+  // 必要カラム (7 列) だけ SELECT することで転送量を抑える。
+  const allGridIds = allGridsInMandalart.map((g) => g.id)
+  const QUERY_CHUNK = 500
+  type NarrowCell = Pick<Cell, 'id' | 'grid_id' | 'position' | 'text' | 'image_path' | 'color' | 'done'>
+  const allCells: NarrowCell[] = []
+  for (let i = 0; i < allGridIds.length; i += QUERY_CHUNK) {
+    const chunk = allGridIds.slice(i, i + QUERY_CHUNK)
+    const ph = chunk.map(() => '?').join(',')
+    const chunkCells = await query<NarrowCell>(
+      `SELECT id, grid_id, position, text, image_path, color, done FROM cells
+       WHERE grid_id IN (${ph}) AND deleted_at IS NULL`,
+      chunk,
+    )
+    allCells.push(...chunkCells)
+  }
+
+  // ---- 3. in-memory map 構築 ----
+  const cellsByGrid = new Map<string, NarrowCell[]>()
+  for (const c of allCells) {
+    const arr = cellsByGrid.get(c.grid_id) ?? []
+    arr.push(c)
+    cellsByGrid.set(c.grid_id, arr)
+  }
+  const gridsByCenterCell = new Map<string, AnyGrid[]>()
+  for (const g of allGridsInMandalart) {
+    const arr = gridsByCenterCell.get(g.center_cell_id) ?? []
+    arr.push(g)
+    gridsByCenterCell.set(g.center_cell_id, arr)
+  }
+
+  // ---- 4. in-memory BFS で ID 割り当て + insert 集計 ----
+  type Node = {
+    sourceGridId: string
+    newGridId: string
+    newCenterCellId: string
+    sortOrder: number
+    mandalartId: string
+    memo: string | null
+    sourceCenterId: string
+  }
+
+  const ts = now()
+  const cellIdMap = new Map<string, string>()
+  const gridInserts: Array<[string, string, string, number, string | null, string, string]> = []
+  const cellInserts: Array<[string, string, number, string, string | null, string | null, number, string, string]> = []
+  const processedGridIds = new Set<string>()
+
+  // Top level: source cell を center とする grid 群 (parallel 含む)。
+  // topLevelGrids は上で既に計算済 (no-subtree 早期 return のため)。
+  let queue: Node[] = topLevelGrids.map((g) => ({
+    sourceGridId: g.id,
+    newGridId: generateId(),
+    newCenterCellId: targetCellId,
+    sortOrder: g.sort_order,
+    mandalartId: g.mandalart_id,
+    memo: g.memo,
+    sourceCenterId: g.center_cell_id,
+  }))
+
+  while (queue.length > 0) {
+    const batch = queue
+    queue = []
+
+    for (const n of batch) {
+      if (processedGridIds.has(n.sourceGridId)) continue
+      processedGridIds.add(n.sourceGridId)
+
+      gridInserts.push([n.newGridId, n.mandalartId, n.newCenterCellId, n.sortOrder, n.memo, ts, ts])
+      cellIdMap.set(n.sourceCenterId, n.newCenterCellId)
+
+      const ownCells = cellsByGrid.get(n.sourceGridId) ?? []
+      for (const sc of ownCells) {
+        if (sc.id === n.sourceCenterId) continue
+        const newCellId = generateId()
+        cellIdMap.set(sc.id, newCellId)
+        cellInserts.push([newCellId, n.newGridId, sc.position, sc.text, sc.image_path, sc.color, sc.done ? 1 : 0, ts, ts])
+
+        // このペリフェラルを center とする child grids を次レベル queue へ
+        const children = gridsByCenterCell.get(sc.id) ?? []
+        for (const child of children) {
+          if (child.id === n.sourceGridId) continue  // self-ref 排除
+          if (processedGridIds.has(child.id)) continue
+          queue.push({
+            sourceGridId: child.id,
+            newGridId: generateId(),
+            newCenterCellId: newCellId,
+            sortOrder: child.sort_order,
+            mandalartId: child.mandalart_id,
+            memo: child.memo,
+            sourceCenterId: child.center_cell_id,
+          })
+        }
+      }
+    }
+  }
+
+  // ---- 全 INSERT を chunk 単位で実行 ----
+  // SQLite の ? 上限 999: grid=7 cols なら 140 行/chunk, cell=9 cols なら 110 行/chunk まで。
+  // 明示トランザクション (BEGIN IMMEDIATE) は tauri-plugin-sql / realtime sync と衝突して
+  // 'database is locked' を誘発することがあったので使わない。chunk サイズを上限近くまで
+  // 拡大して statement 数自体を減らすことで fsync 回数を抑える。
+  const GRID_CHUNK = 140
+  const CELL_CHUNK = 110
+  for (let i = 0; i < gridInserts.length; i += GRID_CHUNK) {
+    const chunk = gridInserts.slice(i, i + GRID_CHUNK)
+    const valuesSql = chunk.map(() => '(?,?,?,?,?,?,?)').join(',')
+    await execute(
+      `INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES ${valuesSql}`,
+      chunk.flat(),
+    )
+  }
+  for (let i = 0; i < cellInserts.length; i += CELL_CHUNK) {
+    const chunk = cellInserts.slice(i, i + CELL_CHUNK)
+    const valuesSql = chunk.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')
+    await execute(
+      `INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES ${valuesSql}`,
+      chunk.flat(),
+    )
+  }
   // target に source の content を上書き
   await execute(
     'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
-    [src.text, src.image_path, src.color, now(), targetCellId]
+    [src.text, src.image_path, src.color, now(), targetCellId],
   )
-}
-
-/**
- * sourceGridId のサブツリーを複製し、新しいグリッドの中心を newCenterCellId にする。
- *
- * - 新グリッド G' は 8 peripherals のみ INSERT (center は newCenterCellId の既存 cell)
- * - source 側の center cell (旧 G.center) の content は複製せず skip:
- *   target cell = newCenterCellId が既に content を持っているか、
- *   呼び出し側 (copyCellSubtree) が src の content を後で target に上書きする
- * - 各 source cell の子グリッドを再帰的に複製
- *
- * ⚠ 子グリッド検索は NG を insert する**前**に snapshot する必要がある。後付けで query すると、
- * 「中心セル C を同一グリッド G 内の周辺セル P にドロップ」のような操作で、sc = P の反復時に
- * 今さっき挿入した NG (center_cell_id = P.id) 自身が「P の子グリッド」として hit して
- * 無限再帰 (NG → NG2 → NG3 ...) が発生する。
- */
-async function copyGridRecursive(
-  sourceGridId: string,
-  newCenterCellId: string,
-  sortOrder: number,
-): Promise<string> {
-  const { generateId } = await import('../db')
-  const gridRows = await query<{ mandalart_id: string; memo: string | null; center_cell_id: string }>(
-    'SELECT mandalart_id, memo, center_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
-    [sourceGridId],
-  )
-  const sg = gridRows[0]
-  if (!sg) return ''
-
-  // getGrid で center merged な 9 cells を取得 (root grid なら 9、child grid でも 9)
-  const { getGrid } = await import('./grids')
-  const sourceGrid = await getGrid(sourceGridId)
-  const sourceCenterId = sg.center_cell_id
-
-  // NG 作成前に snapshot: 各 source cell が現時点で持つ child grids を固定する。
-  // こうしないと NG 挿入後の query で NG 自身を誤って "P の子グリッド" と認識して無限再帰する。
-  const childGridsBySourceCellId = new Map<string, Array<{ id: string; sort_order: number }>>()
-  for (const sc of sourceGrid.cells) {
-    const childGrids = await query<{ id: string; sort_order: number }>(
-      'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
-      [sc.id, sourceGridId],
-    )
-    childGridsBySourceCellId.set(sc.id, childGrids)
-  }
-
-  const newGridId = generateId()
-  const ts = now()
-  await execute(
-    'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
-    [newGridId, sg.mandalart_id, newCenterCellId, sortOrder, sg.memo, ts, ts],
-  )
-
-  // source cell id → new cell id のマッピング
-  const cellIdMap = new Map<string, string>()
-  cellIdMap.set(sourceCenterId, newCenterCellId)
-
-  // 8 peripherals (source の center は skip)
-  for (const sc of sourceGrid.cells) {
-    if (sc.id === sourceCenterId) continue
-    const newCellId = generateId()
-    cellIdMap.set(sc.id, newCellId)
-    await execute(
-      'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
-      [newCellId, newGridId, sc.position, sc.text, sc.image_path, sc.color, sc.done ? 1 : 0, ts, ts],
-    )
-  }
-
-  // 各 source cell の drilled grids を再帰コピー (snapshot を参照)
-  for (const sc of sourceGrid.cells) {
-    const childGrids = childGridsBySourceCellId.get(sc.id) ?? []
-    const newParentCellId = cellIdMap.get(sc.id)!
-    for (const cg of childGrids) {
-      await copyGridRecursive(cg.id, newParentCellId, cg.sort_order)
-    }
-  }
-  return newGridId
 }
 
 // ---------------------------------------------------------------------------

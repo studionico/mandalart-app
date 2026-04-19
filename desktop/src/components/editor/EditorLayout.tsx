@@ -74,7 +74,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const { isOffline } = useOffline()
   const clipboard = useClipboardStore()
 
-  const { data: gridData, reload, updateCell: updateCellLocal } = useGrid(currentGridId)
+  const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
   const { subGrids, reload: reloadSubGrids, setSubGrids } = useSubGrids(gridData?.cells ?? [])
   const gridRef = useRef<HTMLDivElement>(null)
   const gridAreaRef = useRef<HTMLDivElement>(null)
@@ -517,9 +517,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   const reloadAll = useCallback(() => {
+    // gridData が更新されれば useSubGrids / childCounts の useEffect が
+    // rootCells 変化で自動的に再フェッチするので、ここで手動 reloadSubGrids を
+    // 叩く必要はない (重複呼出の削減)。
     reload()
-    reloadSubGrids()
-  }, [reload, reloadSubGrids])
+  }, [reload])
 
   const handleStockPasteDrop = useCallback(async (stockItemId: string, targetCellId: string) => {
     try {
@@ -530,6 +532,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
     }
   }, [reloadAll])
+
+  const handleDndCellsUpdated = useCallback((updated: Cell[]) => {
+    // D&D 成功直後に DB から取り直した各セルを React state に即時反映する。
+    // reloadAll (全体再フェッチ) でも UI が追従しないケースがあったため、target 周辺だけ
+    // refreshCell で確実に更新する補助経路。refreshCell は gridData.cells 中の該当行だけ
+    // 差し替えるので、subGrids / childCounts は従来どおり gridData 変更の useEffect で再計算される。
+    for (const c of updated) refreshCell(c)
+  }, [refreshCell])
 
   const {
     dragSourceId, dragOverId, isOverStock, isDragging,
@@ -546,6 +556,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         redo: async () => { await op.redo(); reloadAll() },
       })
     }, [pushUndo, reloadAll]),
+    handleDndCellsUpdated,
   )
 
   // クリップボードショートカット用: マウス位置を追跡

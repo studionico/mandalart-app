@@ -101,6 +101,14 @@ export function useDragAndDrop(
   onStockDrop?: (cellId: string) => void,
   onStockPaste?: (stockItemId: string, targetCellId: string) => void,
   pushUndo?: (op: DndUndoable) => void,
+  /**
+   * D&D アクション成功直後に、DB から最新値を取り直した「影響を受けたセル群」を受け取る callback。
+   * 既存の `onComplete` (= reloadAll で全体再フェッチ) とは別に、EditorLayout 側で
+   * `refreshCell` による局所更新を行うためのフック。
+   * reloadAll の全体 re-fetch が reflect されないケース (原因未特定) でも、
+   * target セルだけは確実に UI 反映できるようになる。
+   */
+  onCellsUpdated?: (updated: Cell[]) => void,
 ) {
   const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   const [dragOverId, setDragOverId]     = useState<string | null>(null)
@@ -161,9 +169,27 @@ export function useDragAndDrop(
         const action = resolveDndAction(src.cell, target)
         if (action.type !== 'NOOP') {
           executeAction(action)
-            .then((undoable) => {
+            .then(async (undoable) => {
               if (undoable && pushUndo) pushUndo(undoable)
-              onComplete()
+              // onCellsUpdated による refreshCell が gridData を更新すれば、useSubGrids /
+              // childCounts の useEffect がそれに追従して自動再フェッチする。つまり
+              // onComplete (reloadAll で再度 gridData を setData する) は重複処理になり
+              // useEffect が 2 度発火して fetchChildCountsFor / useSubGrids.load が
+              // 2 回ずつ走る。onCellsUpdated 経由で既に state 更新済なら onComplete は呼ばない。
+              if (onCellsUpdated) {
+                const affectedIds: string[] =
+                  action.type === 'COPY_SUBTREE'
+                    ? [action.targetCellId]
+                    : [action.cellIdA, action.cellIdB]
+                const ph = affectedIds.map(() => '?').join(',')
+                const updated = await query<Cell>(
+                  `SELECT * FROM cells WHERE id IN (${ph}) AND deleted_at IS NULL`,
+                  affectedIds,
+                )
+                onCellsUpdated(updated)
+              } else {
+                onComplete()
+              }
             })
             .catch(console.error)
         }
@@ -178,7 +204,7 @@ export function useDragAndDrop(
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup',   onMouseUp)
-  }, [onComplete, onStockDrop, onStockPaste, pushUndo])
+  }, [onComplete, onStockDrop, onStockPaste, pushUndo, onCellsUpdated])
 
   const handleDragStart = useCallback(
     (cell: Cell) => beginDrag({ kind: 'cell', cell }),

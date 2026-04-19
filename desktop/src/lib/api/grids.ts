@@ -117,6 +117,9 @@ export async function createGrid(params: {
   const gridId = generateId()
   const ts = now()
 
+  // 9 セル (root) / 8 セル (child・並列) を multi-row VALUES 1 文で一括 INSERT する。
+  // 以前は for ループで 1 行ずつ await execute していたため毎回 8-9 往復していた。
+  const cellRows: Array<[string, string, number, string, string, string]> = []
   if (params.centerCellId === null) {
     // root グリッド: 9 cells (center + 8 peripherals)
     const centerCellId = generateId()
@@ -126,10 +129,7 @@ export async function createGrid(params: {
     )
     for (let i = 0; i < GRID_CELL_COUNT; i++) {
       const cellId = i === CENTER_POSITION ? centerCellId : generateId()
-      await execute(
-        'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [cellId, gridId, i, '', ts, ts],
-      )
+      cellRows.push([cellId, gridId, i, '', ts, ts])
     }
   } else {
     // 子 / 並列グリッド: 8 peripherals のみ (center は親 grid の cell を共有)
@@ -139,12 +139,15 @@ export async function createGrid(params: {
     )
     for (let i = 0; i < GRID_CELL_COUNT; i++) {
       if (i === CENTER_POSITION) continue
-      await execute(
-        'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [generateId(), gridId, i, '', ts, ts],
-      )
+      cellRows.push([generateId(), gridId, i, '', ts, ts])
     }
   }
+  const valuesSql = cellRows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')
+  const flatParams = cellRows.flat()
+  await execute(
+    `INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES ${valuesSql}`,
+    flatParams,
+  )
 
   return getGrid(gridId)
 }
