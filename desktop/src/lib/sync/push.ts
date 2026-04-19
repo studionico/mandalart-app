@@ -25,10 +25,17 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     id: string,
     row: Record<string, unknown>,
     onSuccess: () => Promise<void>,
+    onConflict?: string,
   ): Promise<boolean> {
-    const { error } = await (supabase.from(table) as unknown as {
-      upsert: (r: Record<string, unknown>) => Promise<{ error: { message: string; code?: string; details?: string; hint?: string } | null }>
-    }).upsert(row)
+    // onConflict 指定時は `ON CONFLICT (cols) DO UPDATE` として扱うので primary key (id) ではない
+    // カラム組の一意制約違反 (例: cells の (grid_id, position)) でも cloud 側を local で上書きする。
+    const upsertFn = (supabase.from(table) as unknown as {
+      upsert: (
+        r: Record<string, unknown>,
+        opts?: { onConflict?: string },
+      ) => Promise<{ error: { message: string; code?: string; details?: string; hint?: string } | null }>
+    }).upsert
+    const { error } = await upsertFn(row, onConflict ? { onConflict } : undefined)
     if (error) {
       // エラー詳細をオブジェクトに畳み込まず、message / code / details / hint を個別に展開して表示
       console.error(
@@ -142,7 +149,16 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     }, async () => {
       await execute('UPDATE cells SET synced_at = ? WHERE id = ?', [c.updated_at, c.id])
       cCount++
-    })
+    },
+      // 複数デバイス / 歴史的な sync ズレで、同じ (grid_id, position) に local と cloud で
+      // 異なる cell id が並ぶケースがある。このとき通常の upsert (PK=id) では INSERT と見なされ、
+      // cloud の UNIQUE(grid_id, position) 制約に弾かれて code=23505 になる。onConflict で
+      // 一意制約側を指定すると「同じ (grid_id, position) の既存行を local の内容で UPDATE」
+      // として処理され、cloud の stale cell が local 値で上書きされる (local 勝ち)。
+      // cells は leaf エンティティで他テーブルから id 参照されない (grids.center_cell_id は
+      // cells のまま unchange) ので、cloud 側の id がこの upsert で変わっても整合性に影響なし。
+      'grid_id,position',
+    )
     if (!ok) continue
   }
 
