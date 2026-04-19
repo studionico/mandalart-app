@@ -192,6 +192,11 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
  *   target cell = newCenterCellId が既に content を持っているか、
  *   呼び出し側 (copyCellSubtree) が src の content を後で target に上書きする
  * - 各 source cell の子グリッドを再帰的に複製
+ *
+ * ⚠ 子グリッド検索は NG を insert する**前**に snapshot する必要がある。後付けで query すると、
+ * 「中心セル C を同一グリッド G 内の周辺セル P にドロップ」のような操作で、sc = P の反復時に
+ * 今さっき挿入した NG (center_cell_id = P.id) 自身が「P の子グリッド」として hit して
+ * 無限再帰 (NG → NG2 → NG3 ...) が発生する。
  */
 async function copyGridRecursive(
   sourceGridId: string,
@@ -210,6 +215,17 @@ async function copyGridRecursive(
   const { getGrid } = await import('./grids')
   const sourceGrid = await getGrid(sourceGridId)
   const sourceCenterId = sg.center_cell_id
+
+  // NG 作成前に snapshot: 各 source cell が現時点で持つ child grids を固定する。
+  // こうしないと NG 挿入後の query で NG 自身を誤って "P の子グリッド" と認識して無限再帰する。
+  const childGridsBySourceCellId = new Map<string, Array<{ id: string; sort_order: number }>>()
+  for (const sc of sourceGrid.cells) {
+    const childGrids = await query<{ id: string; sort_order: number }>(
+      'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
+      [sc.id, sourceGridId],
+    )
+    childGridsBySourceCellId.set(sc.id, childGrids)
+  }
 
   const newGridId = generateId()
   const ts = now()
@@ -233,12 +249,9 @@ async function copyGridRecursive(
     )
   }
 
-  // 各 source cell の drilled grids (own grid は除外) を再帰
+  // 各 source cell の drilled grids を再帰コピー (snapshot を参照)
   for (const sc of sourceGrid.cells) {
-    const childGrids = await query<{ id: string; sort_order: number }>(
-      'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
-      [sc.id, sourceGridId],
-    )
+    const childGrids = childGridsBySourceCellId.get(sc.id) ?? []
     const newParentCellId = cellIdMap.get(sc.id)!
     for (const cg of childGrids) {
       await copyGridRecursive(cg.id, newParentCellId, cg.sort_order)
