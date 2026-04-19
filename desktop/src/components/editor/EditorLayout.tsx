@@ -301,34 +301,47 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // 既にセットされていて gridData のフェッチが走る。この auto-clear を走らせてしまうと
   // アニメーション終了前に orbit がクリアされてしまうので、'initial' 中は除外する。
   // 'initial' 用の orbit クリアは init() 内の setTimeout で明示的に行う。
+  //
+  // fast path で gridData 一致の時は即 clear。遅延や fetch 失敗で追いつかないまま stuck 化
+  // した場合は、アニメ最大時間 + 500ms buffer の safety net で強制 clear する。
+  // (従来は gridData 依存のみで、連続 drill / realtime reload race / useGrid error で
+  // orbit が永続 stuck になり、以降の drill アニメが全て壊れるケースがあった)
   useEffect(() => {
-    if (
-      orbit &&
-      orbit.direction !== 'initial' &&
-      gridData &&
-      gridData.id === orbit.targetGridId
-    ) {
+    if (!orbit || orbit.direction === 'initial') return
+    if (gridData && gridData.id === orbit.targetGridId) {
       setChildCounts(orbit.childCountsByCellId)
       setOrbit(null)
+      return
     }
-  }, [orbit, gridData])
+    const maxMs =
+      (orbit.direction === 'drill-up'
+        ? ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS
+        : ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS) + 500
+    const t = setTimeout(() => setOrbit(null), maxMs)
+    return () => clearTimeout(t)
+  }, [orbit, gridData, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
 
-  // 9×9 orbit も同様に gridData 一致で auto-clear。
+  // 9×9 orbit も同様に gridData 一致で auto-clear + safety net 強制 clear。
   // subGrids は useSubGrids 側が async でフェッチするため、切替直後に古い subGrids で
   // 描画されて「ちらつく」ことがある。事前取得済みの targetSubGrids を setSubGrids で
   // 注入して初回描画から正しい状態にする。
   useEffect(() => {
-    if (
-      orbit9 &&
-      orbit9.direction !== 'initial' &&
-      gridData &&
-      gridData.id === orbit9.targetGridId
-    ) {
+    if (!orbit9 || orbit9.direction === 'initial') return
+    if (gridData && gridData.id === orbit9.targetGridId) {
       setChildCounts(orbit9.childCountsByCellId)
       setSubGrids(orbit9.targetSubGrids)
       setOrbit9(null)
+      return
     }
-  }, [orbit9, gridData, setSubGrids])
+    const maxMs =
+      (orbit9.direction === 'drill-up'
+        ? ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS
+        : ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS) + 500
+    const t = setTimeout(() => setOrbit9(null), maxMs)
+    return () => clearTimeout(t)
+    // setSubGrids は stable。dep に含めると useSubGrids の load 再作成で余分発火するので除外
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orbit9, gridData, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
 
   // サブグリッドの存在マップ (cellId → childCount)
   const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
@@ -667,7 +680,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         deeperChildren.length > 0 ? deeperChildren : await getChildGrids(cell.id)
       const deeperSiblingIdx = deeperSiblings.findIndex((g) => g.id === deeperGrid.id)
 
-      // アニメ: 9×9 なら clicked cell の位置 → 深い grid の中心へ orbit
+      // アニメ: 9×9 なら sub-block の外側位置 (= parentCell.position) → 新中央 (4) へ orbit。
+      // cell.position は sub-block 内の内側位置 (0-8) であり 9×9 layout 位置ではないので使えない。
       if (viewMode === '9x9') {
         const [targetSubGrids, childCountsByCellId] = await Promise.all([
           fetchSubGridsFor(deeperGrid.cells),
@@ -679,7 +693,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           targetGridId: deeperGrid.id,
           childCountsByCellId,
           movingToPosition: 4,
-          movingFromPosition: cell.position,
+          movingFromPosition: parentCell.position,
           direction: 'drill-down',
         })
         await new Promise((r) =>
@@ -815,6 +829,31 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
         )
         if (!isMountedRef.current) return
+      } else if (viewMode === '9x9') {
+        // 9×9 中央ブロック内のセル drill-down: 9×9 layout 上の outer 位置 → 新中央 (4) へ。
+        // cell.position は merged view の値で、X=C 合流セル (sub-block center) では 4 に
+        // 上書きされている。そのまま使うと from === to になり slide animation が不発。
+        // gridData.cells 内の DB 上 position が 9×9 layout での sub-block 外側位置なので
+        // そちらを参照する。
+        const outerPos =
+          gridData?.cells.find((c) => c.id === cell.id)?.position ?? cell.position
+        const [targetSubGrids, childCountsByCellId] = await Promise.all([
+          fetchSubGridsFor(firstChild.cells),
+          fetchChildCountsFor(firstChild.cells),
+        ])
+        setOrbit9({
+          targetRootCells: firstChild.cells,
+          targetSubGrids,
+          targetGridId: firstChild.id,
+          childCountsByCellId,
+          movingToPosition: 4,
+          movingFromPosition: outerPos,
+          direction: 'drill-down',
+        })
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
       }
 
       setCurrentGrid(firstChild.id)
@@ -852,6 +891,30 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           childCountsByCellId,
           movingCellId: targetCenter?.id ?? null,
           movingFromPosition: cell.position,
+          direction: 'drill-down',
+        })
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+      } else if (viewMode === '9x9') {
+        // 9×9 で新規サブグリッドを掘り下げ。sub-grid が無い新規作成直後なので
+        // targetSubGrids / childCountsByCellId はすべて空で確定。
+        // movingFromPosition は 9×9 outer 位置 (gridData.cells の DB position) を使う。
+        // merged view の cell.position は 4 に上書きされ得るので直接使わない。
+        const outerPos =
+          gridData?.cells.find((c) => c.id === cell.id)?.position ?? cell.position
+        const childCountsByCellId = new Map<string, number>(
+          populatedCells.map((c) => [c.id, 0]),
+        )
+        const targetSubGrids = new Map<string, SubGridData>()
+        setOrbit9({
+          targetRootCells: populatedCells,
+          targetSubGrids,
+          targetGridId: newGrid.id,
+          childCountsByCellId,
+          movingToPosition: 4,
+          movingFromPosition: outerPos,
           direction: 'drill-down',
         })
         await new Promise((r) =>
@@ -2163,6 +2226,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 // (中心セルは X=C 統一モデルで drilled grid なら常に親 X の値が入っているため、
                 //  中心空チェックは実質常に通ってしまい、ボタンが常時表示される問題を避ける。
                 //  また "空の並列" を作れないようにすることで、自動削除ルールとも整合する)
+                // 9×9 モードは入力・D&D ができないので、並列作成も禁止して整合を取る
+                if (viewMode === '9x9') return null
                 const peripherals = gridData?.cells.filter((c) => c.position !== CENTER_POSITION) ?? []
                 const hasAnyPeripheralInput = peripherals.some((c) => !isCellEmpty(c))
                 if (!hasAnyPeripheralInput) return null
