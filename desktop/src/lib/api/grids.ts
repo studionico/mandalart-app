@@ -157,13 +157,18 @@ export async function updateGridMemo(id: string, memo: string): Promise<void> {
 }
 
 /**
- * ソフトデリート: grid とその配下のセル・サブグリッドを再帰的に論理削除する。
+ * grid とその配下のセル・サブグリッドを再帰的に削除する。
  *
- * 注意 (新モデル):
- * - 自グリッドの peripherals (grid_id = self.id) は全て soft-delete 対象
+ * 削除方式:
+ * - **未同期行 (synced_at IS NULL)**: hard delete (物理削除)。cloud に存在しないので
+ *   soft-delete すると永遠に dirty な orphan 行になる (push で RLS 403 を誘発)
+ * - **同期済み行 (synced_at IS NOT NULL)**: soft-delete。push で cloud 側に deleted_at を伝播
+ *
+ * 新モデルの注意:
+ * - 自グリッドの peripherals (grid_id = self.id) は全て削除対象
  * - 子グリッド (center_cell_id = peripheral.id で辿る) は再帰 delete
  * - 子グリッドの center cell は親グリッドに属する (grid_id = parent.id) ので、
- *   `UPDATE cells SET deleted_at WHERE grid_id = self.id` の対象外となり自動的に保全される
+ *   `DELETE/UPDATE cells WHERE grid_id = self.id` の対象外となり自動的に保全される
  */
 export async function deleteGrid(id: string): Promise<void> {
   const ts = now()
@@ -180,12 +185,16 @@ export async function deleteGrid(id: string): Promise<void> {
       await deleteGrid(sg.id)
     }
   }
+  // cells: 未同期 → hard delete, 同期済み → soft delete
+  await execute('DELETE FROM cells WHERE grid_id = ? AND synced_at IS NULL', [id])
   await execute(
-    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id = ?',
+    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id = ? AND synced_at IS NOT NULL',
     [ts, ts, id],
   )
+  // grid 本体: 同じく分岐
+  await execute('DELETE FROM grids WHERE id = ? AND synced_at IS NULL', [id])
   await execute(
-    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id = ?',
+    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id = ? AND synced_at IS NOT NULL',
     [ts, ts, id],
   )
 }
@@ -328,9 +337,13 @@ export async function findOrphanGrids(): Promise<OrphanStats> {
 }
 
 /**
- * 孤立グリッドと配下のセルを soft-delete する。
- * 同期経由で cloud 側にも deleted_at が伝播する (RLS に弾かれる行は push エラーとして残るが、
- * local データの整合性は取れる)。
+ * 孤立グリッドと配下のセルを削除する。
+ *
+ * - **未同期行 (synced_at IS NULL)**: hard delete で物理削除する。cloud に行ったことがない
+ *   ので削除を伝播する必要がないし、soft-delete で残すと push で RLS 403 を誘発して永遠に
+ *   dirty な行になる (orphan bug 由来で特に顕著だった)
+ * - **同期済み行 (synced_at IS NOT NULL)**: soft-delete して deleted_at を push で cloud に
+ *   伝播する (別デバイスからも見えなくする)
  */
 export async function cleanupOrphanGrids(): Promise<{
   gridsDeleted: number
@@ -338,21 +351,33 @@ export async function cleanupOrphanGrids(): Promise<{
 }> {
   const { orphanGridIds, orphanCellIds } = await findOrphanGrids()
   const ts = now()
-  // cells 先行 (親 grid の deleted_at 設定前に子 cells をマーク)
   const BATCH = 500
+
+  // cells 先行: hard delete / soft delete に分岐
   for (let i = 0; i < orphanCellIds.length; i += BATCH) {
     const batch = orphanCellIds.slice(i, i + BATCH)
     const ph = batch.map(() => '?').join(',')
+    // 未同期行は物理削除
     await execute(
-      `UPDATE cells SET deleted_at = ?, updated_at = ? WHERE id IN (${ph})`,
+      `DELETE FROM cells WHERE id IN (${ph}) AND synced_at IS NULL`,
+      batch,
+    )
+    // 同期済み行は論理削除 (push で伝播)
+    await execute(
+      `UPDATE cells SET deleted_at = ?, updated_at = ? WHERE id IN (${ph}) AND synced_at IS NOT NULL`,
       [ts, ts, ...batch],
     )
   }
+  // 次に grids: 同様に分岐
   for (let i = 0; i < orphanGridIds.length; i += BATCH) {
     const batch = orphanGridIds.slice(i, i + BATCH)
     const ph = batch.map(() => '?').join(',')
     await execute(
-      `UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id IN (${ph})`,
+      `DELETE FROM grids WHERE id IN (${ph}) AND synced_at IS NULL`,
+      batch,
+    )
+    await execute(
+      `UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id IN (${ph}) AND synced_at IS NOT NULL`,
       [ts, ts, ...batch],
     )
   }

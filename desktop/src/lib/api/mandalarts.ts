@@ -75,22 +75,34 @@ export async function updateMandalartTitle(id: string, title: string): Promise<v
 }
 
 /**
- * ソフトデリート: deleted_at にタイムスタンプをセットし、updated_at も更新して
- * 同期で cloud に反映されるようにする。配下の grids / cells も同じ処理で
- * 論理削除する（別デバイスがこれらを参照したときに見えないように）。
+ * マンダラートとその配下 (grids / cells) を削除する。
+ *
+ * - **未同期行 (synced_at IS NULL)**: hard delete (物理削除)。cloud に存在しないので
+ *   soft-delete で残すと push で RLS 403 を誘発する orphan 行になる
+ * - **同期済み行 (synced_at IS NOT NULL)**: soft-delete。push で cloud に deleted_at を伝播
+ *   (別デバイスがこれらを参照したときに見えないように)
  */
 export async function deleteMandalart(id: string): Promise<void> {
   const ts = now()
+  // cells: 未同期 hard / 同期済み soft
   await execute(
-    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
-    [ts, ts, id],
+    'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?) AND synced_at IS NULL',
+    [id],
   )
   await execute(
-    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE mandalart_id = ?',
+    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?) AND synced_at IS NOT NULL',
     [ts, ts, id],
   )
+  // grids: 同上
+  await execute('DELETE FROM grids WHERE mandalart_id = ? AND synced_at IS NULL', [id])
   await execute(
-    'UPDATE mandalarts SET deleted_at = ?, updated_at = ? WHERE id = ?',
+    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE mandalart_id = ? AND synced_at IS NOT NULL',
+    [ts, ts, id],
+  )
+  // mandalart 本体: 同上
+  await execute('DELETE FROM mandalarts WHERE id = ? AND synced_at IS NULL', [id])
+  await execute(
+    'UPDATE mandalarts SET deleted_at = ?, updated_at = ? WHERE id = ? AND synced_at IS NOT NULL',
     [ts, ts, id],
   )
 }

@@ -52,10 +52,28 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
     return true
   }
 
+  // 「cloud に一度も行ったことがない行 (synced_at IS NULL) の soft-delete」は push 対象外。
+  // cloud 側に対応する行が無いので upsert しても意味がないうえ、RLS (親テーブル所有者チェック)
+  // に弾かれて毎回 403 が出る。ローカルで synced_at を立てて dirty 判定から外す。
+  // (構造的には削除系 API 側で hard-delete にするのが根本対応。ここは既存データ救済用。)
+  async function skipOrphanDirtyDelete<T extends { id: string; deleted_at?: string | null; updated_at: string }>(
+    table: string,
+    rows: T[],
+  ): Promise<T[]> {
+    // synced_at は TS 型 (Mandalart/Grid/Cell) に入っていないが SELECT * で runtime には来る
+    const withSync = rows as Array<T & { synced_at: string | null }>
+    const orphan = withSync.filter((r) => r.deleted_at && !r.synced_at)
+    for (const r of orphan) {
+      await execute(`UPDATE ${table} SET synced_at = ? WHERE id = ?`, [r.updated_at, r.id])
+    }
+    return withSync.filter((r) => !(r.deleted_at && !r.synced_at)) as T[]
+  }
+
   // 1. mandalarts
-  const dirtyMandalarts = await query<Mandalart>(
+  const dirtyMandalartsRaw = await query<Mandalart>(
     'SELECT * FROM mandalarts WHERE synced_at IS NULL OR synced_at < updated_at',
   )
+  const dirtyMandalarts = await skipOrphanDirtyDelete('mandalarts', dirtyMandalartsRaw)
   for (const m of dirtyMandalarts) {
     const ok = await upsertOne('mandalarts', m.id, {
       id: m.id,
@@ -73,9 +91,10 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   }
 
   // 2. grids
-  const dirtyGrids = await query<Grid>(
+  const dirtyGridsRaw = await query<Grid>(
     'SELECT * FROM grids WHERE synced_at IS NULL OR synced_at < updated_at',
   )
+  const dirtyGrids = await skipOrphanDirtyDelete('grids', dirtyGridsRaw)
   for (const g of dirtyGrids) {
     const ok = await upsertOne('grids', g.id, {
       id: g.id,
@@ -94,9 +113,10 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   }
 
   // 3. cells
-  const dirtyCells = await query<Cell>(
+  const dirtyCellsRaw = await query<Cell>(
     'SELECT * FROM cells WHERE synced_at IS NULL OR synced_at < updated_at',
   )
+  const dirtyCells = await skipOrphanDirtyDelete('cells', dirtyCellsRaw)
   for (const c of dirtyCells) {
     const ok = await upsertOne('cells', c.id, {
       id: c.id,
