@@ -33,6 +33,12 @@ pub fn run() {
                             sql: include_str!("../migrations/004_unify_center.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 5,
+                            description: "drop empty cells (lazy cell creation design)",
+                            sql: include_str!("../migrations/005_drop_empty_cells.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

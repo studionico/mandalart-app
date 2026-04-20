@@ -333,6 +333,8 @@ export default function Cell({
     <div
       ref={cellRef}
       data-cell-id={cell.id}
+      data-grid-id={cell.grid_id}
+      data-position={cell.position}
       style={wrapperStyle}
       className={`
         relative select-none overflow-hidden

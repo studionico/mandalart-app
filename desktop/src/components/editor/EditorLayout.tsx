@@ -19,7 +19,7 @@ import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid } from '@/lib/api/grids'
-import { pasteCell, toggleCellDone } from '@/lib/api/cells'
+import { pasteCell, toggleCellDone, upsertCellAt } from '@/lib/api/cells'
 import { deleteMandalart } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
@@ -337,6 +337,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // インライン編集中のセル ID (textarea を表示するセル)
   const [inlineEditingCellId, setInlineEditingCellId] = useState<string | null>(null)
 
+  /**
+   * 空 slot (DB に cell 行が無い) を編集中の状態。
+   * 新設計では空セルを物理的に作らないので、空 slot をクリックしたら以下のフローを取る:
+   * 1. pendingEdit に (gridId, position) を立て、inlineEditingCellId に合成 id `pending:gridId:position` を入れる
+   * 2. GridView 側はこの合成 id で synthetic cell を生成して inline edit UI を表示
+   * 3. commit 時 (Tab/Esc/blur/Cmd+Enter)、実際にテキストが入っていれば upsertCellAt で INSERT、空ならスキップ
+   * 4. INSERT 後、refreshCell で gridData に取り込む
+   */
+  type PendingEdit = { gridId: string; position: number }
+  const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null)
+  const pendingCellId = pendingEdit ? `pending:${pendingEdit.gridId}:${pendingEdit.position}` : null
+
+  function handleStartEmptySlotEdit(targetGridId: string, position: number) {
+    setPendingEdit({ gridId: targetGridId, position })
+    setInlineEditingCellId(`pending:${targetGridId}:${position}`)
+  }
+
   // コンテキストメニュー
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; cell: Cell } | null>(null)
 
@@ -504,6 +521,29 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
     return gridData.cells
   }, [gridData, subGrids, viewMode])
+
+  // GridView3x3 へ渡すセル一覧。pending edit が立っていれば synthetic cell を 1 つ追加する
+  // (空 slot でユーザーが文字入力しているとき用。CellComponent が textarea を表示できるようにする)
+  const cellsForRender = useMemo<Cell[]>(() => {
+    if (!gridData) return []
+    if (!pendingEdit || pendingEdit.gridId !== gridData.id) return gridData.cells
+    // 既に同 position に real cell がある場合は synthetic を作らない (整合性)
+    if (gridData.cells.some((c) => c.position === pendingEdit.position)) return gridData.cells
+    const ts = ''  // synthetic cell は DB に保存されないので timestamp は空でよい
+    const synthetic: Cell = {
+      id: `pending:${pendingEdit.gridId}:${pendingEdit.position}`,
+      grid_id: pendingEdit.gridId,
+      position: pendingEdit.position,
+      text: '',
+      image_path: null,
+      color: null,
+      done: false,
+      created_at: ts,
+      updated_at: ts,
+    }
+    return [...gridData.cells, synthetic]
+  }, [gridData, pendingEdit])
+  void pendingCellId  // 参照保持 (synthetic cell.id 計算で使う想定、現状は cellsForRender で完結)
 
   const handleStockDrop = useCallback(async (cellId: string) => {
     await addToStock(cellId)
@@ -1004,6 +1044,28 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // インライン編集の確定 (blur / Esc / Tab / Cmd+Enter)
   async function handleCellCommitInlineEdit(cell: Cell, text: string) {
     setInlineEditingCellId(null)
+    // pending edit (空 slot からの新規) を判定
+    const isPending = cell.id.startsWith('pending:')
+    if (isPending) {
+      setPendingEdit(null)
+      // テキストが空なら何もせず終了 (無駄な空 cell を作らない)
+      if (text === '') return
+      // 中心セルが空のときは周辺の編集を許さない (validation)
+      if (cell.position !== CENTER_POSITION) {
+        const center = getCenterCell(gridData?.cells ?? [])
+        if (!center || isCellEmpty(center)) {
+          setToast({ message: '中心セルが空のときは周辺セルを編集できません', type: 'error' })
+          return
+        }
+      }
+      const newCell = await upsertCellAt(cell.grid_id, cell.position, {
+        text,
+        image_path: null,
+        color: null,
+      })
+      refreshCell(newCell)
+      return
+    }
     if (text === cell.text) return
     await handleSaveCell(cell.id, {
       text,
@@ -1017,22 +1079,47 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   function handleCellInlineNavigate(currentPosition: number, currentText: string, reverse: boolean) {
     const cells = gridData?.cells ?? []
     // gridData は更新前なので、今 commit したテキストで上書きしたバーチャル配列で判定する
-    const updatedCells = cells.map((c) =>
-      c.position === currentPosition ? { ...c, text: currentText } : c
-    )
+    // currentPosition の cell が無い (空 slot からの pending edit commit) ケースは push する
+    const hasCurrent = cells.some((c) => c.position === currentPosition)
+    const updatedCells = hasCurrent
+      ? cells.map((c) => (c.position === currentPosition ? { ...c, text: currentText } : c))
+      : [...cells, {
+          id: `_temp_${currentPosition}`, grid_id: gridData?.id ?? '', position: currentPosition,
+          text: currentText, image_path: null, color: null, done: false,
+          created_at: '', updated_at: '',
+        } as Cell]
     const center = getCenterCell(updatedCells)
     const centerEmpty = !center || isCellEmpty(center)
     const nextPos = nextTabPosition(currentPosition, reverse)
     // 中心が空のときは周辺セル無効なので留まる
     if (centerEmpty && nextPos !== 4) {
-      setInlineEditingCellId(updatedCells.find((c) => c.position === CENTER_POSITION)?.id ?? null)
+      const centerCell = updatedCells.find((c) => c.position === CENTER_POSITION)
+      if (centerCell && !centerCell.id.startsWith('_temp_')) {
+        setInlineEditingCellId(centerCell.id)
+      } else if (gridData) {
+        handleStartEmptySlotEdit(gridData.id, CENTER_POSITION)
+      }
       return
     }
     const next = updatedCells.find((c) => c.position === nextPos)
-    if (next) setInlineEditingCellId(next.id)
+    if (next && !next.id.startsWith('_temp_')) {
+      setInlineEditingCellId(next.id)
+    } else if (gridData) {
+      // 次の slot に cell 行が無い (新設計の空 slot) → pending edit を開始
+      handleStartEmptySlotEdit(gridData.id, nextPos)
+    }
   }
 
   async function handleSaveCell(cellId: string, params: { text: string; image_path: string | null; color: string | null }) {
+    // pending edit (空 slot からの新規) で expand editor (色 / 画像) が呼ばれたケース。
+    // synthetic cell.id を持っているので gridData には居ない。upsertCellAt で先に INSERT する。
+    if (cellId.startsWith('pending:') && pendingEdit) {
+      const newCell = await upsertCellAt(pendingEdit.gridId, pendingEdit.position, params)
+      refreshCell(newCell)
+      setPendingEdit(null)
+      setInlineEditingCellId(newCell.id)
+      return
+    }
     const cell = gridData?.cells.find((c) => c.id === cellId)
     if (!cell) return
 
@@ -1383,10 +1470,18 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   async function handleStockPaste(item: StockItem) {
     // インライン編集中のセルを貼り付け先にする (詳細編集モーダル廃止後の動線)
-    const targetCellId = inlineEditingCellId
+    let targetCellId = inlineEditingCellId
     if (!targetCellId) {
       setToast({ message: 'ペースト先のセルをインライン編集中にしてください (またはドラッグ&ドロップしてください)', type: 'info' })
       return
+    }
+    // pending edit (空 slot) の場合、本物の cell をまず INSERT して target id を取り直す
+    if (targetCellId.startsWith('pending:') && pendingEdit) {
+      const newCell = await upsertCellAt(pendingEdit.gridId, pendingEdit.position, {})
+      refreshCell(newCell)
+      targetCellId = newCell.id
+      setInlineEditingCellId(newCell.id)
+      setPendingEdit(null)
     }
     // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可
     const targetCell = dndCells.find((c) => c.id === targetCellId)
@@ -1724,6 +1819,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         >
                           <GridView3x3
                             cells={viewSwitch.rootCells}
+                            gridId={viewSwitch.rootCells[0]?.grid_id ?? ''}
                             childCounts={viewSwitch.childCountsByCellId}
                             cutCellId={null}
                             dragSourceId={null}
@@ -1892,6 +1988,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       {viewMode === '3x3' ? (
                         <GridView3x3
                           cells={cells}
+                          gridId={cells[0]?.grid_id ?? ''}
                           childCounts={childCounts}
                           cutCellId={null}
                           dragSourceId={null}
@@ -2215,7 +2312,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 <>
                   {gridData && viewMode === '3x3' && gridSize > 0 && (
                     <GridView3x3
-                      cells={gridData.cells}
+                      cells={cellsForRender}
+                      gridId={gridData.id}
                       childCounts={childCounts}
                       cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
                       dragSourceId={dragSourceId}
@@ -2228,6 +2326,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onStartInlineEdit={handleCellStartInlineEdit}
                       onCommitInlineEdit={handleCellCommitInlineEdit}
                       onInlineNavigate={handleCellInlineNavigate}
+                      onStartEmptySlotEdit={handleStartEmptySlotEdit}
                       onDrill={handleCellDrill}
                       onDragStart={handleDragStart}
                       onContextMenu={handleContextMenu}

@@ -3,23 +3,35 @@ import type { Cell } from '@/types'
 import { resolveDndAction, type DndAction } from '@/lib/utils/dnd'
 import { isCellEmpty } from '@/lib/utils/grid'
 import { CENTER_POSITION, isCenterPosition } from '@/constants/grid'
-import { swapCellContent, swapCellSubtree, copyCellSubtree } from '@/lib/api/cells'
+import { swapCellContent, swapCellSubtree, copyCellSubtree, upsertCellAt } from '@/lib/api/cells'
 import { query, execute, now } from '@/lib/db'
 import type { UndoOperation } from '@/store/undoStore'
 
 /**
- * ストックからのドロップ先として有効かどうかを判定する。
- * - セルが空でなければ不可 (既存ルール: 空セルのみ受け入れ)
- * - 中心セル (position 4) 自体は常に OK
- * - 周辺セルは、同一グリッドの中心セルが非空の場合のみ OK
- *   (中心セルが空 → 周辺は disabled、という入力バリデーションルール)
+ * ストック / D&D の drop 先 slot として有効かを (grid_id, position) ベースで判定する。
+ *
+ * 新設計: 空 slot は cell 行が存在しない可能性がある。
+ * - target slot に既存 cell がある → そのセルが空である必要 (populated cell は drop 先不可)
+ * - target slot に cell が無い (= 完全に空 slot) → 常に空扱いで OK
+ * - 中心 slot (position 4) 自体は常に OK
+ * - 周辺 slot は、同 grid の中心 cell が populated でないと NG
  */
-function isDroppableTarget(cell: Cell, allCells: Cell[]): boolean {
-  if (!isCellEmpty(cell)) return false
-  if (isCenterPosition(cell.position)) return true
-  const center = allCells.find(
-    (c) => c.grid_id === cell.grid_id && c.position === CENTER_POSITION,
-  )
+function isDroppableSlot(
+  gridId: string,
+  position: number,
+  existingCell: Cell | undefined,
+  allCells: Cell[],
+): boolean {
+  // 既存 cell がある場合: populated なら drop 不可
+  if (existingCell && !isCellEmpty(existingCell)) return false
+  // center slot は常に OK
+  if (isCenterPosition(position)) return true
+  // peripheral slot: 同 grid の center cell が populated か確認。
+  // child grid の merged center は grid_id が親 grid のままなので grid_id 一致では拾えないため、
+  // fallback として「allCells 内の position=4 を center とみなす」 (3x3 view では 1 つだけ存在)
+  const center =
+    allCells.find((c) => c.grid_id === gridId && c.position === CENTER_POSITION) ??
+    allCells.find((c) => c.position === CENTER_POSITION)
   return center != null && !isCellEmpty(center)
 }
 
@@ -122,16 +134,53 @@ export function useDragAndDrop(
     setDragSourceId(source.kind === 'cell' ? source.cell.id : `stock:${source.itemId}`)
     document.body.style.cursor = 'grabbing'
 
+    /**
+     * mouse 位置から target slot の (gridId, position) を解決する。
+     * - 既存 cell の上 (data-cell-id がある) → そこから cell.grid_id, cell.position
+     * - 空 placeholder の上 (data-grid-id + data-position) → 直接取得
+     * - 該当なし → null
+     */
+    function resolveTargetSlot(e: MouseEvent): { gridId: string; position: number; existingCell: Cell | null } | null {
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      // 既存 cell 優先
+      const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
+      if (cellEl?.dataset.cellId) {
+        const c = cellsRef.current.find((cc) => cc.id === cellEl.dataset.cellId)
+        if (c) return { gridId: c.grid_id, position: c.position, existingCell: c }
+      }
+      // 空 slot
+      const slotEl = el?.closest('[data-grid-id][data-position]') as HTMLElement | null
+      if (slotEl?.dataset.gridId && slotEl.dataset.position != null) {
+        const gridId = slotEl.dataset.gridId
+        const position = Number(slotEl.dataset.position)
+        // 念のため: 同 (gridId, position) に既存 cell があるなら拾う
+        const existing = cellsRef.current.find((c) => c.grid_id === gridId && c.position === position) ?? null
+        return { gridId, position, existingCell: existing }
+      }
+      return null
+    }
+
     function onMouseMove(e: MouseEvent) {
       const el      = document.elementFromPoint(e.clientX, e.clientY)
-      const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
       const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
-      let overCellId: string | null = cellEl?.dataset.cellId ?? null
 
-      // ストック → セル: 空セル + 中心セルが非空の場合のみ有効なドロップ先としてハイライト
-      if (sourceRef.current?.kind === 'stock' && overCellId) {
-        const t = cellsRef.current.find((c) => c.id === overCellId)
-        if (!t || !isDroppableTarget(t, cellsRef.current)) overCellId = null
+      const slot = resolveTargetSlot(e)
+      let overCellId: string | null = null
+      if (slot) {
+        // 既存 cell があるならハイライトはその id
+        if (slot.existingCell) {
+          overCellId = slot.existingCell.id
+        } else {
+          // 空 slot ハイライト用: 仮 id (grid_id:position)
+          overCellId = `slot:${slot.gridId}:${slot.position}`
+        }
+      }
+
+      // ストック → スロット: 空 + 中心セルが非空の場合のみ有効なドロップ先としてハイライト
+      if (sourceRef.current?.kind === 'stock' && slot) {
+        if (!isDroppableSlot(slot.gridId, slot.position, slot.existingCell ?? undefined, cellsRef.current)) {
+          overCellId = null
+        }
       }
 
       setDragOverId(overCellId)
@@ -153,8 +202,7 @@ export function useDragAndDrop(
 
       const el      = document.elementFromPoint(e.clientX, e.clientY)
       const stockEl = el?.closest('[data-stock-drop]') as HTMLElement | null
-      const cellEl  = el?.closest('[data-cell-id]') as HTMLElement | null
-      const targetId = cellEl?.dataset.cellId ?? null
+      const slot    = resolveTargetSlot(e)
 
       if (src.kind === 'cell') {
         // ストックドロップゾーン
@@ -163,42 +211,45 @@ export function useDragAndDrop(
           return
         }
         // セル間 D&D
-        if (!targetId || targetId === src.cell.id) return
-        const target = cellsRef.current.find((c) => c.id === targetId)
-        if (!target) return
-        const action = resolveDndAction(src.cell, target)
-        if (action.type !== 'NOOP') {
-          executeAction(action)
-            .then(async (undoable) => {
-              if (undoable && pushUndo) pushUndo(undoable)
-              // onCellsUpdated による refreshCell が gridData を更新すれば、useSubGrids /
-              // childCounts の useEffect がそれに追従して自動再フェッチする。つまり
-              // onComplete (reloadAll で再度 gridData を setData する) は重複処理になり
-              // useEffect が 2 度発火して fetchChildCountsFor / useSubGrids.load が
-              // 2 回ずつ走る。onCellsUpdated 経由で既に state 更新済なら onComplete は呼ばない。
-              if (onCellsUpdated) {
-                const affectedIds: string[] =
-                  action.type === 'COPY_SUBTREE'
-                    ? [action.targetCellId]
-                    : [action.cellIdA, action.cellIdB]
-                const ph = affectedIds.map(() => '?').join(',')
-                const updated = await query<Cell>(
-                  `SELECT * FROM cells WHERE id IN (${ph}) AND deleted_at IS NULL`,
-                  affectedIds,
-                )
-                onCellsUpdated(updated)
-              } else {
-                onComplete()
-              }
-            })
-            .catch(console.error)
-        }
+        if (!slot) return
+        if (slot.existingCell?.id === src.cell.id) return  // 自分自身
+
+        // target cell が無ければ INSERT して確保 (空 slot に drop されたケース)
+        ;(async () => {
+          let target = slot.existingCell
+          if (!target) {
+            target = await upsertCellAt(slot.gridId, slot.position, {})
+          }
+          const action = resolveDndAction(src.cell, target)
+          if (action.type === 'NOOP') return
+          const undoable = await executeAction(action)
+          if (undoable && pushUndo) pushUndo(undoable)
+          if (onCellsUpdated) {
+            const affectedIds: string[] =
+              action.type === 'COPY_SUBTREE'
+                ? [action.targetCellId]
+                : [action.cellIdA, action.cellIdB]
+            const ph = affectedIds.map(() => '?').join(',')
+            const updated = await query<Cell>(
+              `SELECT * FROM cells WHERE id IN (${ph}) AND deleted_at IS NULL`,
+              affectedIds,
+            )
+            onCellsUpdated(updated)
+          } else {
+            onComplete()
+          }
+        })().catch(console.error)
       } else {
         // ストック → セル: 空セル + 中心セルが非空の場合のみ許可（入れ替えなし）
-        if (!targetId) return
-        const target = cellsRef.current.find((c) => c.id === targetId)
-        if (!target || !isDroppableTarget(target, cellsRef.current)) return
-        onStockPaste?.(src.itemId, targetId)
+        if (!slot) return
+        if (!isDroppableSlot(slot.gridId, slot.position, slot.existingCell ?? undefined, cellsRef.current)) return
+        ;(async () => {
+          let target = slot.existingCell
+          if (!target) {
+            target = await upsertCellAt(slot.gridId, slot.position, {})
+          }
+          onStockPaste?.(src.itemId, target.id)
+        })().catch(console.error)
       }
     }
 

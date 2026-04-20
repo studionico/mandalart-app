@@ -242,7 +242,7 @@ async function importIntoGrid(
     const c = snapshot.cells.find((cc) => cc.position === pos)
     if (pos === CENTER_POSITION) {
       if (isRoot) {
-        // root 中心セルは事前に決めた id を使う
+        // root 中心セルは事前に決めた id を使う (mandalarts.root_cell_id 参照のため必ず作成)
         await execute(
           'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [centerCellId, gridId, pos, c?.text ?? '', c?.image_path ?? null, c?.color ?? null, ts, ts],
@@ -252,10 +252,19 @@ async function importIntoGrid(
       // child grid の場合は position=4 の行を作らない (insertedCellIdByPosition にも入れない)
       continue
     }
+    // 新設計 (lazy cell creation): 空 peripheral は INSERT しない。
+    // ただし drilled child grid から center として参照される場合 (snapshot.children に
+    // parentPosition=pos が含まれる) は参照整合性のため空でも INSERT する必要がある。
+    const text = c?.text ?? ''
+    const imagePath = c?.image_path ?? null
+    const color = c?.color ?? null
+    const isPopulated = text !== '' || imagePath !== null || color !== null
+    const referencedByChild = snapshot.children.some((child) => child.parentPosition === pos)
+    if (!isPopulated && !referencedByChild) continue
     const cellId = generateId()
     await execute(
       'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [cellId, gridId, pos, c?.text ?? '', c?.image_path ?? null, c?.color ?? null, ts, ts],
+      [cellId, gridId, pos, text, imagePath, color, ts, ts],
     )
     insertedCellIdByPosition.set(pos, cellId)
   }

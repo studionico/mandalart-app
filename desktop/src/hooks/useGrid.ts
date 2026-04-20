@@ -48,9 +48,20 @@ export function useGrid(gridId: string | null) {
   const refreshCell = useCallback((updated: Cell) => {
     setData((prev) => {
       if (!prev) return prev
+      const idx = prev.cells.findIndex((c) => c.id === updated.id)
+      if (idx >= 0) {
+        // 既存 cell の置換 (position は state 側を保持: child grid の merged center が
+        // DB 上 position=7 等でも UI では CENTER_POSITION=4 で扱うため)
+        return {
+          ...prev,
+          cells: prev.cells.map((c) => (c.id === updated.id ? { ...updated, position: c.position } : c)),
+        }
+      }
+      // 新規 cell の追加 (空 slot で upsertCellAt が INSERT した直後 / D&D drop で target を
+      // 新規作成したケース)。position は updated.position をそのまま使う。
       return {
         ...prev,
-        cells: prev.cells.map((c) => (c.id === updated.id ? { ...updated, position: c.position } : c)),
+        cells: [...prev.cells, updated],
       }
     })
   }, [])
