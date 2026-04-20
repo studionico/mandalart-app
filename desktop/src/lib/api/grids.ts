@@ -406,3 +406,70 @@ export async function cleanupOrphanGrids(): Promise<{
 
   return { gridsDeleted: orphanGridIds.length, cellsDeleted: orphanCellIds.length }
 }
+
+/**
+ * cloud (Supabase) 側の空 cell を物理削除する。
+ *
+ * 背景: lazy cell creation 設計で local 側は空 cell を作らない / migration 005 で既存も
+ * 物理削除済。だが local の物理削除は sync の dirty 判定で拾えない (削除対象が SELECT で
+ * 出てこない) ため、cloud には過去の空 cell が滞留する。これを定期的に掃除する。
+ *
+ * 残す条件:
+ * - center_cell_id として grids から参照されている cell (root grid の中心セル等)
+ * - 何らかの content (text 非空 / image_path / color / done=true) を持つ cell
+ *
+ * RLS により自分の所有データのみが対象になる。
+ *
+ * 失敗時は warn のみ (定期実行で user 体験を壊さない)。
+ */
+export async function cleanupEmptyCellsInCloud(): Promise<{ deletedCount: number }> {
+  if (!isSupabaseConfigured) return { deletedCount: 0 }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return { deletedCount: 0 }
+
+  try {
+    // 1. center_cell_id として参照されている cell id を全部集める
+    const referencedRows = await supabase.from('grids').select('center_cell_id')
+    if (referencedRows.error) throw referencedRows.error
+    const referencedIds = new Set(
+      ((referencedRows.data ?? []) as { center_cell_id: string }[])
+        .map((r) => r.center_cell_id)
+        .filter((v): v is string => v != null),
+    )
+
+    // 2. 空 cell を pagination で全件回収 (Supabase の select はデフォルト 1000 行上限)
+    const PAGE = 1000
+    const emptyIds: string[] = []
+    let pageStart = 0
+    for (;;) {
+      const page = await supabase
+        .from('cells')
+        .select('id')
+        .eq('text', '')
+        .is('image_path', null)
+        .is('color', null)
+        .eq('done', false)
+        .range(pageStart, pageStart + PAGE - 1)
+      if (page.error) throw page.error
+      const ids = ((page.data ?? []) as { id: string }[]).map((r) => r.id)
+      emptyIds.push(...ids)
+      if (ids.length < PAGE) break
+      pageStart += PAGE
+    }
+
+    // 3. 参照されていない id だけ削除対象
+    const toDelete = emptyIds.filter((id) => !referencedIds.has(id))
+
+    // 4. 500 件ずつ batch DELETE
+    const BATCH = 500
+    for (let i = 0; i < toDelete.length; i += BATCH) {
+      const batch = toDelete.slice(i, i + BATCH)
+      const res = await supabase.from('cells').delete().in('id', batch)
+      if (res.error) throw res.error
+    }
+    return { deletedCount: toDelete.length }
+  } catch (e) {
+    console.warn('[cleanupEmptyCellsInCloud] failed:', e)
+    return { deletedCount: 0 }
+  }
+}

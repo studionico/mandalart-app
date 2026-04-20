@@ -8,12 +8,14 @@ import { useAppUpdate } from './hooks/useAppUpdate'
 import { useAuthBootstrap } from './hooks/useAuthBootstrap'
 import { useTheme } from './hooks/useTheme'
 import { useBeforeQuit } from './hooks/useBeforeQuit'
+import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
 
 export default function App() {
   useGlobalShortcut()
   useAuthBootstrap()
   useTheme()
   useBeforeQuit()
+  useCloudEmptyCellsCleanup()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   return (
