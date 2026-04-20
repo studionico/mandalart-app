@@ -3,6 +3,57 @@ import { CENTER_POSITION } from '@/constants/grid'
 import { isCellEmpty } from '@/lib/utils/grid'
 import type { Cell } from '../../types'
 
+/**
+ * (grid_id, position) スロットに対する upsert。
+ *
+ * 新設計では空セルは DB に存在しない。よって peripheral slot の編集 / D&D drop / paste 等で
+ * 「この slot に書き込みたいが cell 行はまだ無い」状態を扱う必要がある。
+ *
+ * 動作:
+ * - 既に cell 行がある → UPDATE して返す
+ * - 行が無い → INSERT して返す
+ *
+ * 戻り値は upsert 後の cell。呼出側はこの cell.id を使って後続処理 (state 反映等) を行う。
+ *
+ * UNIQUE(grid_id, position) 制約を利用するため SQLite の `INSERT ... ON CONFLICT(...) DO UPDATE`
+ * を使えば 1 query で済むが、id 取り直しの都合で SELECT-then-UPDATE/INSERT の 2 手段を採る。
+ */
+export async function upsertCellAt(
+  gridId: string,
+  position: number,
+  params: { text?: string; image_path?: string | null; color?: string | null },
+): Promise<Cell> {
+  const existing = await query<Cell>(
+    'SELECT * FROM cells WHERE grid_id = ? AND position = ? AND deleted_at IS NULL',
+    [gridId, position],
+  )
+  if (existing[0]) {
+    return updateCell(existing[0].id, params)
+  }
+  // INSERT new cell with generated id
+  const id = generateId()
+  const ts = now()
+  await execute(
+    'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+    [id, gridId, position, params.text ?? '', params.image_path ?? null, params.color ?? null, 0, ts, ts],
+  )
+  // root center cell の title ミラー / done propagate は updateCell 経由でないと走らない。
+  // INSERT した cell が新規 root center として参照されているケース (createMandalart の初回作成)
+  // は通常 createMandalart が title を別途扱うのでここでは propagate しない。
+  // 必要なら呼出側で改めて updateCell を呼ぶ。
+  const rows = await query<Cell>('SELECT * FROM cells WHERE id = ? AND deleted_at IS NULL', [id])
+  return rows[0]
+}
+
+/**
+ * cell の content を更新する。
+ *
+ * 新設計 (空セルは DB に存在しない) との整合性:
+ * - 既存 cell (id がある) を UPDATE する経路として残る
+ * - 「空 slot に新規書込」したい場合は `upsertCellAt(gridId, position, ...)` を使う
+ * - cell 行が無い id を指定された場合: UPDATE は no-op になり SELECT は空。caller は cell が
+ *   消えた / 別端末で削除されたケースとして扱う必要がある (現状ほぼ起きない)
+ */
 export async function updateCell(
   id: string,
   params: { text?: string; image_path?: string | null; color?: string | null }
@@ -284,12 +335,20 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
         if (sc.id === n.sourceCenterId) continue
         const newCellId = generateId()
         cellIdMap.set(sc.id, newCellId)
-        cellInserts.push([newCellId, n.newGridId, sc.position, sc.text, sc.image_path, sc.color, sc.done ? 1 : 0, ts, ts])
-
-        // このペリフェラルを center とする child grids を次レベル queue へ
+        // このペリフェラルを center とする child grids
         const children = gridsByCenterCell.get(sc.id) ?? []
-        for (const child of children) {
-          if (child.id === n.sourceGridId) continue  // self-ref 排除
+        const childrenToCopy = children.filter((c) => c.id !== n.sourceGridId)
+        // 新設計: 空 source cell は INSERT しない (DB に空行を作らない)。
+        // ただし drilled 子 grid から center として参照されている場合 (バグ由来データ等) は
+        // 参照先がダングル参照にならないよう INSERT する必要がある (text='' のまま)
+        const isPopulated = sc.text !== '' || sc.image_path !== null || sc.color !== null
+        const referencedByChild = childrenToCopy.length > 0
+        if (isPopulated || referencedByChild) {
+          cellInserts.push([newCellId, n.newGridId, sc.position, sc.text, sc.image_path, sc.color, sc.done ? 1 : 0, ts, ts])
+        }
+
+        // 子 grids を queue へ
+        for (const child of childrenToCopy) {
           if (processedGridIds.has(child.id)) continue
           queue.push({
             sourceGridId: child.id,
