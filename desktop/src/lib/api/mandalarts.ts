@@ -1,6 +1,6 @@
 import { query, execute, generateId, now } from '../db'
 import { supabase, isSupabaseConfigured } from '../supabase/client'
-import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
+import { CENTER_POSITION } from '@/constants/grid'
 import type { Mandalart, Cell } from '../../types'
 
 // ルート中心セル (= mandalarts.root_cell_id が指す cell) の image_path を取得する共通式。
@@ -29,11 +29,14 @@ export async function getMandalart(id: string): Promise<Mandalart | null> {
 }
 
 /**
- * マンダラートを新規作成する。ルートグリッド (9 cells: 1 center + 8 peripherals)
- * も同じトランザクションで作成し、mandalarts.root_cell_id に root 中心セル id を記録する。
+ * マンダラートを新規作成する。
  *
- * (旧モデルでは DashboardPage 側で createMandalart + createGrid を別々に呼んでいたが、
- *  root_cell_id NOT NULL のためここで一緒に作る)
+ * lazy cell creation 設計 (commit 7668c5c〜) では peripheral cell は user が書込んだ瞬間に
+ * upsertCellAt で初めて INSERT される。ここで作るのは:
+ *   - mandalarts 1 行
+ *   - root grid 1 行
+ *   - root center cell 1 行 (mandalarts.root_cell_id 参照のため必須)
+ * peripheral cells は作らない (旧版では 8 cells INSERT していた)。
  */
 export async function createMandalart(title = ''): Promise<Mandalart> {
   const mandalartId = generateId()
@@ -49,13 +52,10 @@ export async function createMandalart(title = ''): Promise<Mandalart> {
     'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
     [rootGridId, mandalartId, rootCenterCellId, 0, ts, ts],
   )
-  for (let i = 0; i < GRID_CELL_COUNT; i++) {
-    const cellId = i === CENTER_POSITION ? rootCenterCellId : generateId()
-    await execute(
-      'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [cellId, rootGridId, i, '', ts, ts],
-    )
-  }
+  await execute(
+    'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [rootCenterCellId, rootGridId, CENTER_POSITION, '', ts, ts],
+  )
 
   return {
     id: mandalartId,
@@ -253,9 +253,18 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     )
   }
 
+  // 新設計: 空 source cell は新 mandalart にも INSERT しない (lazy)。
+  // ただし新 grids.center_cell_id として参照される cell は (text 空でも) 整合性のため INSERT する
+  // (例: root center cell は mandalarts.root_cell_id 参照のため必須)。
+  const newCenterCellIdSet = new Set(
+    allGrids.map((g) => cellIdMap.get(g.center_cell_id)).filter((v): v is string => v != null),
+  )
   for (const c of allCells) {
     const newCellId = cellIdMap.get(c.id)!
     const newGridId = gridIdMap.get(c.grid_id)!
+    const isPopulated = c.text !== '' || c.image_path !== null || c.color !== null
+    const isReferenced = newCenterCellIdSet.has(newCellId)
+    if (!isPopulated && !isReferenced) continue
     await execute(
       'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
       [newCellId, newGridId, c.position, c.text, c.image_path, c.color, c.done ? 1 : 0, ts, ts],

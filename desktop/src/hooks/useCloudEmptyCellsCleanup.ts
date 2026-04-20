@@ -20,7 +20,9 @@ import { STORAGE_KEYS } from '@/constants/storage'
  * App ルートで 1 度だけ呼び出す。失敗時は warn のみ (失敗しても次回起動で再試行されるので
  * 過剰な retry 機構は不要)。
  */
-const CLOUD_CLEANUP_VERSION = 1
+// v1: 初回 cleanup
+// v2: createMandalart / duplicateMandalart の lazy 化漏れで作られた cloud 空 cell を再掃除
+const CLOUD_CLEANUP_VERSION = 2
 
 export function useCloudEmptyCellsCleanup(): void {
   useEffect(() => {
