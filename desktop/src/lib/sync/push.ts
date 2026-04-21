@@ -137,6 +137,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       id: g.id,
       mandalart_id: g.mandalart_id,
       center_cell_id: g.center_cell_id,
+      parent_cell_id: g.parent_cell_id ?? null,
       sort_order: g.sort_order,
       memo: g.memo,
       created_at: g.created_at,

@@ -158,16 +158,16 @@ async function applyGridChange(payload: { eventType: string; new: Record<string,
   const g = payload.new as CloudGrid & { deleted_at: string | null }
   if (!g.id) return false
   const local = await query<{
-    mandalart_id: string; center_cell_id: string; sort_order: number;
-    memo: string | null; deleted_at: string | null; updated_at: string;
+    mandalart_id: string; center_cell_id: string; parent_cell_id: string | null;
+    sort_order: number; memo: string | null; deleted_at: string | null; updated_at: string;
   }>(
-    'SELECT mandalart_id, center_cell_id, sort_order, memo, deleted_at, updated_at FROM grids WHERE id = ?',
+    'SELECT mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, deleted_at, updated_at FROM grids WHERE id = ?',
     [g.id],
   )
   if (local.length === 0) {
     await execute(
-      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
-      [g.id, g.mandalart_id, g.center_cell_id, g.sort_order, g.memo, g.created_at, g.updated_at, g.deleted_at, g.updated_at],
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [g.id, g.mandalart_id, g.center_cell_id, g.parent_cell_id ?? null, g.sort_order, g.memo, g.created_at, g.updated_at, g.deleted_at, g.updated_at],
     )
     return true
   }
@@ -175,6 +175,7 @@ async function applyGridChange(payload: { eventType: string; new: Record<string,
   const contentSame =
     local[0].mandalart_id === g.mandalart_id &&
     local[0].center_cell_id === g.center_cell_id &&
+    (local[0].parent_cell_id ?? null) === (g.parent_cell_id ?? null) &&
     local[0].sort_order === g.sort_order &&
     (local[0].memo ?? null) === (g.memo ?? null) &&
     tsEqual(local[0].deleted_at, g.deleted_at)
@@ -186,8 +187,8 @@ async function applyGridChange(payload: { eventType: string; new: Record<string,
     return false
   }
   await execute(
-    'UPDATE grids SET mandalart_id=?, center_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-    [g.mandalart_id, g.center_cell_id, g.sort_order, g.memo, g.updated_at, g.deleted_at, g.updated_at, g.id],
+    'UPDATE grids SET mandalart_id=?, center_cell_id=?, parent_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+    [g.mandalart_id, g.center_cell_id, g.parent_cell_id ?? null, g.sort_order, g.memo, g.updated_at, g.deleted_at, g.updated_at, g.id],
   )
   return true
 }

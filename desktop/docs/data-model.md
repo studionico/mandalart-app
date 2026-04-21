@@ -18,7 +18,7 @@
 CREATE TABLE mandalarts (
   id            TEXT PRIMARY KEY,           -- UUID
   title         TEXT NOT NULL DEFAULT '',   -- ルート中心セル text のキャッシュ (updateCell 経由で自動同期)
-  root_cell_id  TEXT NOT NULL,              -- 並列ルートグリッド群が共有する中心セル id
+  root_cell_id  TEXT NOT NULL,              -- プライマリ root グリッドの中心セル id (dashboard のサムネ等に使用)
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at     TEXT,                       -- 最終クラウド同期日時
@@ -29,7 +29,7 @@ CREATE TABLE mandalarts (
 
 > **title は独立した値ではなく、ルートグリッドの中心セル (position = 4) のテキストをキャッシュしたもの。**`lib/api/cells.ts` の `updateCell` がルート中心セルの更新を検知して自動的に同期する。別途「ファイル名を付けて保存」するフローは無い。
 >
-> **`root_cell_id` は並列ルートグリッドの中心共有を実現するキー**。`getRootGrids(mandalartId)` は `WHERE mandalart_id = ? AND center_cell_id = root_cell_id` を使って並列ルートを列挙する。
+> **`root_cell_id` はプライマリ root グリッドの中心セルを指す**。migration 004 〜 005 時代は全並列ルートがこの cell を共有していたが、migration 006 以降の新規並列ルートは独自の center cell を持つ。並列ルートの列挙は `getRootGrids(mandalartId)` が `WHERE mandalart_id = ? AND parent_cell_id IS NULL` を使って行う。
 
 ---
 
@@ -42,6 +42,7 @@ CREATE TABLE grids (
   id              TEXT PRIMARY KEY,
   mandalart_id    TEXT NOT NULL,             -- FK 制約は張らない (下記参照)
   center_cell_id  TEXT NOT NULL,             -- このグリッドの中心セル (position=4 相当) の cells.id
+  parent_cell_id  TEXT,                      -- drill 元 cell (root は NULL)、migration 006 以降
   sort_order      INTEGER NOT NULL DEFAULT 0, -- 並列順序 (← → ナビゲーション順)
   memo            TEXT,                      -- Markdown メモ
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -56,12 +57,18 @@ CREATE INDEX idx_grids_center_cell  ON grids(center_cell_id, sort_order);
 CREATE INDEX idx_grids_deleted_at   ON grids(deleted_at);
 ```
 
-> **ローカルスキーマでは `grids.mandalart_id` / `grids.center_cell_id` に FK 制約を付けていない。** 理由は後述の「FK 制約を張らない理由」を参照。
+> **ローカルスキーマでは `grids.mandalart_id` / `grids.center_cell_id` / `grids.parent_cell_id` に FK 制約を付けていない。** 理由は後述の「FK 制約を張らない理由」を参照。
 
 **`center_cell_id` の意味**:
-- **root グリッド** (`mandalart_id` 直下) → 自グリッド内 (`grid_id == grid.id`) の `position=4` の cell を指す
-- **子グリッド** (drill で生まれたグリッド) → 親グリッドに属する drill 元 cell (旧 X) を指す。**子グリッドには `position=4` の cell 行は存在しない**
-- **並列グリッド** (同一 `center_cell_id` を共有する複数 grid) → 中心セルが DB レベルで共有される (中心変更時に片方だけ変わるバグが起きない)
+- **root グリッド** (`mandalart_id` 直下、`parent_cell_id IS NULL`) → 自グリッド内 (`grid_id == grid.id`) の `position=4` の cell を指す
+- **primary drilled グリッド** (X=C モデル、同じ drill 元から最初に作られた grid) → 親グリッドに属する drill 元 cell (旧 X) を指す。**自グリッド内に `position=4` の cell 行は存在しない**
+- **独立並列グリッド** (migration 006 以降の新規並列) → 自グリッド内 (`grid_id == grid.id`) の `position=4` の cell を指す。各並列が独立したテーマを持てる
+- **レガシー並列グリッド** (migration 006 以前) → primary と同じ `center_cell_id` を共有。後方互換のため現状維持
+
+**`parent_cell_id` の意味 (migration 006 以降)**:
+- **root グリッド**: `NULL`
+- **drilled グリッド (primary / 並列どちらも)**: drill 元 cell の id (親グリッドの peripheral cell)
+- `getChildGrids(cellId)` や `getRootGrids(mandalartId)` の列挙はこのキーで行う (並列は独自 center を持ちうるので center_cell_id では拾えない)
 
 ---
 
@@ -129,20 +136,24 @@ CREATE TABLE IF NOT EXISTS stock_items (
 
 ```
 mandalart
-  └── root grid R (9 cells: position 0-8)
+  └── root grid R (9 cells: position 0-8、parent_cell_id = NULL)
         ├── R.center_cell_id → R.cells[4]                      ← ルートの中心は自分自身の cell
         └── cells[0..8] の内、周辺 cell (0-3, 5-8) のどれかを drill:
-              └── child grid G (8 cells: position 0-3, 5-8)
-                    ├── G.center_cell_id → R.cells[X] (drill 元)  ← 中心は親の周辺 cell
+              └── primary drilled grid G (8 cells、parent_cell_id = R.cells[X])
+                    ├── G.center_cell_id → R.cells[X] (drill 元)  ← X=C: 中心は親の周辺 cell
                     └── G の周辺 cell を drill → さらに子 grid ...
 
-並列グリッド: G と G2 が R.cells[X] を中心共有
-  └── G1.center_cell_id == G2.center_cell_id == R.cells[X].id  (sort_order で順序付け)
+並列グリッド (migration 006 以降の新モデル):
+  G (primary): center_cell_id → R.cells[X],   parent_cell_id → R.cells[X]   (X=C)
+  G2 (parallel): center_cell_id → G2.cells[4], parent_cell_id → R.cells[X]   (独立 center)
+  G3 (parallel): center_cell_id → G3.cells[4], parent_cell_id → R.cells[X]   (独立 center)
+  → parent_cell_id が同じで sort_order で順序付け。各並列の center は独立編集可能
 ```
 
-- **root グリッド** は自グリッド内の `position=4` cell (9 cells のうちの中央) を中心に持つ
-- **子グリッド** は自グリッド内に `position=4` の cell を持たない (8 cells のみ)。代わりに `center_cell_id` で親グリッドの drill 元 cell を参照する
-- **並列グリッド** は同じ `center_cell_id` を共有する複数の grid。`sort_order` で並列順を管理
+- **root グリッド** (`parent_cell_id IS NULL`) は自グリッド内の `position=4` cell を中心に持つ
+- **primary drilled グリッド** は自グリッド内に `position=4` の cell 行を持たない (8 cells のみ)。代わりに `center_cell_id` で親グリッドの drill 元 cell を参照する (X=C 統一モデル)
+- **独立並列グリッド** (migration 006 以降) は自グリッド内に `position=4` cell を持つ独自の中心を持ち、テーマを独立して編集可能
+- **レガシー並列グリッド** (migration 006 以前) は primary と同じ `center_cell_id` を共有。後方互換のため挙動はそのまま
 
 ---
 
@@ -163,7 +174,8 @@ export type Mandalart = {
 export type Grid = {
   id: string
   mandalart_id: string
-  center_cell_id: string     // 中心セル (position=4 相当) の cells.id
+  center_cell_id: string          // 中心セル (position=4 相当) の cells.id
+  parent_cell_id: string | null   // drill 元 cell (root は null)、migration 006 以降
   sort_order: number
   memo: string | null
   created_at: string
@@ -298,6 +310,8 @@ tauri_plugin_sql::Builder::new()
         Migration { version: 2, description: "add deleted_at columns for soft delete", sql: include_str!("../migrations/002_soft_delete.sql"), kind: MigrationKind::Up },
         Migration { version: 3, description: "add done column to cells", sql: include_str!("../migrations/003_cell_done.sql"), kind: MigrationKind::Up },
         Migration { version: 4, description: "unify X and C: replace grids.parent_cell_id with grids.center_cell_id", sql: include_str!("../migrations/004_unify_center.sql"), kind: MigrationKind::Up },
+        Migration { version: 5, description: "drop empty cells (lazy cell creation design)", sql: include_str!("../migrations/005_drop_empty_cells.sql"), kind: MigrationKind::Up },
+        Migration { version: 6, description: "add grids.parent_cell_id for independent parallel centers", sql: include_str!("../migrations/006_parent_cell_id.sql"), kind: MigrationKind::Up },
     ])
     .build()
 ```

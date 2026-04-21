@@ -98,6 +98,24 @@ CREATE INDEX IF NOT EXISTS idx_grids_center_cell ON grids(center_cell_id, sort_o
 
 ローカル側は migration 004 で自動的に全テーブルを DROP & CREATE します (既存の `mandalart.db` ファイルは再作成されます)。
 
+### 必須スキーマ変更: 独立並列 center (`parent_cell_id`)
+
+migration 006 で並列グリッドが独自の center cell を持てるようにするため、`grids.parent_cell_id TEXT` (nullable) を追加します。Supabase 側では以下を実行してください:
+
+```sql
+ALTER TABLE grids ADD COLUMN parent_cell_id TEXT;
+
+-- 既存 drilled grid のバックフィル (root グリッドは NULL のまま)
+UPDATE grids g
+SET parent_cell_id = g.center_cell_id
+FROM mandalarts m
+WHERE g.mandalart_id = m.id
+  AND g.center_cell_id != m.root_cell_id;
+```
+
+ローカル側は migration 006 で自動的に適用されます。
+RLS ポリシーへの影響はなし (既存の `user_id` ベース policy は parent_cell_id を参照しません)。
+
 ---
 
 ## ステップ 4: Auth 設定

@@ -99,7 +99,11 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 7. **`window.confirm` が Tauri WebView で動かない** — state ベースの 2 クリック確認 UI で代替 ([`TrashDialog.tsx`](desktop/src/components/dashboard/TrashDialog.tsx))
 8. **CSS keyframes の `transform: var(--x)` は WebKit で補間されない** — 固定 keyframes 8 方向で対応。詳細は [`animations.md`](desktop/docs/animations.md)
 9. **環境変数が欠損するとクラッシュ** — `lib/supabase/client.ts` がダミー URL でフォールバックし `isSupabaseConfigured` で gate
-10. **子グリッドには position=4 の cell 行が無い** — drill 先グリッドの中心は親グリッドの drill 元 cell (`grids.center_cell_id`) で直接参照。`cells WHERE grid_id = child.id` は 8 行しか返らない。描画では `getGrid` が親 cell を merge して 9 要素提供する。`setGridDone` のような grid 単位の UPDATE は 8 行のみ対象になる点に注意
+10. **中心セル行の有無は grid 種別で 3 パターン** (migration 006 以降):
+    - **root / 独立並列グリッド**: 自グリッド所属の position=4 cell 行を持つ。`cells WHERE grid_id = self.id` に center 含む
+    - **X=C primary drilled**: position=4 cell 行を持たず、`center_cell_id` は親 peripheral を指す。`getGrid` が merge して 9 要素提供
+    - **レガシー共有並列** (migration 006 以前の残存): primary と同じ `center_cell_id` を指し、cell 行は持たない
+    グリッド列挙は `parent_cell_id` ベース (`getRootGrids` / `getChildGrids`) で統一されており新旧両モデルを透過的に扱う。`setGridDone` のような grid 単位の UPDATE は自グリッド所属の cells のみが対象になる点に注意
 11. **`<a download>.click()` で Tauri のダウンロードは動かない** — ブラウザと違って WebKit はサイレントに握り潰す。ファイル保存は `@tauri-apps/plugin-fs` の `writeFile` + `BaseDirectory.Download` 等で書き、toast で保存先を通知する ([`src/lib/utils/export.ts`](desktop/src/lib/utils/export.ts))
 12. **push 失敗の thrash が全 DB 操作を巻き込む** — `synced_at=NULL` のまま soft-delete された「cloud に存在しない行」や親 mandalart が local から消えた zombie grid/cell は、push のたびに RLS 403 で upsert 失敗 → busy_timeout ロック待ち連鎖で関係ない query が数百 ms 遅延する (実測 1 往復 225ms)。対策: ① 削除系 API は `synced_at IS NULL` ならハードデリートする ([`grids.ts:deleteGrid`](desktop/src/lib/api/grids.ts), [`mandalarts.ts:deleteMandalart`](desktop/src/lib/api/mandalarts.ts), [`grids.ts:cleanupOrphanGrids`](desktop/src/lib/api/grids.ts)) ② [`push.ts`](desktop/src/lib/sync/push.ts) 先頭で参照整合性サニタイズ (`grids NOT IN mandalarts` / `cells NOT IN grids` を hard delete) ③ ただし zombie cleanup は**新規削除経路のバグを silent に隠す**ので、新しい DELETE 経路を追加したときは必ず子連鎖テストを書くこと
 13. **`copyCellSubtree` は mandalart 全体を in-memory ロードする** — [`cells.ts`](desktop/src/lib/api/cells.ts) の BFS + bulk INSERT 実装は「source cell が属する mandalart の全 grids / 全 cells」を 2 query で一括取得してから JS 側で subtree 抽出する。超巨大 mandalart (1 万 grid 超級) ではメモリスパイク / IPC 転送コスト (~0.6ms/row) に注意。少数の subtree コピーのためだけに 10000 行 fetch する設計なので、将来もし mandalart サイズ制限を緩めるなら再設計が必要

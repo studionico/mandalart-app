@@ -39,6 +39,12 @@ pub fn run() {
                             sql: include_str!("../migrations/005_drop_empty_cells.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 6,
+                            description: "add grids.parent_cell_id for independent parallel centers",
+                            sql: include_str!("../migrations/006_parent_cell_id.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

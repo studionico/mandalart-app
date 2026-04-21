@@ -21,39 +21,36 @@ function withCenterPosition(cell: Cell): Cell {
 /**
  * 並列ルートグリッド群を列挙する。
  *
- * 新モデル (migration 004 以降):
- * - 並列ルートは全員 `center_cell_id = mandalarts.root_cell_id` を指す
- * - sort_order で順序付け
+ * migration 006 以降: `parent_cell_id IS NULL` が root の判定キー。
+ * - 新規並列ルートは独自 center cell を持つので center_cell_id 比較では拾えない
+ * - レガシー並列ルート (center_cell_id = root_cell_id) も parent_cell_id=NULL で統一的に拾える
  */
 export async function getRootGrids(mandalartId: string): Promise<Grid[]> {
   return query<Grid>(
-    `SELECT g.* FROM grids g
-     JOIN mandalarts m ON m.id = g.mandalart_id
-     WHERE g.mandalart_id = ?
-       AND g.center_cell_id = m.root_cell_id
-       AND g.deleted_at IS NULL
-     ORDER BY g.sort_order`,
+    `SELECT * FROM grids
+     WHERE mandalart_id = ?
+       AND parent_cell_id IS NULL
+       AND deleted_at IS NULL
+     ORDER BY sort_order`,
     [mandalartId],
   )
 }
 
 /**
- * ある cell を中心 (drill 元) とする子グリッド群 (並列含む) を列挙する。
+ * ある cell を drill 元とする子グリッド群 (primary + 並列) を列挙する。
  * sort_order 昇順。
  *
- * 自己参照 (cell の所属 grid と同じ grid。= root 中心セルがその root grid を center として持つ) は
- * 「drill 元」としては意味を持たないので除外する。並列グリッドはすべて新規に作られた grid の
- * 行なので g.id != cell.grid_id となり、通常の drilled children と一緒に返される。
+ * migration 006 以降は `parent_cell_id = ?` で判定。primary は `center_cell_id = parent_cell_id`、
+ * 並列は `center_cell_id` が独自 cell を指すが `parent_cell_id` は同じなので統一クエリで拾える。
+ * レガシー並列も backfill で `parent_cell_id = center_cell_id` になっているため同じく拾える。
  */
 export async function getChildGrids(parentCellId: string): Promise<Grid[]> {
   return query<Grid>(
-    `SELECT g.* FROM grids g
-     JOIN cells c ON c.id = ?
-     WHERE g.center_cell_id = ?
-       AND g.id != c.grid_id
-       AND g.deleted_at IS NULL
-     ORDER BY g.sort_order`,
-    [parentCellId, parentCellId],
+    `SELECT * FROM grids
+     WHERE parent_cell_id = ?
+       AND deleted_at IS NULL
+     ORDER BY sort_order`,
+    [parentCellId],
   )
 }
 
@@ -102,40 +99,40 @@ export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
 }
 
 /**
- * グリッドを新規作成する。
+ * グリッドを新規作成する。migration 006 以降の 3 モードをサポート。
  *
- * - `centerCellId = null`: root グリッド作成。新規 center cell を生成し、8 peripherals と共に insert (計 9 cells)。
- *   戻り値の grid.center_cell_id は自動生成された center cell の id。
- *   呼び出し側 (createMandalart) は、初回 root 作成時にこの center_cell_id を mandalarts.root_cell_id に保存する。
- * - `centerCellId` 指定: 子 / 並列グリッド作成。center は既存 cell (親 peripheral or 並列共有中心) を再利用し、
- *   8 peripherals のみを insert (position=4 の cell 行は作らない)。
+ * - `parentCellId = null, centerCellId = null`: root 初期作成 (createMandalart 経由)。
+ *   新 center cell を generate して空コンテンツで INSERT。mandalarts.root_cell_id に保存される想定。
+ * - `parentCellId = Y, centerCellId = Y`: primary drilled グリッド (X=C 維持)。
+ *   新 cell 行は作らず、center_cell_id に親 peripheral cell id をそのまま入れる。
+ * - `parentCellId = Y, centerCellId = null`: 並列グリッド (独立 center)。
+ *   新 center cell を generate して空コンテンツで INSERT。parent_cell_id は Y を継承。
  */
 export async function createGrid(params: {
   mandalartId: string
+  parentCellId: string | null
   centerCellId: string | null
   sortOrder: number
 }): Promise<Grid & { cells: Cell[] }> {
   const gridId = generateId()
   const ts = now()
 
-  // 新設計: 空 cell 行は DB に作らない。
-  // - root grid: center cell 1 行のみ INSERT (mandalarts.root_cell_id が指す実体が必要なため)
-  // - child / parallel grid: cell 0 行 (center は親 grid の peripheral cell が既に存在、
-  //   peripheral は user が書込んだ瞬間に upsertCellAt で初めて INSERT される)
   if (params.centerCellId === null) {
+    // root 初期作成 or 並列独立作成: 新 center cell を空で INSERT
     const centerCellId = generateId()
     await execute(
-      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [gridId, params.mandalartId, centerCellId, params.sortOrder, ts, ts],
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [gridId, params.mandalartId, centerCellId, params.parentCellId, params.sortOrder, ts, ts],
     )
     await execute(
       'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [centerCellId, gridId, CENTER_POSITION, '', ts, ts],
     )
   } else {
+    // primary drilled (X=C): 新 cell は作らず既存 cell を center に共有
     await execute(
-      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [gridId, params.mandalartId, params.centerCellId, params.sortOrder, ts, ts],
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [gridId, params.mandalartId, params.centerCellId, params.parentCellId, params.sortOrder, ts, ts],
     )
   }
 
@@ -255,27 +252,20 @@ export type OrphanStats = {
 }
 
 export async function findOrphanGrids(): Promise<OrphanStats> {
-  // 1. 必要なデータを 3 クエリだけで一括取得
-  type GridRow = { id: string; mandalart_id: string; center_cell_id: string }
+  // 1. 必要なデータを 2 クエリだけで一括取得 (mandalarts は parent_cell_id による root 判定で不要になった)
+  type GridRow = { id: string; mandalart_id: string; center_cell_id: string; parent_cell_id: string | null }
   type CellRow = { id: string; grid_id: string; position: number; text: string; image_path: string | null }
-  type MandalartRow = { id: string; root_cell_id: string }
 
-  const [allGrids, allCells, allMandalarts] = await Promise.all([
+  const [allGrids, allCells] = await Promise.all([
     query<GridRow>(
-      'SELECT id, mandalart_id, center_cell_id FROM grids WHERE deleted_at IS NULL',
+      'SELECT id, mandalart_id, center_cell_id, parent_cell_id FROM grids WHERE deleted_at IS NULL',
     ),
     query<CellRow>(
       'SELECT id, grid_id, position, text, image_path FROM cells WHERE deleted_at IS NULL',
     ),
-    query<MandalartRow>(
-      'SELECT id, root_cell_id FROM mandalarts WHERE deleted_at IS NULL',
-    ),
   ])
 
   // 2. インデックス構築 (全て O(N) で構築し、以降の反復は O(1) lookup)
-  const rootCellIdByMandalart = new Map<string, string>()
-  for (const m of allMandalarts) rootCellIdByMandalart.set(m.id, m.root_cell_id)
-
   // grid_id → その grid が所有する cells (all cells, 中心含む)
   const ownCellsByGrid = new Map<string, CellRow[]>()
   for (const c of allCells) {
@@ -284,21 +274,24 @@ export async function findOrphanGrids(): Promise<OrphanStats> {
     ownCellsByGrid.set(c.grid_id, arr)
   }
 
-  // center_cell_id → その cell を center にしている grid id 群
-  const gridsByCenterCellId = new Map<string, string[]>()
+  // parent_cell_id → その cell を drill 元とする grid id 群 (primary + 並列)。
+  // 新モデルの並列グリッドは独自 center を持つので center_cell_id ベースでは拾えない。
+  // parent_cell_id ベースなら primary / 並列 / レガシー全てを統一的に子として検出できる。
+  const gridsByParentCellId = new Map<string, string[]>()
   for (const g of allGrids) {
-    const arr = gridsByCenterCellId.get(g.center_cell_id) ?? []
+    if (g.parent_cell_id == null) continue
+    const arr = gridsByParentCellId.get(g.parent_cell_id) ?? []
     arr.push(g.id)
-    gridsByCenterCellId.set(g.center_cell_id, arr)
+    gridsByParentCellId.set(g.parent_cell_id, arr)
   }
 
-  // 各 grid の「drilled children grid ids」= 自 grid の cells を center にしている他 grid
+  // 各 grid の「drilled children grid ids」= 自 grid の cells を drill 元 (parent_cell_id) とする他 grid
   const drilledChildrenByGrid = new Map<string, string[]>()
   for (const g of allGrids) {
     const ownCells = ownCellsByGrid.get(g.id) ?? []
     const children: string[] = []
     for (const cell of ownCells) {
-      const childGrids = gridsByCenterCellId.get(cell.id) ?? []
+      const childGrids = gridsByParentCellId.get(cell.id) ?? []
       for (const chId of childGrids) {
         if (chId !== g.id) children.push(chId)
       }
@@ -315,7 +308,7 @@ export async function findOrphanGrids(): Promise<OrphanStats> {
     return peripherals.every((c) => c.text === '' && c.image_path === null)
   }
   function isRoot(g: GridRow): boolean {
-    return rootCellIdByMandalart.get(g.mandalart_id) === g.center_cell_id
+    return g.parent_cell_id == null
   }
   const candidateIds: string[] = []
   for (const g of allGrids) {

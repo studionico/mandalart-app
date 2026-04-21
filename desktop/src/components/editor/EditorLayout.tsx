@@ -712,7 +712,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         deeperChildren.length > 0
           ? await getGrid(deeperChildren[0].id)
           : await getGrid(
-              (await createGrid({ mandalartId, centerCellId: cell.id, sortOrder: 0 })).id,
+              (await createGrid({ mandalartId, parentCellId: cell.id, centerCellId: cell.id, sortOrder: 0 })).id,
             )
       const deeperSiblings =
         deeperChildren.length > 0 ? deeperChildren : await getChildGrids(cell.id)
@@ -956,7 +956,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
       // 新モデル: center_cell_id = cell.id (親の周辺セルがそのまま子グリッドの中心になる)
       // 中心の text/image/color/done は親セルそのものなので別途コピー不要
-      const newGrid = await createGrid({ mandalartId, centerCellId: cell.id, sortOrder: 0 })
+      const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, centerCellId: cell.id, sortOrder: 0 })
 
       // newGrid.cells は 9 要素で提供される (中心は親 cell、周辺 8 は新規 empty)
       const populatedCells = newGrid.cells
@@ -1165,18 +1165,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   /**
-   * 指定グリッドが「空」なら soft-delete する。判定基準は grid 種別で異なる:
+   * 指定グリッドが「空」なら削除する。判定基準は grid 種別で異なる:
    *
-   * - **self-centered** (root grid, center_cell_id が自グリッド所属):
-   *   中心セル空 → 削除 (従来通り)。ただし root を削除すると親 cell を
-   *   クリアする対象がないので X クリア処理は行わない
-   * - **非 self-centered** (drilled / 並列):
-   *   自グリッドの peripherals 8 個が全部空 → 削除。中心は親 X と共有で空にできないので、
-   *   周辺が空なら "書かれていない並列" とみなす。
+   * - **self-centered** (root grid / 独立並列グリッド、center cell が自グリッド所属):
+   *   中心セル **かつ** peripherals が全て空 → 削除。
+   *   独立並列は center cell 行を保持しているため、中心だけ見ていると peripherals に
+   *   内容があっても誤削除するバグがあった (migration 006 対応で修正)。
+   * - **非 self-centered** (X=C primary drilled / レガシー共有並列):
+   *   自グリッドの peripherals 8 個が全部空 → 削除。中心は親 X と共有なので
+   *   自グリッド側では消せない。
    *   兄弟の有無に関わらず削除する (以前は「単独 drilled」は X 保持のため残していたが、
    *   空グリッドの累積を招くだけで X 自体や UI には影響しないと判明したため廃止)。
-   *   削除後にユーザーが再 drill した場合は createGrid で新しい空 grid が作られるだけで
-   *   挙動は従来と等価。
    *
    * 判定は DB から再読み込みした merged cells で行う (state の部分更新で position
    * override が崩れていても影響を受けないようにするため)。
@@ -1184,21 +1183,24 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   async function cleanupGridIfEmpty(gridId: string): Promise<boolean> {
     try {
       const gridWithCells = await getGrid(gridId)
-      const parentCellId = gridWithCells.center_cell_id
-      const parentCell = gridWithCells.cells.find((c) => c.id === parentCellId)
-      const isSelfCentered = parentCell?.grid_id === gridWithCells.id
+      const centerCellId = gridWithCells.center_cell_id
+      const centerCell = gridWithCells.cells.find((c) => c.id === centerCellId)
+      const isSelfCentered = centerCell?.grid_id === gridWithCells.id
 
       if (isSelfCentered) {
         const center = gridWithCells.cells.find((c) => c.position === CENTER_POSITION)
-        if (center && !isCellEmpty(center)) return false
+        const peripherals = gridWithCells.cells.filter((c) => c.position !== CENTER_POSITION)
+        const centerEmpty = !center || isCellEmpty(center)
+        const peripheralsEmpty = peripherals.every(isCellEmpty)
+        if (!centerEmpty || !peripheralsEmpty) return false
         // 自動掃除は復元の意図がないので soft-delete ではなく local + cloud の hard-delete を使う
         // (deleteGrid の soft-delete では cloud に deleted_at 付きゴミが永続的に残るため)
         await permanentDeleteGrid(gridId)
         return true
       }
 
-      // 非 self-centered: peripherals (自 grid 所属のセル = parentCellId 以外) が全て空か?
-      const peripherals = gridWithCells.cells.filter((c) => c.id !== parentCellId)
+      // 非 self-centered: peripherals (自 grid 所属のセル = centerCellId 以外) が全て空か?
+      const peripherals = gridWithCells.cells.filter((c) => c.id !== centerCellId)
       if (peripherals.some((c) => !isCellEmpty(c))) return false
 
       await permanentDeleteGrid(gridId)
@@ -1314,13 +1316,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   async function handleAddParallel() {
     if (slide) return
 
-    // 新モデル: 並列グリッドは元グリッドと同じ center_cell_id を共有する
-    // (中心が DB レベルで自動同期されるので手動コピー不要)
-    const originCenterCellId = gridData?.center_cell_id ?? null
-    if (!originCenterCellId) return
+    // migration 006 以降: 並列グリッドは独立した center cell を持つ。
+    // parent_cell_id は現在 grid から継承し (root なら null、drilled なら drill 元 cell)、
+    // center は新 cell を空コンテンツで INSERT する (コピーしない)。
+    if (!gridData) return
     const newGrid = await createGrid({
       mandalartId,
-      centerCellId: originCenterCellId,
+      parentCellId: gridData.parent_cell_id,
+      centerCellId: null,
       sortOrder: parallelGrids.length,
     })
 

@@ -2,29 +2,46 @@ import { describe, it, expect, expectTypeOf } from 'vitest'
 import type { Grid, Mandalart, GridSnapshot } from '@/types'
 
 /**
- * X/C 統一リファクタで追加された新カラム (grids.center_cell_id /
- * mandalarts.root_cell_id) が型レベルで正しく反映されていることの確認。
+ * migration 004 (X=C 統一) + migration 006 (独立並列 center) で導入された
+ * grids.center_cell_id / grids.parent_cell_id / mandalarts.root_cell_id が
+ * 型レベルで正しく反映されていることの確認。
  *
  * DB 層 (tauri-plugin-sql) はテスト環境で起動しないので、ここでは型と
  * snapshot 形状のみをチェックする。実動作は Tauri dev でのスモーク確認
  * に委ねる (docs/data-model.md を参照)。
  */
 
-describe('unified X/C model — type guards', () => {
-  it('Grid has center_cell_id (NOT NULL) and no parent_cell_id', () => {
+describe('grid schema — type guards', () => {
+  it('Grid has center_cell_id (NOT NULL) and parent_cell_id (nullable)', () => {
     const g: Grid = {
       id: 'g1',
       mandalart_id: 'm1',
       center_cell_id: 'c1',
+      parent_cell_id: null,
       sort_order: 0,
       memo: null,
       created_at: '2026-04-18T00:00:00Z',
       updated_at: '2026-04-18T00:00:00Z',
     }
     expect(g.center_cell_id).toBe('c1')
+    expect(g.parent_cell_id).toBeNull()
     expectTypeOf<Grid['center_cell_id']>().toEqualTypeOf<string>()
-    // parent_cell_id は新モデルで廃止: プロパティ自体が存在しない
-    expectTypeOf<Grid>().not.toHaveProperty('parent_cell_id')
+    // migration 006: root grid は null、drilled grid は drill 元 cell id
+    expectTypeOf<Grid['parent_cell_id']>().toEqualTypeOf<string | null>()
+  })
+
+  it('drilled Grid は parent_cell_id に cell id を持てる', () => {
+    const g: Grid = {
+      id: 'g2',
+      mandalart_id: 'm1',
+      center_cell_id: 'cellY',
+      parent_cell_id: 'cellY',
+      sort_order: 0,
+      memo: null,
+      created_at: '2026-04-18T00:00:00Z',
+      updated_at: '2026-04-18T00:00:00Z',
+    }
+    expect(g.parent_cell_id).toBe('cellY')
   })
 
   it('Mandalart has root_cell_id (required)', () => {
@@ -41,8 +58,8 @@ describe('unified X/C model — type guards', () => {
   })
 
   it('GridSnapshot は並列グリッドを parentPosition=undefined で表現する', () => {
-    // 並列グリッドは中心を共有するため snapshot としては parentPosition=undefined で
-    // 親グリッドの兄弟として記録する (import/paste 側で center_cell_id を共有するよう復元)
+    // 並列グリッドは snapshot としては親グリッドの兄弟として parentPosition=undefined で記録。
+    // import 側で独立した center cell として復元される (migration 006 以降)。
     const snap: GridSnapshot = {
       grid: { sort_order: 1, memo: null },
       cells: [],

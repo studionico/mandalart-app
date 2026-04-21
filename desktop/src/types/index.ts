@@ -3,9 +3,10 @@ export type Mandalart = {
   user_id: string
   title: string
   /**
-   * 並列ルートグリッド群が共有する中心セルの id。
-   * 並列ルートグリッド (mandalart 直下の parallel grids) は全員この cell を
-   * center_cell_id として指す → 中心変更が DB レベルで全並列に反映される。
+   * プライマリ root グリッドの中心セル id。
+   * レガシー並列ルート (migration 006 以前に作成されたもの) は全員この cell を
+   * center_cell_id として指し、共有されている。新規作成される並列ルートは独自の
+   * center cell を持ち、root_cell_id は参照しない (ダッシュボードのサムネ等の用途で残存)。
    */
   root_cell_id: string
   // ルート中心セル (position=4) の image_path を join で取得したもの。
@@ -21,11 +22,20 @@ export type Grid = {
   mandalart_id: string
   /**
    * このグリッドの中心セル (position=4 相当) を指す cells.id。
-   * - root グリッド: 自グリッド (grid_id == 自 id) の position=4 の cell
-   * - 子グリッド: 親グリッドに属する drill 元 cell (旧 X)。子グリッド内に position=4 行は存在しない
-   * - 並列グリッド: 同じ center_cell_id を共有する複数の grid (sort_order で順序付け)
+   * - root グリッド / primary drilled グリッド (X=C): 親または自グリッドの cell を共有
+   * - 並列グリッド (migration 006 以降の新規): 自グリッド所属の独立 cell 行 (grid_id=自 id, position=4)
+   * - レガシー並列グリッド (migration 006 以前): 同じ cell を共有 (primary と同じ)
    */
   center_cell_id: string
+  /**
+   * drill 元の cell id。
+   * - root グリッド (mandalart 直下): NULL
+   * - drilled グリッド (primary / 並列どちらも): 親グリッドの peripheral cell id
+   *
+   * 並列グリッドかどうかの判定は sort_order や mandalart 内での同一 parent_cell_id の
+   * 存在数で行う (parent_cell_id 自体は primary と parallel で同じ値)。
+   */
+  parent_cell_id: string | null
   sort_order: number
   memo: string | null
   created_at: string

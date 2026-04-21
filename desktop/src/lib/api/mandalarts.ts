@@ -49,8 +49,8 @@ export async function createMandalart(title = ''): Promise<Mandalart> {
     [mandalartId, title, rootCenterCellId, ts, ts],
   )
   await execute(
-    'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [rootGridId, mandalartId, rootCenterCellId, 0, ts, ts],
+    'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [rootGridId, mandalartId, rootCenterCellId, null, 0, ts, ts],
   )
   await execute(
     'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -222,8 +222,8 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const gridIdMap = new Map<string, string>()
 
   // 全 grids / cells を収集
-  const allGrids = await query<{ id: string; mandalart_id: string; center_cell_id: string; sort_order: number; memo: string | null }>(
-    'SELECT id, mandalart_id, center_cell_id, sort_order, memo FROM grids WHERE mandalart_id = ? AND deleted_at IS NULL',
+  const allGrids = await query<{ id: string; mandalart_id: string; center_cell_id: string; parent_cell_id: string | null; sort_order: number; memo: string | null }>(
+    'SELECT id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo FROM grids WHERE mandalart_id = ? AND deleted_at IS NULL',
     [sourceId],
   )
   const allCells = await query<Cell>(
@@ -247,9 +247,10 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     const newGridId = gridIdMap.get(g.id)!
     const newCenterCellId = cellIdMap.get(g.center_cell_id)
     if (!newCenterCellId) throw new Error(`Grid ${g.id} has orphan center_cell_id ${g.center_cell_id}`)
+    const newParentCellId = g.parent_cell_id == null ? null : cellIdMap.get(g.parent_cell_id) ?? null
     await execute(
-      'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
-      [newGridId, newMandalartId, newCenterCellId, g.sort_order, g.memo, ts, ts],
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
+      [newGridId, newMandalartId, newCenterCellId, newParentCellId, g.sort_order, g.memo, ts, ts],
     )
   }
 

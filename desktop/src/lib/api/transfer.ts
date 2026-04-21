@@ -15,12 +15,15 @@ const PERIPHERAL_POSITIONS = TAB_ORDER.filter((p) => p !== CENTER_POSITION)
  * グリッドとその配下の全ての子孫を GridSnapshot 形式でエクスポートする。
  * 各子グリッドには `parentPosition` (親グリッドのどのセルから生えているか) を
  * 記録するので、インポート時に正しい位置に復元できる。
+ *
+ * migration 006 以降は:
+ *  - drilled descendants: peripheral cell を drill 元とする grids (`parent_cell_id = cell.id`)
+ *  - parallels of current grid: 同じ `parent_cell_id` を共有する siblings (root なら `parent_cell_id IS NULL`)
+ * の 2 軸で traversal する。新並列 (独立 center) も旧並列 (共有 center) も統一クエリで拾える。
+ *
+ * `visited` で無限再帰を防ぐ (parallel 同士が互いを parallel として見つけるため必要)。
  */
 export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
-  // X=C 統一モデルでは並列グリッド G1 / G2 が同じ center_cell_id を共有するため、
-  // `SELECT grids WHERE center_cell_id = X AND id != 自分` は G1 から見ると G2 を、
-  // G2 から見ると G1 を返す → 相互参照で無限再帰になる。
-  // `visited` に訪問済 grid.id を積んで同じ grid は二度と辿らないようにする。
   const visited = new Set<string>()
 
   async function fetchSnapshot(
@@ -37,12 +40,9 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
     const grid = grids[0]
     if (!grid) throw new Error('Grid not found')
 
-    // 自 grid に属する cells を取得。child grid の場合は center 行を含まないので、
-    // export は center_cell_id の cell を別途読み込んで 9 cells 化する (import 側との
-    // 後方互換のため)。
-    // child grid では親の cell を position=CENTER_POSITION として merge する
-    // (DB 上の position は親内位置だが、snapshot としては中心 = 4 にしないと import
-    //  で position=4 の位置に復元されない)。
+    // 自 grid に属する cells を取得。X=C な primary drilled は自 grid に center 行が無いので、
+    // 親所属の center cell を別途読み込んで position=CENTER_POSITION として merge する
+    // (snapshot の整合性のため)。
     const ownCells = await query<Cell>(
       'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
       [gId],
@@ -59,17 +59,33 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
     allCells.sort((a, b) => a.position - b.position)
 
     const children: GridSnapshot[] = []
+
+    // 1. drilled descendants: peripheral cell ごとに parent_cell_id でぶら下がる grids を列挙
     for (const cell of allCells) {
-      // このセルを center として指す他の grids。自 grid と訪問済 grid は除く。
-      const childGrids = await query<{ id: string; sort_order: number }>(
-        'SELECT id, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL ORDER BY sort_order',
-        [cell.id, gId],
+      if (cell.position === CENTER_POSITION) continue
+      const drilled = await query<{ id: string; sort_order: number }>(
+        'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
+        [cell.id],
       )
-      for (const cg of childGrids) {
-        if (visited.has(cg.id)) continue
-        const parentPos = cell.id === grid.center_cell_id ? undefined : cell.position
-        children.push(await fetchSnapshot(cg.id, cg.sort_order, parentPos))
+      for (const d of drilled) {
+        if (visited.has(d.id)) continue
+        children.push(await fetchSnapshot(d.id, d.sort_order, cell.position))
       }
+    }
+
+    // 2. parallels of current grid: 同じ parent_cell_id を共有する siblings (自身を除く)
+    const parallels = grid.parent_cell_id == null
+      ? await query<{ id: string; sort_order: number }>(
+          'SELECT id, sort_order FROM grids WHERE mandalart_id = ? AND parent_cell_id IS NULL AND id != ? AND deleted_at IS NULL ORDER BY sort_order',
+          [grid.mandalart_id, gId],
+        )
+      : await query<{ id: string; sort_order: number }>(
+          'SELECT id, sort_order FROM grids WHERE parent_cell_id = ? AND id != ? AND deleted_at IS NULL ORDER BY sort_order',
+          [grid.parent_cell_id, gId],
+        )
+    for (const p of parallels) {
+      if (visited.has(p.id)) continue
+      children.push(await fetchSnapshot(p.id, p.sort_order, undefined))
     }
 
     return {
@@ -211,48 +227,53 @@ export async function importFromJSON(snapshot: GridSnapshot): Promise<Mandalart>
     'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
     [mandalartId, centerText, rootCenterCellId, ts, ts],
   )
-  // root grid を作成 (center_cell_id = rootCenterCellId)
-  await importIntoGrid(snapshot, mandalartId, rootCenterCellId, 0, /* isRoot */ true)
+  // root grid を作成 (parent_cell_id=null, 自身が center cell を INSERT)
+  await importIntoGrid(snapshot, mandalartId, rootCenterCellId, null, 0, /* ownsCenter */ true)
   return { id: mandalartId, title: centerText, root_cell_id: rootCenterCellId, created_at: ts, updated_at: ts, user_id: '' }
 }
 
 /**
  * GridSnapshot をローカル DB に挿入する。
  *
- * 新モデル:
- *  - isRoot = true: 9 cells (position=4 を含む) を grid に INSERT。center = position=4 の cell (id = centerCellId)
- *  - isRoot = false: 8 peripherals のみ INSERT (position=4 は skip)。center = 呼び出し側から渡された既存 cell id
+ * - `ownsCenter = true`: 自グリッドで center cell 行を INSERT する (root / 独立並列)。
+ *   `centerCellId` は呼び出し側が pre-generate した id を使う。
+ * - `ownsCenter = false`: X=C primary drilled。`centerCellId` は親 peripheral を指し、
+ *   cell 行はすでに親 grid 所属として存在するので INSERT しない。
+ *
+ * `parentCellId`: 新 grid の drill 元 (root は null、drilled / parallel は親 peripheral cell id)。
  */
 async function importIntoGrid(
   snapshot: GridSnapshot,
   mandalartId: string,
   centerCellId: string,
+  parentCellId: string | null,
   sortOrder: number,
-  isRoot = false,
+  ownsCenter = false,
 ) {
   const gridId = generateId()
   const ts = now()
   await execute(
-    'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [gridId, mandalartId, centerCellId, sortOrder, snapshot.grid.memo ?? null, ts, ts],
+    'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [gridId, mandalartId, centerCellId, parentCellId, sortOrder, snapshot.grid.memo ?? null, ts, ts],
   )
 
   const insertedCellIdByPosition = new Map<number, string>()
   for (let pos = 0; pos < GRID_CELL_COUNT; pos++) {
     const c = snapshot.cells.find((cc) => cc.position === pos)
     if (pos === CENTER_POSITION) {
-      if (isRoot) {
-        // root 中心セルは事前に決めた id を使う (mandalarts.root_cell_id 参照のため必ず作成)
+      if (ownsCenter) {
+        // 自グリッドで center cell 行を INSERT (snapshot の内容を保持)。
+        // root なら mandalarts.root_cell_id の実体、新並列なら独立テーマ行になる。
         await execute(
           'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [centerCellId, gridId, pos, c?.text ?? '', c?.image_path ?? null, c?.color ?? null, ts, ts],
         )
         insertedCellIdByPosition.set(pos, centerCellId)
       }
-      // child grid の場合は position=4 の行を作らない (insertedCellIdByPosition にも入れない)
+      // X=C primary drilled の場合は position=4 の行を作らない (親 cell をそのまま使う)
       continue
     }
-    // 新設計 (lazy cell creation): 空 peripheral は INSERT しない。
+    // lazy cell creation: 空 peripheral は INSERT しない。
     // ただし drilled child grid から center として参照される場合 (snapshot.children に
     // parentPosition=pos が含まれる) は参照整合性のため空でも INSERT する必要がある。
     const text = c?.text ?? ''
@@ -273,20 +294,18 @@ async function importIntoGrid(
     const parentPos = child.parentPosition
     // 手書き JSON で `"parentPosition": null` と書かれた場合も並列として扱う
     // (undefined と null を同じく "未指定" と見なす)
-    if (parentPos === undefined || parentPos === null) {
-      // 並列グリッド: 同じ center を共有
-      await importIntoGrid(child, mandalartId, centerCellId, child.grid.sort_order, /* isRoot */ false)
+    if (parentPos === undefined || parentPos === null || parentPos === CENTER_POSITION) {
+      // 並列グリッド: 独立した center cell を持つ (migration 006 以降の新モデル)。
+      // snapshot の position=4 内容をそのまま新 center cell に INSERT して再現する。
+      // parent_cell_id は current grid から継承 (root parallel なら null、drilled parallel なら Y)。
+      const newCenterCellId = generateId()
+      await importIntoGrid(child, mandalartId, newCenterCellId, parentCellId, child.grid.sort_order, /* ownsCenter */ true)
       continue
     }
-    if (parentPos === CENTER_POSITION) {
-      // center 経由でぶら下がるグリッド (並列と同等)
-      await importIntoGrid(child, mandalartId, centerCellId, child.grid.sort_order, false)
-      continue
-    }
-    const parentCellId = insertedCellIdByPosition.get(parentPos)
-    if (!parentCellId) continue
-    // drilled: 新グリッドの center = 親の peripheral cell id
-    await importIntoGrid(child, mandalartId, parentCellId, child.grid.sort_order, false)
+    const parentCellIdForDrill = insertedCellIdByPosition.get(parentPos)
+    if (!parentCellIdForDrill) continue
+    // primary drilled: X=C 維持 (新 cell は作らず親 peripheral を center として共有)
+    await importIntoGrid(child, mandalartId, parentCellIdForDrill, parentCellIdForDrill, child.grid.sort_order, /* ownsCenter */ false)
   }
 }
 
@@ -315,6 +334,6 @@ export async function importIntoCell(cellId: string, snapshot: GridSnapshot): Pr
     )
   }
 
-  // 新しい子グリッドとして cellId を center にして挿入
-  await importIntoGrid(snapshot, grid.mandalart_id, cellId, 0, false)
+  // 新しい子グリッドとして cellId を center (X=C primary drilled) にして挿入
+  await importIntoGrid(snapshot, grid.mandalart_id, cellId, cellId, 0, /* ownsCenter */ false)
 }
