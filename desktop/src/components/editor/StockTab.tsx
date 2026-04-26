@@ -7,7 +7,6 @@ import type { StockItem } from '@/types'
 
 type Props = {
   onPaste: (item: StockItem) => void
-  isOverStock?: boolean
   reloadKey?: number
   onItemDragStart?: (itemId: string) => void
   dragSourceId?: string | null
@@ -16,7 +15,7 @@ type Props = {
 const DRAG_THRESHOLD = 5
 
 export default function StockTab({
-  onPaste, isOverStock, reloadKey, onItemDragStart, dragSourceId,
+  onPaste, reloadKey, onItemDragStart, dragSourceId,
 }: Props) {
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -98,18 +97,8 @@ export default function StockTab({
   }
 
   return (
-    <div data-stock-drop="true" className="flex flex-col h-full gap-2">
-      {/* ドロップゾーン */}
-      <div
-        className={`
-          shrink-0 border-2 border-dashed rounded-xl py-3 text-xs text-center transition-colors select-none
-          ${isOverStock
-            ? 'border-blue-400 bg-blue-50 text-blue-600'
-            : 'border-gray-200 text-gray-400 hover:border-gray-300'}
-        `}
-      >
-        {isOverStock ? 'ここにドロップ' : 'セルをドラッグしてストックに追加'}
-      </div>
+    <div className="flex flex-col h-full gap-2">
+      {/* ストック追加導線は D&D 中の DragActionPanel (Copy アイコン) に集約済 (旧 data-stock-drop は廃止) */}
 
       {/* すべて削除ボタン (件数付き、2 クリック確認) */}
       {!loading && items.length > 0 && (

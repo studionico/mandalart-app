@@ -4,16 +4,15 @@ import { CENTER_POSITION } from '@/constants/grid'
 import type { Cell } from '@/types'
 
 /**
- * D&D ルールテーブル (要件定義に記載):
+ * D&D ルールテーブル (Phase A 後 — drop policy 厳格化):
  *
  * | ドラッグ元 | ドロップ先 | 結果 |
  * |---|---|---|
  * | 周辺 | 周辺 | SWAP_SUBTREE |
- * | 中央 | 入力ありの周辺 | SWAP_CONTENT |
- * | 中央 | 空の周辺 | COPY_SUBTREE |
- * | 入力ありの周辺 | 中央 | SWAP_CONTENT |
- * | 空の周辺 | 中央 | NOOP |
+ * | 中央 | 周辺 (空 / 入力ありどちらも) | NOOP |
+ * | 周辺 | 中央 (空 / 入力ありどちらも) | NOOP |
  *
+ * 中心セル絡みの D&D は全て禁止 (アクションアイコン経由のみ)。
  * 9×9 で異なるサブグリッドまたいだ D&D も同じ判定を再利用するので、
  * ここで分岐が網羅されていれば両方カバーされる。
  */
@@ -49,34 +48,22 @@ describe('resolveDndAction', () => {
     })
   })
 
-  it('中央 → 入力ありの周辺 は SWAP_CONTENT', () => {
+  it('中央 → 入力ありの周辺 は NOOP (drop policy で禁止)', () => {
     const src = cell({ id: 's', position: CENTER_POSITION, text: 'center' })
     const tgt = cell({ id: 't', position: 1, text: 'peri' })
-    expect(resolveDndAction(src, tgt)).toEqual({
-      type: 'SWAP_CONTENT',
-      cellIdA: 's',
-      cellIdB: 't',
-    })
+    expect(resolveDndAction(src, tgt)).toEqual({ type: 'NOOP' })
   })
 
-  it('中央 → 空の周辺 は COPY_SUBTREE', () => {
+  it('中央 → 空の周辺 は NOOP (drop policy で禁止)', () => {
     const src = cell({ id: 's', position: CENTER_POSITION, text: 'center' })
     const tgt = cell({ id: 't', position: 1, text: '' })
-    expect(resolveDndAction(src, tgt)).toEqual({
-      type: 'COPY_SUBTREE',
-      sourceCellId: 's',
-      targetCellId: 't',
-    })
+    expect(resolveDndAction(src, tgt)).toEqual({ type: 'NOOP' })
   })
 
-  it('入力ありの周辺 → 中央 は SWAP_CONTENT', () => {
+  it('入力ありの周辺 → 中央 は NOOP (drop policy で禁止)', () => {
     const src = cell({ id: 's', position: 1, text: 'peri' })
     const tgt = cell({ id: 't', position: CENTER_POSITION, text: 'center' })
-    expect(resolveDndAction(src, tgt)).toEqual({
-      type: 'SWAP_CONTENT',
-      cellIdA: 's',
-      cellIdB: 't',
-    })
+    expect(resolveDndAction(src, tgt)).toEqual({ type: 'NOOP' })
   })
 
   it('空の周辺 → 中央 は NOOP', () => {

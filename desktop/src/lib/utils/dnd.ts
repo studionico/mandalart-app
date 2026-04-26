@@ -1,50 +1,27 @@
 import type { Cell } from '@/types'
-import { isCellEmpty } from './grid'
 import { isCenterPosition } from '@/constants/grid'
 
 export type DndAction =
   | { type: 'SWAP_SUBTREE'; cellIdA: string; cellIdB: string }
-  | { type: 'SWAP_CONTENT'; cellIdA: string; cellIdB: string }
-  | { type: 'COPY_SUBTREE'; sourceCellId: string; targetCellId: string }
   | { type: 'NOOP' }
 
 /**
- * D&D ルール判定
+ * D&D ルール判定 (Phase A: drop policy 厳格化後)
+ *
  * source: ドラッグ元セル
  * target: ドロップ先セル
+ *
+ * ルール:
+ * - 中心セルは drop ターゲットになれない (どんな source からも) → NOOP
+ * - 中心セルからの cell-to-cell drop は禁止 (4 アクションアイコン経由のみ) → NOOP
+ * - 周辺 → 周辺 のみ SWAP_SUBTREE で許可
+ *
+ * 旧来の SWAP_CONTENT / COPY_SUBTREE 経路 (中心セル絡み) は本ポリシーで全面廃止し、
+ * 中心セルへの操作は「アクションアイコン (シュレッダー/移動/コピー/エクスポート)」に集約する。
  */
 export function resolveDndAction(source: Cell, target: Cell): DndAction {
   if (source.id === target.id) return { type: 'NOOP' }
-
-  const sourceIsCenter = isCenterPosition(source.position)
-  const targetIsCenter = isCenterPosition(target.position)
-  const sourceEmpty = isCellEmpty(source)
-  const targetEmpty = isCellEmpty(target)
-
-  // 周辺 → 周辺: サブツリーごと入れ替え
-  if (!sourceIsCenter && !targetIsCenter) {
-    return { type: 'SWAP_SUBTREE', cellIdA: source.id, cellIdB: target.id }
-  }
-
-  // 中心 → 入力ある周辺: 内容のみ入れ替え
-  if (sourceIsCenter && !targetIsCenter && !targetEmpty) {
-    return { type: 'SWAP_CONTENT', cellIdA: source.id, cellIdB: target.id }
-  }
-
-  // 中心 → 空の周辺: 階層全体をコピー
-  if (sourceIsCenter && !targetIsCenter && targetEmpty) {
-    return { type: 'COPY_SUBTREE', sourceCellId: source.id, targetCellId: target.id }
-  }
-
-  // 入力ある周辺 → 中心: 内容のみ入れ替え
-  if (!sourceIsCenter && targetIsCenter && !sourceEmpty) {
-    return { type: 'SWAP_CONTENT', cellIdA: source.id, cellIdB: target.id }
-  }
-
-  // 空の周辺 → 中心: 何もしない
-  if (!sourceIsCenter && targetIsCenter && sourceEmpty) {
-    return { type: 'NOOP' }
-  }
-
-  return { type: 'NOOP' }
+  if (isCenterPosition(source.position)) return { type: 'NOOP' }
+  if (isCenterPosition(target.position)) return { type: 'NOOP' }
+  return { type: 'SWAP_SUBTREE', cellIdA: source.id, cellIdB: target.id }
 }

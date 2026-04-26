@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import MemoTab from './MemoTab'
 import StockTab from './StockTab'
+import DragActionPanel, { type ActionDropType } from './DragActionPanel'
 import type { StockItem } from '@/types'
 
 type Tab = 'memo' | 'stock'
@@ -10,27 +11,29 @@ type Props = {
   gridMemo: string | null
   onStockPaste: (item: StockItem) => void
   isDragging?: boolean
-  isOverStock?: boolean
+  /** D&D 中にホバー中のアクションアイコン (DragActionPanel のハイライト用) */
+  hoveredAction?: ActionDropType | null
   stockReloadKey?: number
   onStockItemDragStart?: (itemId: string) => void
   dragSourceId?: string | null
 }
 
+/**
+ * 右サイドパネル。通常はメモ / ストックタブを切替表示する。
+ *
+ * D&D 進行中 (isDragging) はメモ / ストックを非表示にして、`DragActionPanel` (4 アクションアイコン) を
+ * 大きく表示する。アイコンが drop target を担うため、ストック自動切替は行わない。
+ */
 export default function SidePanel({
-  gridId, gridMemo, onStockPaste, isDragging, isOverStock, stockReloadKey,
+  gridId, gridMemo, onStockPaste, isDragging, hoveredAction, stockReloadKey,
   onStockItemDragStart, dragSourceId,
 }: Props) {
   const [tab, setTab] = useState<Tab>('memo')
 
-  // ドラッグ開始時にストックタブへ自動切替（ドロップゾーンを見せるため）
-  useEffect(() => {
-    if (isDragging) setTab('stock')
-  }, [isDragging])
-
   return (
     <div className="flex flex-col h-full border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-      {/* タブ */}
-      <div className="flex border-b border-gray-200 dark:border-gray-800">
+      {/* タブ (ドラッグ中は隠す) */}
+      <div className={`flex border-b border-gray-200 dark:border-gray-800 ${isDragging ? 'invisible' : ''}`}>
         {(['memo', 'stock'] as Tab[]).map((t) => (
           <button
             key={t}
@@ -44,18 +47,26 @@ export default function SidePanel({
         ))}
       </div>
 
-      <div className="flex-1 overflow-hidden p-3">
-        {tab === 'memo' ? (
-          <MemoTab gridId={gridId} initialMemo={gridMemo} />
-        ) : (
-          <StockTab
-            onPaste={onStockPaste}
-            isOverStock={isOverStock}
-            reloadKey={stockReloadKey}
-            onItemDragStart={onStockItemDragStart}
-            dragSourceId={dragSourceId}
-          />
+      <div className="flex-1 overflow-hidden p-3 relative">
+        {/* ドラッグ中: 4 アクションアイコンを overlay で表示 */}
+        {isDragging && (
+          <div className="absolute inset-0 z-10 bg-white dark:bg-gray-900 p-3">
+            <DragActionPanel hoveredAction={hoveredAction} />
+          </div>
         )}
+        {/* memo / stock タブの DOM は state を保持するため display:none で隠すだけ */}
+        <div className={`h-full ${isDragging ? 'invisible' : ''}`}>
+          {tab === 'memo' ? (
+            <MemoTab gridId={gridId} initialMemo={gridMemo} />
+          ) : (
+            <StockTab
+              onPaste={onStockPaste}
+              reloadKey={stockReloadKey}
+              onItemDragStart={onStockItemDragStart}
+              dragSourceId={dragSourceId}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

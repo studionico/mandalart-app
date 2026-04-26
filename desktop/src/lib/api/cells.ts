@@ -1,6 +1,7 @@
 import { query, execute, now, generateId } from '../db'
 import { CENTER_POSITION } from '@/constants/grid'
 import { isCellEmpty } from '@/lib/utils/grid'
+import { deleteGrid } from './grids'
 import type { Cell } from '../../types'
 
 /**
@@ -303,7 +304,8 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
 
   const ts = now()
   const cellIdMap = new Map<string, string>()
-  const gridInserts: Array<[string, string, string, number, string | null, string, string]> = []
+  // grid INSERT: id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at (8 cols)
+  const gridInserts: Array<[string, string, string, string, number, string | null, string, string]> = []
   const cellInserts: Array<[string, string, number, string, string | null, string | null, number, string, string]> = []
   const processedGridIds = new Set<string>()
 
@@ -327,7 +329,8 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
       if (processedGridIds.has(n.sourceGridId)) continue
       processedGridIds.add(n.sourceGridId)
 
-      gridInserts.push([n.newGridId, n.mandalartId, n.newCenterCellId, n.sortOrder, n.memo, ts, ts])
+      // X=C モデル: 新 grid の center_cell_id = parent_cell_id = newCenterCellId (drill 元 cell)
+      gridInserts.push([n.newGridId, n.mandalartId, n.newCenterCellId, n.newCenterCellId, n.sortOrder, n.memo, ts, ts])
       cellIdMap.set(n.sourceCenterId, n.newCenterCellId)
 
       const ownCells = cellsByGrid.get(n.sourceGridId) ?? []
@@ -365,17 +368,17 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
   }
 
   // ---- 全 INSERT を chunk 単位で実行 ----
-  // SQLite の ? 上限 999: grid=7 cols なら 140 行/chunk, cell=9 cols なら 110 行/chunk まで。
+  // SQLite の ? 上限 999: grid=8 cols なら 120 行/chunk, cell=9 cols なら 110 行/chunk まで。
   // 明示トランザクション (BEGIN IMMEDIATE) は tauri-plugin-sql / realtime sync と衝突して
   // 'database is locked' を誘発することがあったので使わない。chunk サイズを上限近くまで
   // 拡大して statement 数自体を減らすことで fsync 回数を抑える。
-  const GRID_CHUNK = 140
+  const GRID_CHUNK = 120
   const CELL_CHUNK = 110
   for (let i = 0; i < gridInserts.length; i += GRID_CHUNK) {
     const chunk = gridInserts.slice(i, i + GRID_CHUNK)
-    const valuesSql = chunk.map(() => '(?,?,?,?,?,?,?)').join(',')
+    const valuesSql = chunk.map(() => '(?,?,?,?,?,?,?,?)').join(',')
     await execute(
-      `INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES ${valuesSql}`,
+      `INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES ${valuesSql}`,
       chunk.flat(),
     )
   }
@@ -391,6 +394,35 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
   await execute(
     'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
     [src.text, src.image_path, src.color, now(), targetCellId],
+  )
+}
+
+// ---------------------------------------------------------------------------
+// シュレッダー / 移動 用: セル内容クリア + 配下サブグリッド再帰削除
+// ---------------------------------------------------------------------------
+
+/**
+ * セル内容を空クリアし、配下サブグリッド (`grids.parent_cell_id = cellId`) を再帰削除する。
+ *
+ * - cell row 自体は残し、text/image_path/color を空に UPDATE (lazy 設計と整合)
+ * - done フラグは false にリセット
+ * - 配下 grids は既存 `deleteGrid` 経由で再帰 cascade (synced_at による hard/soft 自動分岐)
+ *
+ * 呼出側 (D&D シュレッダー / 移動) で確認 dialog や undo / navigate up を制御する想定。
+ */
+export async function shredCellSubtree(cellId: string): Promise<void> {
+  // 1. 配下の全 sub-grid (parent_cell_id = cellId) を再帰削除
+  const subGrids = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
+  for (const g of subGrids) {
+    await deleteGrid(g.id)
+  }
+  // 2. セル本体の content をクリア
+  await execute(
+    'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
+    ['', null, null, 0, now(), cellId],
   )
 }
 

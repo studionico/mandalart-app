@@ -15,13 +15,17 @@ import CellComponent from './Cell'
 import Breadcrumb from './Breadcrumb'
 import SidePanel from './SidePanel'
 import ImportDialog from './ImportDialog'
+import ReplaceConfirmDialog from './ReplaceConfirmDialog'
+import ShredConfirmDialog from './ShredConfirmDialog'
+import ExportFormatPicker, { type ExportFormat } from './ExportFormatPicker'
+import type { ActionDropType } from '@/hooks/useDragAndDrop'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid } from '@/lib/api/grids'
-import { pasteCell, toggleCellDone, upsertCellAt } from '@/lib/api/cells'
-import { deleteMandalart } from '@/lib/api/mandalarts'
-import { addToStock, pasteFromStock } from '@/lib/api/stock'
+import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
+import { deleteMandalart, getMandalart, permanentDeleteMandalart } from '@/lib/api/mandalarts'
+import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
@@ -545,10 +549,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }, [gridData, pendingEdit])
   void pendingCellId  // 参照保持 (synthetic cell.id 計算で使う想定、現状は cellsForRender で完結)
 
-  const handleStockDrop = useCallback(async (cellId: string) => {
+  // Copy アクション: snapshot をストックに追加 (元セルは変化なし)
+  const handleCopyAction = useCallback(async (cellId: string) => {
     await addToStock(cellId)
     setStockReloadKey((k) => k + 1)
-    setToast({ message: 'ストックに追加しました', type: 'success' })
+    setToast({ message: 'ストックにコピーしました', type: 'success' })
   }, [])
 
   // 画像ファイルかどうかの簡易判定
@@ -573,6 +578,230 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }, [reloadAll])
 
+  // ストック → 入力ありの周辺セル drop: 確認 dialog を開く
+  const [replaceConfirm, setReplaceConfirm] = useState<{ stockItemId: string; targetCellId: string; targetText: string } | null>(null)
+
+  const handleStockReplaceDrop = useCallback((stockItemId: string, targetCellId: string) => {
+    const target = dndCells.find((c) => c.id === targetCellId)
+    setReplaceConfirm({
+      stockItemId,
+      targetCellId,
+      targetText: target?.text ?? '',
+    })
+  }, [dndCells])
+
+  const handleReplaceConfirm = useCallback(async () => {
+    if (!replaceConfirm) return
+    try {
+      await pasteFromStockReplacing(replaceConfirm.stockItemId, replaceConfirm.targetCellId)
+      reloadAll()
+      setToast({ message: 'ストックの内容で上書きしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `上書き失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setReplaceConfirm(null)
+    }
+  }, [replaceConfirm, reloadAll])
+
+  // 4 アクションアイコン (DragActionPanel) ドロップ用 state / dialogs
+  const [shredConfirm, setShredConfirm] = useState<{
+    cellId: string
+    isCenter: boolean
+    isPrimaryRoot: boolean
+    isSelfCenteredInCurrentGrid: boolean
+    gridIdForSelfCenter: string | undefined
+    targetText: string
+    childrenCount: number
+  } | null>(null)
+  const [exportPicker, setExportPicker] = useState<{
+    cellId: string
+    targetText: string
+    isCenter: boolean
+    gridIdForCenter: string | undefined
+  } | null>(null)
+
+  // 中心セル drop 後に上の階層へ navigate (drilled は親 grid、root は dashboard)
+  const navigateUpAfterAction = useCallback(() => {
+    if (breadcrumb.length <= 1) {
+      navigate('/dashboard')
+      return
+    }
+    const parent = breadcrumb[breadcrumb.length - 2]
+    if (parent) popBreadcrumbTo(parent.gridId)
+  }, [breadcrumb, navigate, popBreadcrumbTo])
+
+  /**
+   * 並列グリッドが削除された後の遷移処理。
+   * - 削除された並列以外がまだ残っていれば「左隣 (sort_order が 1 つ前) のサブグリッド」を表示
+   *   先頭 (index=0) を削除した場合は左隣がないので、新しい先頭をそのまま表示
+   * - 並列が他に無い場合 (= 削除後 0 件) は上の階層 (drilled なら親 grid、root なら dashboard) へ
+   */
+  const navigateAfterParallelDeleted = useCallback((deletedGridId: string) => {
+    const oldIndex = parallelGrids.findIndex((g) => g.id === deletedGridId)
+    const remaining = parallelGrids.filter((g) => g.id !== deletedGridId)
+    if (remaining.length === 0) {
+      navigateUpAfterAction()
+      return
+    }
+    const newIndex = Math.max(0, oldIndex - 1)
+    const targetGrid = remaining[newIndex]
+    setParallelGrids(remaining)
+    setParallelIndex(newIndex)
+    setCurrentGrid(targetGrid.id)
+    // breadcrumb 末尾が削除された grid を指していたら、新 grid id に差し替える
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (last && last.gridId === deletedGridId) {
+      updateBreadcrumbItem(last.gridId, { gridId: targetGrid.id })
+    }
+  }, [parallelGrids, breadcrumb, navigateUpAfterAction, setCurrentGrid, updateBreadcrumbItem])
+
+  /** primary root の中心セルか判定 (mandalart.root_cell_id と一致するか)。
+   *  該当する場合 shred / move はマンダラート全体の削除を意味する。
+   *  並列ルート (独立 center) は別 cell id なので false。 */
+  const isPrimaryRootCell = useCallback(async (cellId: string): Promise<boolean> => {
+    try {
+      const m = await getMandalart(mandalartId)
+      return m?.root_cell_id === cellId
+    } catch {
+      return false
+    }
+  }, [mandalartId])
+
+  const handleActionDrop = useCallback(async (action: ActionDropType, cellId: string) => {
+    const cell = dndCells.find((c) => c.id === cellId)
+    const isCenter = cell?.position === CENTER_POSITION
+    const targetText = cell?.text ?? ''
+    // 並列グリッドの中心セル判定: cell が自グリッド (= 現在表示中) に属しかつ中心。
+    // root primary も同条件にマッチするが、それは別途 isPrimaryRoot で先に分岐するので問題ない。
+    const isSelfCenteredInCurrentGrid = !!(isCenter && cell && gridData && cell.grid_id === gridData.id)
+    switch (action) {
+      case 'shred': {
+        // 配下サブグリッド数を概算 (確認 dialog の文言ヒント)
+        const [children, isPrimaryRoot] = await Promise.all([
+          getChildGrids(cellId).catch(() => []),
+          isCenter ? isPrimaryRootCell(cellId) : Promise.resolve(false),
+        ])
+        setShredConfirm({
+          cellId,
+          isCenter: !!isCenter,
+          isPrimaryRoot,
+          isSelfCenteredInCurrentGrid,
+          gridIdForSelfCenter: gridData?.id,
+          targetText,
+          childrenCount: children.length,
+        })
+        return
+      }
+      case 'move': {
+        try {
+          const isPrimaryRoot = isCenter ? await isPrimaryRootCell(cellId) : false
+          if (isPrimaryRoot) {
+            // primary root center: snapshot をストックに残してマンダラート全体を完全削除
+            await addToStock(cellId)
+            setStockReloadKey((k) => k + 1)
+            await permanentDeleteMandalart(mandalartId)
+            setToast({ message: 'ストックへ移動し、マンダラートを削除しました', type: 'success' })
+            navigate('/dashboard')
+          } else if (isSelfCenteredInCurrentGrid && gridData) {
+            // 並列 (root or drilled): snapshot 保存後に並列 grid 自体を完全削除
+            // (shredCellSubtree では並列 grid 本体は消えないので明示的に permanentDeleteGrid)
+            const deletedGridId = gridData.id
+            await addToStock(cellId)
+            setStockReloadKey((k) => k + 1)
+            await permanentDeleteGrid(deletedGridId)
+            setToast({ message: 'ストックへ移動し、並列グリッドを削除しました', type: 'success' })
+            navigateAfterParallelDeleted(deletedGridId)
+          } else {
+            // X=C primary drilled center または周辺セル: 通常の moveCellToStock
+            await moveCellToStock(cellId)
+            setStockReloadKey((k) => k + 1)
+            setToast({ message: 'ストックに移動しました', type: 'success' })
+            if (isCenter) navigateUpAfterAction()
+            else reloadAll()
+          }
+        } catch (e) {
+          setToast({ message: `移動失敗: ${(e as Error).message}`, type: 'error' })
+        }
+        return
+      }
+      case 'copy': {
+        await handleCopyAction(cellId)
+        return
+      }
+      case 'export': {
+        setExportPicker({ cellId, targetText, isCenter: !!isCenter, gridIdForCenter: gridData?.id })
+        return
+      }
+    }
+  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate])
+
+  const handleShredConfirm = useCallback(async () => {
+    if (!shredConfirm) return
+    const { cellId, isCenter, isPrimaryRoot, isSelfCenteredInCurrentGrid, gridIdForSelfCenter } = shredConfirm
+    try {
+      if (isPrimaryRoot) {
+        // primary root center 削除 → マンダラート全体を完全削除 (ゴミ箱に入れない)
+        await permanentDeleteMandalart(mandalartId)
+        setToast({ message: 'マンダラートを削除しました', type: 'success' })
+        navigate('/dashboard')
+      } else if (isSelfCenteredInCurrentGrid && gridIdForSelfCenter) {
+        // 並列 (root or drilled): 並列 grid 自体を完全削除し、左隣の並列に切替
+        await permanentDeleteGrid(gridIdForSelfCenter)
+        setToast({ message: '並列グリッドを削除しました', type: 'success' })
+        navigateAfterParallelDeleted(gridIdForSelfCenter)
+      } else {
+        await shredCellSubtree(cellId)
+        setToast({ message: '完全に削除しました', type: 'success' })
+        if (isCenter) navigateUpAfterAction()
+        else reloadAll()
+      }
+    } catch (e) {
+      setToast({ message: `削除失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setShredConfirm(null)
+    }
+  }, [shredConfirm, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, mandalartId, navigate])
+
+  const handleExportPick = useCallback(async (format: ExportFormat) => {
+    if (!exportPicker) return
+    const { cellId, targetText, isCenter, gridIdForCenter } = exportPicker
+    setExportPicker(null)
+    try {
+      // ファイル名のベース: cell.text を sanitize (Tauri / OS で問題になる文字を _ に置換)
+      const baseName = (targetText || 'cell').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) || 'cell'
+
+      // エクスポート対象 grid の決定:
+      //  - 中心セル: 現在表示中の grid 自体を書き出す (root primary なら mandalart 全体、
+      //    並列 root / 並列 drilled / X=C primary drilled でもユーザーが見ている grid が対象)
+      //  - 周辺セル: parent_cell_id = cellId の primary drilled grid を書き出す
+      let targetGridId: string | undefined
+      if (isCenter) {
+        targetGridId = gridIdForCenter
+      } else {
+        const childGrids = await getChildGrids(cellId)
+        targetGridId = childGrids[0]?.id
+      }
+      if (!targetGridId) {
+        setToast({ message: 'エクスポート対象のグリッドが見つかりません', type: 'info' })
+        return
+      }
+      let filename: string
+      if (format === 'json') {
+        const snap = await exportToJSON(targetGridId)
+        filename = await downloadJSON(snap, baseName)
+      } else if (format === 'markdown') {
+        const md = await exportToMarkdown(targetGridId)
+        filename = await downloadText(md, 'md', baseName)
+      } else {
+        const txt = await exportToIndentText(targetGridId)
+        filename = await downloadText(txt, 'txt', baseName)
+      }
+      setToast({ message: `保存しました: ${filename}`, type: 'success' })
+    } catch (e) {
+      setToast({ message: `エクスポート失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [exportPicker])
+
   const handleDndCellsUpdated = useCallback((updated: Cell[]) => {
     // D&D 成功直後に DB から取り直した各セルを React state に即時反映する。
     // reloadAll (全体再フェッチ) でも UI が追従しないケースがあったため、target 周辺だけ
@@ -582,12 +811,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }, [refreshCell])
 
   const {
-    dragSourceId, dragOverId, isOverStock, isDragging,
+    dragSourceId, dragOverId, hoveredAction, isDragging,
     handleDragStart, handleStockItemDragStart,
   } = useDragAndDrop(
     dndCells,
     reloadAll,
-    handleStockDrop,
     handleStockPasteDrop,
     useCallback((op: DndUndoable) => {
       pushUndo({
@@ -597,6 +825,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       })
     }, [pushUndo, reloadAll]),
     handleDndCellsUpdated,
+    handleStockReplaceDrop,
+    handleActionDrop,
   )
 
   // クリップボードショートカット用: マウス位置を追跡
@@ -2411,7 +2641,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             gridMemo={gridData?.memo ?? null}
             onStockPaste={handleStockPaste}
             isDragging={isDragging}
-            isOverStock={isOverStock}
+            hoveredAction={hoveredAction}
             stockReloadKey={stockReloadKey}
             onStockItemDragStart={handleStockItemDragStart}
             dragSourceId={dragSourceId}
@@ -2458,6 +2688,32 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           reloadAll()
           setToast({ message: 'インポートしました', type: 'success' })
         }}
+      />
+
+      {/* ストック → 入力ありセル drop の置換確認 */}
+      <ReplaceConfirmDialog
+        open={replaceConfirm !== null}
+        targetText={replaceConfirm?.targetText}
+        onCancel={() => setReplaceConfirm(null)}
+        onConfirm={handleReplaceConfirm}
+      />
+
+      {/* シュレッダー drop 確認 */}
+      <ShredConfirmDialog
+        open={shredConfirm !== null}
+        targetText={shredConfirm?.targetText}
+        childrenCount={shredConfirm?.childrenCount}
+        isPrimaryRoot={shredConfirm?.isPrimaryRoot}
+        onCancel={() => setShredConfirm(null)}
+        onConfirm={handleShredConfirm}
+      />
+
+      {/* エクスポート形式選択 */}
+      <ExportFormatPicker
+        open={exportPicker !== null}
+        targetText={exportPicker?.targetText}
+        onCancel={() => setExportPicker(null)}
+        onPick={handleExportPick}
       />
 
       {/* トースト */}

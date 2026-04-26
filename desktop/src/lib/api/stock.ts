@@ -1,5 +1,7 @@
 import { query, execute, generateId, now } from '../db'
 import { CENTER_POSITION } from '@/constants/grid'
+import { deleteGrid } from './grids'
+import { shredCellSubtree } from './cells'
 import type { Cell, StockItem, CellSnapshot, GridSnapshot } from '../../types'
 
 type RawStockItem = { id: string; snapshot: string; created_at: string }
@@ -22,6 +24,42 @@ export async function addToStock(cellId: string): Promise<StockItem> {
 
 export async function deleteStockItem(id: string): Promise<void> {
   await execute('DELETE FROM stock_items WHERE id = ?', [id])
+}
+
+/**
+ * 「移動」アクション: snapshot をストックに保存してから、元セル + 配下サブグリッドをクリア (= shred)。
+ *
+ * Copy (`addToStock` 単体) との違い: 元セルの content と配下が削除される。ユーザーは
+ * その後ストックから別の場所にペーストすることで「カット → ペースト」を完成できる。
+ *
+ * ※ atomic 性は保証しない (snapshot 保存後に shred 失敗した場合、ストックには残るが元も残る)。
+ *    実害は小さい (ユーザーが目視で気付ける) ので現状は補正処理を入れない。
+ */
+export async function moveCellToStock(cellId: string): Promise<StockItem> {
+  const item = await addToStock(cellId)
+  await shredCellSubtree(cellId)
+  return item
+}
+
+/**
+ * 入力ありセルへのストックペースト (置換版)。
+ *
+ * 既存の cell content + 配下サブグリッド (parent_cell_id = targetCellId の grids) を破棄してから
+ * 通常の `pasteFromStock` を実行する。これにより新スナップショットの内容で完全に置き換わる。
+ *
+ * 呼出側 (EditorLayout) で確認 dialog を経由するのが前提。
+ */
+export async function pasteFromStockReplacing(stockItemId: string, targetCellId: string): Promise<void> {
+  // 1. ターゲットセルを drill 元とする全 grids (primary + 並列) を再帰削除
+  const subGrids = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [targetCellId],
+  )
+  for (const g of subGrids) {
+    await deleteGrid(g.id)
+  }
+  // 2. 通常の paste で content + 新サブグリッドを上書き挿入
+  await pasteFromStock(stockItemId, targetCellId)
 }
 
 /**
@@ -144,9 +182,11 @@ async function insertGridSnapshot(
 ): Promise<void> {
   const gridId = generateId()
   const ts = now()
+  // X=C 統一モデルでは center_cell_id = parent peripheral cell id。parent_cell_id も同じ値で OK
+  // (migration 006 以降の独立並列ではない、通常の drilled grid 扱い)
   await execute(
-    'INSERT INTO grids (id, mandalart_id, center_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
-    [gridId, mandalartId, parentCellId, snap.grid.sort_order, snap.grid.memo, ts, ts],
+    'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
+    [gridId, mandalartId, parentCellId, parentCellId, snap.grid.sort_order, snap.grid.memo, ts, ts],
   )
 
   // peripherals 8 個を挿入 (position=4 は skip)
@@ -195,13 +235,21 @@ async function buildCellSnapshot(cellId: string): Promise<CellSnapshot> {
 
   const children: GridSnapshot[] = []
 
-  // 新モデル: このセルを center として指しているすべての grid をスナップショット
-  // (自グリッドを含む root center, drilled grids, 並列 grids が統一的にヒットする)
-  const centeringGrids = await query<{ id: string; memo: string | null; sort_order: number }>(
-    'SELECT id, memo, sort_order FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
-    [cellId],
-  )
-  for (const g of centeringGrids) {
+  // セル種別で snapshot 対象 grid の選び方が異なる:
+  //  - 中心セル (DB 上の position=4 = 自グリッド所属の root / 独立並列 center): center_cell_id ベース。
+  //    自グリッド + (root center なら) center を共有するレガシー並列ルートを拾う
+  //  - 周辺セル (DB 上の position!=4 = X=C primary の center も含む): parent_cell_id ベース。
+  //    primary + 新独立並列 + レガシー並列が backfill 済みで統一的にヒットする
+  const targetGrids = c.position === CENTER_POSITION
+    ? await query<{ id: string; memo: string | null; sort_order: number }>(
+        'SELECT id, memo, sort_order FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
+        [cellId],
+      )
+    : await query<{ id: string; memo: string | null; sort_order: number }>(
+        'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL ORDER BY sort_order',
+        [cellId],
+      )
+  for (const g of targetGrids) {
     children.push(await buildGridSnapshot(g.id, g.memo, g.sort_order))
   }
 
@@ -244,9 +292,9 @@ async function buildGridSnapshot(
 
   const children: GridSnapshot[] = []
   for (const sc of peripherals) {
-    // この peripheral を center として指す他の grids (drilled + 並列)
+    // この peripheral を drill 元とする全 grids (primary + 新独立並列 + レガシー並列を統一的に拾う)
     const sub = await query<{ id: string; memo: string | null; sort_order: number }>(
-      'SELECT id, memo, sort_order FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL ORDER BY sort_order',
+      'SELECT id, memo, sort_order FROM grids WHERE parent_cell_id = ? AND id != ? AND deleted_at IS NULL ORDER BY sort_order',
       [sc.id, gridId],
     )
     for (const subGrid of sub) {
