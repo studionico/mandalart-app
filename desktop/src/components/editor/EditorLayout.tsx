@@ -1808,29 +1808,22 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             </button>
           </div>
 
-          {/* チェックボックス表示 ON/OFF トグル */}
+          {/* チェックボックス表示 ON/OFF (チェックボックス型ボタン) */}
           <button
             type="button"
             onClick={() => setShowCheckbox(!showCheckbox)}
-            className={`relative w-10 h-5 rounded-full transition-colors border text-[9px] ${
+            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
               showCheckbox
-                ? 'bg-blue-600 border-blue-600'
-                : 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+                ? 'bg-blue-600 border-blue-600 text-white'
+                : 'bg-white dark:bg-gray-900 border-gray-400 dark:border-gray-500 hover:border-gray-700 dark:hover:border-gray-300 text-transparent'
             }`}
             title={showCheckbox ? 'チェックボックス表示中 (クリックで非表示)' : 'チェックボックス非表示 (クリックで表示)'}
             aria-label="toggle checkbox display"
+            aria-pressed={showCheckbox}
           >
-            <span
-              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all flex items-center justify-center ${
-                showCheckbox ? 'left-[22px] text-blue-600' : 'left-0.5 text-gray-400'
-              }`}
-            >
-              {showCheckbox && (
-                <svg viewBox="0 0 16 16" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 8 7 12 13 4" />
-                </svg>
-              )}
-            </span>
+            <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 8 7 12 13 4" />
+            </svg>
           </button>
 
           {/* 表示モード切替 */}
