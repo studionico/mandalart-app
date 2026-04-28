@@ -14,6 +14,7 @@
 | 触るもの | 先に読む docs |
 |---|---|
 | セルの見た目・操作 | [`requirements.md`](desktop/docs/requirements.md), [`typography.md`](desktop/docs/typography.md) |
+| D&D / 4 アクションアイコン / 中心セル禁止 ルール | [`requirements.md`](desktop/docs/requirements.md) "セルのドラッグ＆ドロップ" 節 |
 | アニメーション | [`animations.md`](desktop/docs/animations.md) |
 | API (lib/api) | [`api-spec.md`](desktop/docs/api-spec.md), [`data-model.md`](desktop/docs/data-model.md) |
 | DB スキーマ変更 | [`data-model.md`](desktop/docs/data-model.md), [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) |
@@ -63,9 +64,10 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
                       ↘ lib/sync/ → Supabase (REST + Realtime)
 ```
 
-- **データモデル**: `mandalarts → grids → cells` の再帰階層。FK 制約なし (後述)。`deleted_at` でソフトデリート。**子グリッドは自身の中心セル行を持たず** `grids.center_cell_id` で親グリッドの drill 元 cell を共有する (X=C 統一、migration 004)。並列ルートは `mandalarts.root_cell_id` を共有
-- **同期**: `lib/sync/` で last-write-wins (updated_at 比較)、`lib/realtime.ts` で postgres_changes 購読
-- **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore`)
+- **データモデル**: `mandalarts → grids → cells` の再帰階層。FK 制約なし (後述)。`deleted_at` でソフトデリート。**子グリッドの中心セル行の有無は 3 パターン**: ① root / 独立並列 (migration 006+) は自グリッド所属、② X=C primary drilled は親 peripheral と共有、③ レガシー共有並列 (migration 006 未満) は primary と center_cell_id 共有 (落とし穴 #10 参照)。並列の判定は `grids.parent_cell_id` (migration 006) で統一
+- **lazy cell creation** (migration 005+): 空セル行は DB に作らない。`upsertCellAt(grid_id, position)` で書込時に初めて INSERT
+- **同期**: `lib/sync/` で last-write-wins (updated_at 比較)、`lib/realtime.ts` で postgres_changes 購読。マンダラート単位の UI プリファレンス (`show_checkbox`、migration 007) も同期される
+- **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore`)。マンダラート単位の永続 UI 設定は DB カラム経由 (editorStore に置かない)
 - **ルーティング**: HashRouter — `/dashboard`, `/mandalart/:id`。認証ガードなし (ローカル専用モードで全機能使える)
 - 詳細は [`folder-structure.md`](desktop/docs/folder-structure.md)
 
@@ -108,6 +110,9 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 12. **push 失敗の thrash が全 DB 操作を巻き込む** — `synced_at=NULL` のまま soft-delete された「cloud に存在しない行」や親 mandalart が local から消えた zombie grid/cell は、push のたびに RLS 403 で upsert 失敗 → busy_timeout ロック待ち連鎖で関係ない query が数百 ms 遅延する (実測 1 往復 225ms)。対策: ① 削除系 API は `synced_at IS NULL` ならハードデリートする ([`grids.ts:deleteGrid`](desktop/src/lib/api/grids.ts), [`mandalarts.ts:deleteMandalart`](desktop/src/lib/api/mandalarts.ts), [`grids.ts:cleanupOrphanGrids`](desktop/src/lib/api/grids.ts)) ② [`push.ts`](desktop/src/lib/sync/push.ts) 先頭で参照整合性サニタイズ (`grids NOT IN mandalarts` / `cells NOT IN grids` を hard delete) ③ ただし zombie cleanup は**新規削除経路のバグを silent に隠す**ので、新しい DELETE 経路を追加したときは必ず子連鎖テストを書くこと
 13. **`copyCellSubtree` は mandalart 全体を in-memory ロードする** — [`cells.ts`](desktop/src/lib/api/cells.ts) の BFS + bulk INSERT 実装は「source cell が属する mandalart の全 grids / 全 cells」を 2 query で一括取得してから JS 側で subtree 抽出する。超巨大 mandalart (1 万 grid 超級) ではメモリスパイク / IPC 転送コスト (~0.6ms/row) に注意。少数の subtree コピーのためだけに 10000 行 fetch する設計なので、将来もし mandalart サイズ制限を緩めるなら再設計が必要
 14. **D&D 後の UI 反映は `onCellsUpdated` 経由のみ** — [`useDragAndDrop.ts`](desktop/src/hooks/useDragAndDrop.ts) は D&D 成功時に `reloadAll` をスキップし、`refreshCell(target)` だけで UI を更新する (useEffect cascade の二重発火を避けるため)。D&D アクションが将来 target / source 以外の DB side-effect を持つようになる場合 (例: 親 grid の memo 書換など) は、`onCellsUpdated` のセル列挙を拡張するか reloadAll に戻す判断が必要
+15. **D&D drop policy は cell-to-cell では 周辺→周辺 のみ** — Phase A 改修以降、中心セル絡みの cell-to-cell drop は `resolveDndAction` が NOOP を返す。中心セルからの操作は **D&D 中の右パネル 4 アクションアイコン** (シュレッダー / 移動 / コピー / エクスポート) に集約。新しい drop パターンを足すときはこの方針を維持し、中心セル直接 drop は再導入しないこと
+16. **アニメ render 経路で空 slot / checkbox を忘れる罠** — orbit / view-switch / slide で `orbit.targetCells.find(...)` が undefined のとき bare `<div />` を返すと、空 slot が animation 完了 swap の瞬間に枠付きで pop する。空 slot にも `GridView3x3` と同じ枠 + `orbit-fade-in` を当てる必要がある。同様に `onToggleDone` を渡し忘れると Cell 内 `done` checkbox が遅れて出現する (アニメ render に必ず `onToggleDone={showCheckbox ? handleToggleDone : undefined}` を渡す)
+17. **マンダラート単位の UI 設定は DB カラム + Supabase 手動 ALTER** — `mandalarts.show_checkbox` (migration 007) のように UI プリファレンスを DB に置く場合、Supabase 側で `ALTER TABLE mandalarts ADD COLUMN ... ;` を **新版配布前に手動実行** する必要がある。未実行のままだと push が `PGRST204: column not found` で失敗 → thrash 化する。手順は [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) 参照。同様に migration 006 の `grids.parent_cell_id` も同パターン
 
 ## ドキュメント一覧
 

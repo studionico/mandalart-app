@@ -45,13 +45,19 @@ getMandalarts(): Promise<Mandalart[]>
 // 指定 ID のマンダラートを取得 (削除済みは除外)
 getMandalart(id: string): Promise<Mandalart | null>
 
-// 新規マンダラートを作成
+// 新規マンダラートを作成 (show_checkbox は DEFAULT 0 = OFF)
 createMandalart(title?: string): Promise<Mandalart>
 
 // タイトルを直接更新 (現状はほぼ未使用 — 通常は updateCell 経由の auto-sync に任せる)
 updateMandalartTitle(id: string, title: string): Promise<void>
 
-// マンダラートをソフトデリート (cells / grids / mandalarts の順に deleted_at をセット)
+// セル左上 done チェックボックス UI 表示 ON/OFF を更新する (migration 007 以降)。
+// DB 値はマンダラート単位で push/pull/realtime によりデバイス間同期される。
+updateMandalartShowCheckbox(id: string, show: boolean): Promise<void>
+
+// マンダラートと配下を削除する。
+// - 未同期行 (synced_at IS NULL): hard delete (orphan 防止)
+// - 同期済み行: soft delete (deleted_at) → push でクラウドに伝播
 deleteMandalart(id: string): Promise<void>
 
 // 全文検索: タイトルまたは配下のセル本文に一致するものを更新日降順で返す
@@ -59,7 +65,7 @@ deleteMandalart(id: string): Promise<void>
 searchMandalarts(q: string): Promise<Mandalart[]>
 
 // マンダラートを丸ごと複製 (全グリッド / セル / サブツリーを再帰複製)
-// タイトルはソースのままコピーされる (「〜 のコピー」サフィックスは付けない)
+// タイトル / show_checkbox はソースのまま継承される
 duplicateMandalart(sourceId: string): Promise<Mandalart>
 
 // ソフトデリートされたマンダラートを削除日降順で取得 (ゴミ箱)
@@ -82,25 +88,28 @@ permanentDeleteMandalart(id: string): Promise<void>
 ## lib/api/grids.ts
 
 ```typescript
-// ルートグリッド (mandalarts.root_cell_id を center とするグリッド) を sort_order 昇順で取得
-// 並列ルートグリッドをすべて含む
+// ルートグリッド (mandalart 直下、parent_cell_id IS NULL) を sort_order 昇順で取得
+// migration 006 以降は parent_cell_id ベースの判定。並列ルート (legacy 共有 / 新独立) を統一的に拾う
 getRootGrids(mandalartId: string): Promise<Grid[]>
 
-// 指定セルを center とする drill 先グリッドを sort_order 昇順で取得
-// 自己参照 (cell の所属 grid と同じ grid) は除外するので、root 中心セルに対して呼んでも
-// 自グリッド自身は返らない
+// 指定セルを drill 元とする子グリッド群 (primary + 並列) を sort_order 昇順で取得
+// migration 006 以降は parent_cell_id = ? で判定 (新独立並列も含めて統一的に列挙)
 getChildGrids(parentCellId: string): Promise<Grid[]>
 
 // グリッドとそのセルを常に 9 要素で取得する
-// - root grid: 自 grid_id 配下の 9 cells をそのまま返す
-// - 子 grid: 自 grid_id 配下の 8 peripherals に center_cell_id が指す cell を merge して 9 要素にする
+// - root / 独立並列 grid: 自 grid_id 配下の 9 cells をそのまま返す
+// - X=C primary drilled / レガシー共有並列: 自 grid_id 配下の 8 peripherals に
+//   center_cell_id が指す cell を merge して 9 要素にする
 getGrid(id: string): Promise<Grid & { cells: Cell[] }>
 
-// グリッドを新規作成する。
-// - centerCellId = null: root 作成。新 center cell を生成して 9 cells を INSERT
-// - centerCellId 指定: 子 / 並列グリッド作成。center は既存 cell を再利用し 8 peripherals のみ INSERT
+// グリッドを新規作成する (3 モード)。
+// - parentCellId=null, centerCellId=null: root 初期作成 (createMandalart 経由)。
+//   新 center cell を空で INSERT
+// - parentCellId=Y, centerCellId=Y: primary drilled (X=C 維持)。新 cell INSERT なし
+// - parentCellId=Y, centerCellId=null: 並列グリッド (独立 center)。新 center cell を空で INSERT
 createGrid(params: {
   mandalartId: string
+  parentCellId: string | null
   centerCellId: string | null
   sortOrder: number
 }): Promise<Grid & { cells: Cell[] }>
@@ -108,13 +117,38 @@ createGrid(params: {
 // メモ (Markdown) を更新
 updateGridMemo(id: string, memo: string): Promise<void>
 
-// グリッドとその子孫を再帰的にソフトデリート
-// 自 grid_id の cells のみを対象とするので、子グリッドの center cell
-// (= 親 grid に属する peripheral) は削除されない
+// グリッドとその子孫を再帰的に削除する。
+// - 未同期行 (synced_at IS NULL): hard delete
+// - 同期済み行: soft delete (deleted_at)
+// 自 grid 所属 cells (peripherals + 独立 center) を対象、X=C primary の center cell
+// は親所属なので影響なし
 deleteGrid(id: string): Promise<void>
 
 // 並列グリッドの表示順を更新
 updateGridSortOrder(id: string, sortOrder: number): Promise<void>
+
+// グリッドとその配下を local + cloud で物理削除する。シュレッダー / orphan 整理 /
+// 並列削除 など「復元意図なし」の経路で使用 (deleteGrid だと cloud に
+// deleted_at 付きゴミが永続化するため)
+permanentDeleteGrid(id: string): Promise<void>
+
+// 「root から辿れるが内容なし」な空グリッド (orphan) を検出する。
+// - 全 grids / cells / mandalarts を 3 query で一括取得 → in-memory で判定
+// - 周辺セル全空 + drilled children も全 orphan な grid を畳み込みで列挙
+findOrphanGrids(): Promise<{
+  orphanGridIds: string[]
+  orphanCellIds: string[]
+  totalGrids: number
+  totalCells: number
+}>
+
+// 上記 orphan を local + cloud で物理削除する。整理ボタンから呼ばれる
+cleanupOrphanGrids(): Promise<{ gridsDeleted: number; cellsDeleted: number }>
+
+// cloud (Supabase) 側に滞留する空 cell 行を物理削除する。
+// 「アプリ更新時に一度だけ」走らせる useCloudEmptyCellsCleanup hook から呼ばれる
+// (local は migration 005 で削除済 / 新規は lazy で作らない設計)
+cleanupEmptyCellsInCloud(): Promise<{ deletedCount: number }>
 ```
 
 ---
@@ -122,6 +156,15 @@ updateGridSortOrder(id: string, sortOrder: number): Promise<void>
 ## lib/api/cells.ts
 
 ```typescript
+// (grid_id, position) スロットに対する upsert。lazy 設計で空 slot はまだ DB に
+// cell 行が無い前提で、編集 / D&D / paste 等で「この slot に書き込みたいが行はまだ無い」
+// 状態を扱うためのヘルパ。
+upsertCellAt(
+  gridId: string,
+  position: number,
+  params: { text?: string; image_path?: string | null; color?: string | null }
+): Promise<Cell>
+
 // セルの内容を部分更新 (指定フィールドのみ)
 // ルートグリッドの中心セル (position=4) を更新した場合、
 // mandalarts.title も同じテキストで自動同期される
@@ -134,20 +177,31 @@ updateCell(
 // サブツリー (子グリッド) は移動しない
 swapCellContent(cellIdA: string, cellIdB: string): Promise<void>
 
-// 2 つのセルのサブツリーごと入れ替える
-// 子グリッドの center_cell_id を付け替えるだけで実装 (循環 FK 問題を避けるため一時 ID は使わない)
-// root 中心セルの自グリッド自己参照 (cell の所属 grid = grid 自身の center) は付け替え対象外
+// 2 つのセルのサブツリーごと入れ替える (D&D Phase A 後は周辺→周辺 SWAP_SUBTREE のみで使用)
+// 子グリッドの parent_cell_id / center_cell_id を付け替えて実現
 swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void>
 
 // クリップボードからのペースト (カット/コピー)
 // copyCellSubtree で内容とサブツリーを複製し、cut モードなら source を論理削除
 pasteCell(sourceCellId: string, targetCellId: string, mode: 'cut' | 'copy'): Promise<void>
 
-// sourceCellId のサブツリーを targetCellId 配下に再帰的にコピー。
-// 新モデル (X=C 統一): `SELECT ... FROM grids WHERE center_cell_id = ?` で source の
-// サブツリーを列挙するので、source が root 中心セルなら所属 grid 自体も subtree に含まれ、
-// 結果として "グリッド丸ごと複製" が自動的に実現される (旧モデルの特殊分岐は廃止)。
+// sourceCellId のサブツリーを targetCellId 配下に再帰的にコピー (BFS + bulk INSERT)。
+// mandalart 全体を 2 query で in-memory 取得 → JS で subtree 抽出して chunk INSERT。
+// 新カラム parent_cell_id も整合性ある形で複製する
 copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
+
+// セルの内容を空クリア + 配下サブグリッド (parent_cell_id = cellId の grids) を再帰削除する。
+// シュレッダー (確認後実行) / 移動 (snapshot 保存後実行) などから呼ばれる。
+// deleteGrid 経由で local hard / soft 自動分岐 + cloud 同期も追従
+shredCellSubtree(cellId: string): Promise<void>
+
+// グリッド単位 done フラグ操作 (チェックボックス機能)。
+// 自 grid 所属の populated cells のみを対象に done を一括設定する
+setGridDone(gridId: string, done: boolean): Promise<void>
+
+// セルの done を toggle する。子孫 propagate / 親 propagate (兄弟全 done なら親も done)
+// を伴う複雑な伝搬を含む
+toggleCellDone(cellId: string): Promise<void>
 ```
 
 ---
@@ -159,16 +213,25 @@ copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
 getStockItems(): Promise<StockItem[]>
 
 // 指定セル (とそのサブツリー) のスナップショットをストックに追加
-// 周辺セル: そのセルの子グリッド群
-// 中央セル: 所属するグリッド自体 (8 周辺セル + その下のサブツリー)
+// - 周辺セル: parent_cell_id = cellId の全 grids を子として再帰スナップショット
+// - 中央セル: center_cell_id = cellId のグリッド (root parallels 含む) を再帰スナップショット
 addToStock(cellId: string): Promise<StockItem>
 
 // ストックアイテムを削除
 deleteStockItem(id: string): Promise<void>
 
+// 「移動」アクション: addToStock + shredCellSubtree。
+// snapshot をストック保存してから元セル + 配下を完全削除する (= カット to ストック)
+moveCellToStock(cellId: string): Promise<StockItem>
+
 // ストックアイテムの内容 + サブツリーをターゲットセルに貼り付け
-// ターゲットが空セルのときのみ useDragAndDrop から呼ばれる
+// 通常のターゲットが空セルの経路で useDragAndDrop から呼ばれる
 pasteFromStock(stockItemId: string, targetCellId: string): Promise<void>
+
+// 入力ありセルへのストックペースト (置換版)。
+// 既存 cell content + 配下 (parent_cell_id = targetCellId) を破棄してから pasteFromStock。
+// ReplaceConfirmDialog 経由で確認後に呼ばれる
+pasteFromStockReplacing(stockItemId: string, targetCellId: string): Promise<void>
 ```
 
 ---
@@ -347,31 +410,34 @@ getCenterCell(cells: Cell[]): Cell | undefined
 ## lib/utils/dnd.ts
 
 ```typescript
-// ドラッグ元セルとドロップ先セルから D&D アクションを判定する
-// 返り値は SWAP_SUBTREE / SWAP_CONTENT / COPY_SUBTREE / NOOP のいずれか
+// ドラッグ元セルとドロップ先セルから D&D アクションを判定する (Phase A drop policy 厳格化後)。
+// - 周辺 → 周辺: SWAP_SUBTREE
+// - 中心セル絡み (どちらかが center) は全て NOOP (= 4 アクションアイコン経由のみ許可)
 resolveDndAction(source: Cell, target: Cell): DndAction
 
 export type DndAction =
   | { type: 'SWAP_SUBTREE'; cellIdA: string; cellIdB: string }
-  | { type: 'SWAP_CONTENT'; cellIdA: string; cellIdB: string }
-  | { type: 'COPY_SUBTREE'; sourceCellId: string; targetCellId: string }
   | { type: 'NOOP' }
 ```
 
 ## lib/utils/export.ts
 
+Tauri WebKit は `<a download>` の click() が動かないので、`tauri-plugin-fs` の `writeFile` で
+`$DOWNLOAD` (OS のダウンロードフォルダ) に直接書き、戻り値のファイル名を toast で通知する。
+
 ```typescript
-// グリッド DOM 要素を PNG としてダウンロード (html2canvas)
-exportAsPNG(element: HTMLElement): Promise<void>
+// DOM 要素を PNG として Downloads に保存 (html-to-image。html2canvas は Tailwind CSS v4 の
+// oklch() をパースできないため使わない)
+exportAsPNG(element: HTMLElement, baseName?: string): Promise<string>  // filename を返す
 
-// グリッド DOM 要素を PDF としてダウンロード (jsPDF)
-exportAsPDF(element: HTMLElement): Promise<void>
+// DOM 要素を PDF として Downloads に保存 (PNG 経由 → jsPDF)
+exportAsPDF(element: HTMLElement, baseName?: string): Promise<string>
 
-// JSON データをファイルとしてダウンロード
-downloadJSON(data: unknown): void
+// JSON を pretty-print して Downloads に保存
+downloadJSON(data: unknown, baseName?: string): Promise<string>
 
-// CSV 文字列をファイルとしてダウンロード
-downloadCSV(csv: string): void
+// プレーンテキスト (Markdown / IndentText) を Downloads に保存。拡張子は呼出側が指定 ('md', 'txt')
+downloadText(content: string, extension: string, baseName?: string): Promise<string>
 ```
 
 ## constants/tabOrder.ts
@@ -406,21 +472,28 @@ type BreadcrumbItem = {
   gridId: string
   cellId: string | null      // 親グリッドで押下したセルの ID (root は null)
   label: string              // セルのテキスト
+  imagePath?: string | null  // 画像セルのサムネ (text 空時のフォールバック)
   cells: Cell[]              // ミニプレビュー用のセル一覧
   highlightPosition: number | null
 }
 
 // アクション
 setMandalartId(id: string): void
-setCurrentGrid(gridId: string): void
+setCurrentGrid(gridId: string | null): void
 setViewMode(mode: '3x3' | '9x9'): void
 pushBreadcrumb(item: BreadcrumbItem): void
 popBreadcrumbTo(gridId: string): void
 resetBreadcrumb(root: BreadcrumbItem): void
+// gridId に一致するエントリの一部フィールドを更新 (label / imagePath / gridId 自身など)
+updateBreadcrumbItem(gridId: string, updates: Partial<BreadcrumbItem>): void
 
 bumpFontLevel(delta: number): void   // +1 / -1 を押すたびに呼ばれる
 resetFontLevel(): void                // 中央の「100%」ボタン
 ```
+
+**注**: 旧 `showCheckbox` / `setShowCheckbox` は migration 007 でマンダラート単位の DB カラム
+(`mandalarts.show_checkbox`) に移行したため editorStore からは撤去された。EditorLayout 側で
+local state + DB load/persist で扱う ([`updateMandalartShowCheckbox`](#libapimandalartsts) 参照)。
 
 ### undoStore
 

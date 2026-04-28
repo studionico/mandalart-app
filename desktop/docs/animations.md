@@ -170,6 +170,18 @@ ResizeObserver が breadcrumb 高さ変動 (scrollbar の出し入れ等) を拾
 
 orbit は「state 遷移より前」に `setOrbit` → 待機 → state 遷移、の順。逆にすると `useGrid` が先にフェッチを走らせて `gridData` が target に変わり、auto-clear が animation 開始前に発動してしまう。
 
+**7. lazy 設計の空 slot を入れた場合のタイミング統一**
+
+`orbit.targetCells` にはコンテンツのある cell 行しか含まれない (lazy cell creation)。空 slot を `<div />` で返すだけだと、入力ありセルだけ stagger fade-in し、空セルは orbit 終了後の通常 render swap でようやく枠付きで現れる ("外枠が最後に出る" 体験)。
+
+**対策**: orbit / to-3x3 view-switch 描画の `if (!cell)` 分岐で、`GridView3x3` の空 placeholder と同じ枠 + 背景を持つ styled `<div>` を返し、wrapperStyle で **同じ `orbit-fade-in` (or transform transition)** + `staggerIdx * stagger` の delay を当てる。これで populated / empty 問わず 7-6-3-0-1-2-5-8 順に一斉表示される。
+
+**8. Cell 内 `done` チェックボックスの描画タイミング**
+
+[`Cell.tsx`](../src/components/editor/Cell.tsx) の `showCheckbox` 判定は `!!onToggleDone && ...` を含むので、アニメ render 経路 (slide / orbit 3×3 / to-3x3) で `onToggleDone` を渡し忘れると、checkbox が orbit 終了後の swap で初めて出現してしまう (= セル本体は fade-in しているのに checkbox が遅れて pop)。
+
+**対策**: 各アニメ render 経路で `onToggleDone={showCheckbox ? handleToggleDone : undefined}` を渡す。`pointer-events: none` で click は飛ばないが、render 上は同時に表示される。
+
 ---
 
 ## 3. 表示モード切替 (View Switch)
