@@ -2140,7 +2140,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
                         {Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
                           const cell = rootCellMap.get(pos)
-                          if (!cell) return <div key={pos} />
                           const c = pos % GRID_SIDE
                           const r = Math.floor(pos / GRID_SIDE)
                           // 9×9 中央ブロック内位置 (global 座標、gridSize 原点から)
@@ -2161,6 +2160,30 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               ? `translate(${tx}px, ${ty}px) scale(${1 / GRID_SIDE})`
                               : 'translate(0, 0) scale(1)'
                           const transition = `transform ${FADE}ms ease-out ${delay}ms`
+
+                          // 空 slot: 入力ありセルと同じ transform / transition で展開
+                          // (GridView3x3 の空 placeholder と同じ枠 / 背景に揃え、view-switch 終了 swap で
+                          // 見た目が pop しないようにする)
+                          if (!cell) {
+                            return (
+                              <div
+                                key={`empty-${pos}`}
+                                style={{
+                                  transform,
+                                  transition,
+                                  transformOrigin: 'top left',
+                                  willChange: 'transform',
+                                }}
+                                className={`
+                                  rounded-lg shadow-sm bg-white dark:bg-gray-900
+                                  ${isCenter
+                                    ? 'border-[6px] border-black dark:border-white shadow-md'
+                                    : 'border border-gray-300 dark:border-gray-700'}
+                                `}
+                              />
+                            )
+                          }
+
                           return (
                             <CellComponent
                               key={cell.id}
@@ -2286,11 +2309,34 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     const centerEmpty = !center || isCellEmpty(center)
                     return Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
                       const cell = orbit.targetCells.find((c) => c.position === pos)
-                      if (!cell) return <div key={pos} />
-                      const isMoving = cell.id === orbit.movingCellId
+                      const isCenter = isCenterPosition(pos)
+                      const isDisabled = !isCenter && centerEmpty
                       const staggerIdx = order.indexOf(pos)
                       // drill-down で pos=4 (= 移動セル) は stagger に含まれないので delay 0
                       const fadeDelay = staggerIdx >= 0 ? staggerIdx * stagger : 0
+
+                      // 空 slot: GridView3x3 の空 placeholder と同じ styling + orbit-fade-in
+                      // を適用して、入力ありセルと同じタイミングで「内容・背景・外枠」揃って
+                      // 表示されるようにする (orbit 終了 swap で見た目が pop しないよう className を一致させる)
+                      if (!cell) {
+                        return (
+                          <div
+                            key={`empty-${pos}`}
+                            style={{
+                              animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
+                              willChange: 'opacity',
+                            }}
+                            className={`
+                              rounded-lg shadow-sm bg-white dark:bg-gray-900
+                              ${isCenter
+                                ? 'border-[6px] border-black dark:border-white shadow-md'
+                                : 'border border-gray-300 dark:border-gray-700'}
+                            `}
+                          />
+                        )
+                      }
+
+                      const isMoving = cell.id === orbit.movingCellId
 
                       // 移動セルの transform 遷移は方向別:
                       //  drill-down: delay 0, duration = fade — 一気に中心へ寄る
@@ -2322,8 +2368,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
                               willChange: 'opacity',
                             }
-                      const isCenter = isCenterPosition(pos)
-                      const isDisabled = !isCenter && centerEmpty
                       return (
                         <CellComponent
                           key={cell.id}
