@@ -12,6 +12,13 @@ export type Mandalart = {
   // ルート中心セル (position=4) の image_path を join で取得したもの。
   // mandalarts テーブル自体には保存していないので、SELECT の仕方に応じて無い場合もある。
   image_path?: string | null
+  /**
+   * セル左上 done チェックボックス UI の表示 ON/OFF (マンダラート単位)。migration 007 以降。
+   * SQLite では INTEGER 0/1、Supabase では BOOLEAN として保持される。
+   * 既存行は DEFAULT 0 (= 非表示) で初期化され、新規マンダラートも 0 で開始。
+   * デバイス間で push/pull 同期される (= UI プリファレンスでも DB 同期する設計)。
+   */
+  show_checkbox: boolean
   created_at: string
   updated_at: string
   deleted_at?: string | null

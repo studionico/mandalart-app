@@ -16,16 +16,19 @@
 
 ```sql
 CREATE TABLE mandalarts (
-  id            TEXT PRIMARY KEY,           -- UUID
-  title         TEXT NOT NULL DEFAULT '',   -- ルート中心セル text のキャッシュ (updateCell 経由で自動同期)
-  root_cell_id  TEXT NOT NULL,              -- プライマリ root グリッドの中心セル id (dashboard のサムネ等に使用)
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  synced_at     TEXT,                       -- 最終クラウド同期日時
-  remote_id     TEXT,                       -- Supabase 側の ID
-  deleted_at    TEXT                        -- ソフトデリート (NULL = 未削除)
+  id              TEXT PRIMARY KEY,           -- UUID
+  title           TEXT NOT NULL DEFAULT '',   -- ルート中心セル text のキャッシュ (updateCell 経由で自動同期)
+  root_cell_id    TEXT NOT NULL,              -- プライマリ root グリッドの中心セル id (dashboard のサムネ等に使用)
+  show_checkbox   INTEGER NOT NULL DEFAULT 0, -- セル左上 done チェックボックス UI の表示 ON/OFF (migration 007 以降)
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at       TEXT,                       -- 最終クラウド同期日時
+  remote_id       TEXT,                       -- Supabase 側の ID
+  deleted_at      TEXT                        -- ソフトデリート (NULL = 未削除)
 );
 ```
+
+> **`show_checkbox` はマンダラート単位の UI プリファレンス**。push/pull/realtime で全カラムが伝播するためデバイス間で同期される。旧 `mandalart.showCheckbox` localStorage キーは廃止 (新規 / 既存ともに DEFAULT 0 = OFF で開始)。
 
 > **title は独立した値ではなく、ルートグリッドの中心セル (position = 4) のテキストをキャッシュしたもの。**`lib/api/cells.ts` の `updateCell` がルート中心セルの更新を検知して自動的に同期する。別途「ファイル名を付けて保存」するフローは無い。
 >
@@ -312,6 +315,7 @@ tauri_plugin_sql::Builder::new()
         Migration { version: 4, description: "unify X and C: replace grids.parent_cell_id with grids.center_cell_id", sql: include_str!("../migrations/004_unify_center.sql"), kind: MigrationKind::Up },
         Migration { version: 5, description: "drop empty cells (lazy cell creation design)", sql: include_str!("../migrations/005_drop_empty_cells.sql"), kind: MigrationKind::Up },
         Migration { version: 6, description: "add grids.parent_cell_id for independent parallel centers", sql: include_str!("../migrations/006_parent_cell_id.sql"), kind: MigrationKind::Up },
+        Migration { version: 7, description: "add mandalarts.show_checkbox (per-mandalart UI preference, cloud-synced)", sql: include_str!("../migrations/007_mandalart_show_checkbox.sql"), kind: MigrationKind::Up },
     ])
     .build()
 ```

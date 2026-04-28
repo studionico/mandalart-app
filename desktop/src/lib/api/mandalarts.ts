@@ -61,6 +61,7 @@ export async function createMandalart(title = ''): Promise<Mandalart> {
     id: mandalartId,
     title,
     root_cell_id: rootCenterCellId,
+    show_checkbox: false,
     created_at: ts,
     updated_at: ts,
     user_id: '',
@@ -71,6 +72,17 @@ export async function updateMandalartTitle(id: string, title: string): Promise<v
   await execute(
     'UPDATE mandalarts SET title = ?, updated_at = ? WHERE id = ?',
     [title, now(), id],
+  )
+}
+
+/**
+ * マンダラートごとの「セル左上 done チェックボックス UI 表示 ON/OFF」を更新する (migration 007 以降)。
+ * push.ts の dirty 検知用に updated_at も bump する。
+ */
+export async function updateMandalartShowCheckbox(id: string, show: boolean): Promise<void> {
+  await execute(
+    'UPDATE mandalarts SET show_checkbox = ?, updated_at = ? WHERE id = ?',
+    [show ? 1 : 0, now(), id],
   )
 }
 
@@ -238,9 +250,10 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const newRootCellId = cellIdMap.get(src.root_cell_id)
   if (!newRootCellId) throw new Error(`root_cell_id not found in source cells: ${src.root_cell_id}`)
 
+  // show_checkbox はコピー元の設定を継承する (テンプレ複製の自然な挙動)
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [newMandalartId, src.title, newRootCellId, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, ts, ts],
   )
 
   for (const g of allGrids) {
@@ -276,6 +289,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     id: newMandalartId,
     title: src.title,
     root_cell_id: newRootCellId,
+    show_checkbox: src.show_checkbox,
     created_at: ts,
     updated_at: ts,
     user_id: '',

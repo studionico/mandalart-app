@@ -45,17 +45,10 @@ function persistFontLevel(level: number) {
   try { localStorage.setItem(FONT_LEVEL_KEY, String(level)) } catch { /* noop */ }
 }
 
-// セル左上チェックボックス UI の表示 ON/OFF。デフォルト OFF (使わないユーザーに
-// UI を押し付けない)。done 値は DB に残るので ON 時は前回の状態が復元される。
-const SHOW_CHECKBOX_KEY = STORAGE_KEYS.showCheckbox
-
-function loadShowCheckbox(): boolean {
-  try { return localStorage.getItem(SHOW_CHECKBOX_KEY) === '1' } catch { return false }
-}
-
-function persistShowCheckbox(v: boolean) {
-  try { localStorage.setItem(SHOW_CHECKBOX_KEY, v ? '1' : '0') } catch { /* noop */ }
-}
+// セル左上 done チェックボックス UI 表示 ON/OFF はマンダラート単位の DB カラム
+// (`mandalarts.show_checkbox`、migration 007 以降) に移行した。グローバル localStorage
+// による全マンダラート共通設定は廃止。EditorLayout 側で local state + DB load/persist
+// で管理するため、editorStore からは関連 state を削除した。
 
 type EditorState = {
   mandalartId: string | null
@@ -64,7 +57,6 @@ type EditorState = {
   breadcrumb: BreadcrumbItem[]
   fontLevel: number   // -10 〜 +10 の整数
   fontScale: number   // 1.1^fontLevel (派生値、Cell に渡す)
-  showCheckbox: boolean  // セル左上チェックボックス UI の表示 ON/OFF
 
   setMandalartId: (id: string) => void
   setCurrentGrid: (gridId: string | null) => void
@@ -77,7 +69,6 @@ type EditorState = {
 
   bumpFontLevel: (delta: number) => void
   resetFontLevel: () => void
-  setShowCheckbox: (v: boolean) => void
 }
 
 export const useEditorStore = create<EditorState>((set) => {
@@ -89,7 +80,6 @@ export const useEditorStore = create<EditorState>((set) => {
     breadcrumb: [],
     fontLevel: initialLevel,
     fontScale: levelToScale(initialLevel),
-    showCheckbox: loadShowCheckbox(),
 
     setMandalartId: (id) => set({ mandalartId: id }),
     setCurrentGrid: (gridId) => set({ currentGridId: gridId }),
@@ -127,11 +117,6 @@ export const useEditorStore = create<EditorState>((set) => {
     resetFontLevel: () => {
       persistFontLevel(FONT_LEVEL_DEFAULT)
       set({ fontLevel: FONT_LEVEL_DEFAULT, fontScale: levelToScale(FONT_LEVEL_DEFAULT) })
-    },
-
-    setShowCheckbox: (v) => {
-      persistShowCheckbox(v)
-      set({ showCheckbox: v })
     },
   }
 })

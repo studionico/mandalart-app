@@ -116,6 +116,18 @@ WHERE g.mandalart_id = m.id
 ローカル側は migration 006 で自動的に適用されます。
 RLS ポリシーへの影響はなし (既存の `user_id` ベース policy は parent_cell_id を参照しません)。
 
+### 必須スキーマ変更: チェックボックス表示設定 (`show_checkbox`)
+
+migration 007 で「セル左上 done チェックボックス UI 表示 ON/OFF」をマンダラート単位で記憶 + クラウド同期する仕様に移行しました。Supabase 側では以下を実行してください:
+
+```sql
+ALTER TABLE mandalarts ADD COLUMN show_checkbox boolean NOT NULL DEFAULT false;
+```
+
+ローカル側は migration 007 で自動的に適用されます (SQLite は `INTEGER NOT NULL DEFAULT 0`)。
+RLS ポリシーへの影響はなし。
+旧 `mandalart.showCheckbox` localStorage は廃止 (新規 / 既存ともに OFF からスタートする)。
+
 ---
 
 ## ステップ 4: Auth 設定

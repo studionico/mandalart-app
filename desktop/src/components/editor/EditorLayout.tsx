@@ -24,7 +24,7 @@ import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
-import { deleteMandalart, getMandalart, permanentDeleteMandalart } from '@/lib/api/mandalarts'
+import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
@@ -68,11 +68,38 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const navigate = useNavigate()
   const {
     currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
-    showCheckbox,
     setMandalartId, setCurrentGrid, setViewMode,
     pushBreadcrumb, popBreadcrumbTo, resetBreadcrumb, updateBreadcrumbItem,
-    bumpFontLevel, resetFontLevel, setShowCheckbox,
+    bumpFontLevel, resetFontLevel,
   } = useEditorStore()
+
+  // セル左上 done チェックボックス UI の表示 ON/OFF。マンダラート単位で記憶 (migration 007)。
+  // mandalartId 変更時に DB から復元、トグル時は楽観的更新 + DB 永続化。
+  const [showCheckbox, setShowCheckbox] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const m = await getMandalart(mandalartId)
+        if (cancelled) return
+        setShowCheckbox(!!m?.show_checkbox)
+      } catch {
+        if (!cancelled) setShowCheckbox(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [mandalartId])
+
+  const handleToggleShowCheckbox = useCallback(async () => {
+    const next = !showCheckbox
+    setShowCheckbox(next)  // 楽観的更新
+    try {
+      await updateMandalartShowCheckbox(mandalartId, next)
+    } catch (e) {
+      setShowCheckbox(!next)  // 失敗時ロールバック
+      setToast({ message: `チェックボックス設定の保存に失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [showCheckbox, mandalartId])
 
   const { push: pushUndo } = useUndo()
   const { isOffline } = useOffline()
@@ -1811,7 +1838,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           {/* チェックボックス表示 ON/OFF (チェックボックス型ボタン) */}
           <button
             type="button"
-            onClick={() => setShowCheckbox(!showCheckbox)}
+            onClick={handleToggleShowCheckbox}
             className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
               showCheckbox
                 ? 'bg-blue-600 border-blue-600 text-white'
@@ -2195,6 +2222,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               onCommitInlineEdit={async () => {}}
                               onInlineNavigate={() => {}}
                               onDrill={() => {}}
+                              // pointer-events: none で click は飛ばないが、checkbox を
+                              // render させるため onToggleDone を渡す
+                              onToggleDone={showCheckbox ? handleToggleDone : undefined}
                               wrapperStyle={{
                                 transform,
                                 transition,
@@ -2249,6 +2279,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           onInlineNavigate={handleCellInlineNavigate}
                           onDrill={handleCellDrill}
                           onContextMenu={handleContextMenu}
+                          // スライド中も checkbox を表示するため onToggleDone を渡す
+                          // (pointer-events: none で click は飛ばない)
+                          onToggleDone={showCheckbox ? handleToggleDone : undefined}
                         />
                       ) : (
                         <GridView9x9
@@ -2377,6 +2410,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           onCommitInlineEdit={async () => {}}
                           onInlineNavigate={() => {}}
                           onDrill={() => {}}
+                          // pointer-events: none で click は飛ばないが、checkbox を render
+                          // させるため onToggleDone を渡す (現行 showCheckbox 状態を反映)
+                          onToggleDone={showCheckbox ? handleToggleDone : undefined}
                           wrapperStyle={wrapperStyle}
                         />
                       )

@@ -23,6 +23,7 @@ type CloudMandalart = {
   id: string
   title: string
   root_cell_id: string
+  show_checkbox: boolean
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -60,7 +61,7 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
   let cCount = 0
 
   const [m, g, c] = await Promise.all([
-    supabase.from('mandalarts').select('id, title, root_cell_id, created_at, updated_at, deleted_at'),
+    supabase.from('mandalarts').select('id, title, root_cell_id, show_checkbox, created_at, updated_at, deleted_at'),
     supabase.from('grids').select('id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at'),
     supabase.from('cells').select('id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at'),
   ])
@@ -78,14 +79,14 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     )
     if (local.length === 0) {
       await tryInsert('mandalarts',
-        'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?)',
-        [cm.id, cm.title, cm.root_cell_id, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
+        'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?)',
+        [cm.id, cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
       )
       mCount++
     } else if (cm.updated_at > local[0].updated_at) {
       await tryUpdate('mandalarts',
-        'UPDATE mandalarts SET title=?, root_cell_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-        [cm.title, cm.root_cell_id, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
+        'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
       )
       mCount++
     }
