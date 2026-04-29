@@ -19,6 +19,13 @@ export type Mandalart = {
    * デバイス間で push/pull 同期される (= UI プリファレンスでも DB 同期する設計)。
    */
   show_checkbox: boolean
+  /**
+   * 前回開いていた sub-grid の id (マンダラート単位、migration 008 以降)。
+   * ダッシュボードから再度開いた時の drill 階層復元に使う。一度も drill していなければ null。
+   * SQLite / Supabase ともに TEXT (nullable、DEFAULT なし)。push/pull 同期される。
+   * 復元時に対象 grid が削除済み (stale) の場合は呼出側で root にフォールバック + DB 側を null に戻す。
+   */
+  last_grid_id?: string | null
   created_at: string
   updated_at: string
   deleted_at?: string | null

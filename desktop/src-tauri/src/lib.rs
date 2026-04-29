@@ -51,6 +51,12 @@ pub fn run() {
                             sql: include_str!("../migrations/007_mandalart_show_checkbox.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 8,
+                            description: "add mandalarts.last_grid_id (last opened sub-grid for restore)",
+                            sql: include_str!("../migrations/008_mandalart_last_grid_id.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

@@ -20,6 +20,7 @@ CREATE TABLE mandalarts (
   title           TEXT NOT NULL DEFAULT '',   -- ルート中心セル text のキャッシュ (updateCell 経由で自動同期)
   root_cell_id    TEXT NOT NULL,              -- プライマリ root グリッドの中心セル id (dashboard のサムネ等に使用)
   show_checkbox   INTEGER NOT NULL DEFAULT 0, -- セル左上 done チェックボックス UI の表示 ON/OFF (migration 007 以降)
+  last_grid_id    TEXT,                       -- 前回開いていた sub-grid の id (migration 008 以降、nullable)
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at       TEXT,                       -- 最終クラウド同期日時
@@ -29,6 +30,8 @@ CREATE TABLE mandalarts (
 ```
 
 > **`show_checkbox` はマンダラート単位の UI プリファレンス**。push/pull/realtime で全カラムが伝播するためデバイス間で同期される。旧 `mandalart.showCheckbox` localStorage キーは廃止 (新規 / 既存ともに DEFAULT 0 = OFF で開始)。
+
+> **`last_grid_id` は前回開いていた sub-grid の id**。ダッシュボードからマンダラートを再オープンしたときに drill 階層を復元するため、EditorLayout の `currentGridId` 変化監視 useEffect で都度更新。null は「未設定 → root にフォールバック」を意味する。stale (grid 削除済み) の場合は復元時に root に戻す + null にクリーンアップ。push/pull/realtime で同期される。
 
 > **title は独立した値ではなく、ルートグリッドの中心セル (position = 4) のテキストをキャッシュしたもの。**`lib/api/cells.ts` の `updateCell` がルート中心セルの更新を検知して自動的に同期する。別途「ファイル名を付けて保存」するフローは無い。
 >
@@ -316,6 +319,7 @@ tauri_plugin_sql::Builder::new()
         Migration { version: 5, description: "drop empty cells (lazy cell creation design)", sql: include_str!("../migrations/005_drop_empty_cells.sql"), kind: MigrationKind::Up },
         Migration { version: 6, description: "add grids.parent_cell_id for independent parallel centers", sql: include_str!("../migrations/006_parent_cell_id.sql"), kind: MigrationKind::Up },
         Migration { version: 7, description: "add mandalarts.show_checkbox (per-mandalart UI preference, cloud-synced)", sql: include_str!("../migrations/007_mandalart_show_checkbox.sql"), kind: MigrationKind::Up },
+        Migration { version: 8, description: "add mandalarts.last_grid_id (last opened sub-grid for restore)", sql: include_str!("../migrations/008_mandalart_last_grid_id.sql"), kind: MigrationKind::Up },
     ])
     .build()
 ```

@@ -62,6 +62,7 @@ export async function createMandalart(title = ''): Promise<Mandalart> {
     title,
     root_cell_id: rootCenterCellId,
     show_checkbox: false,
+    last_grid_id: null,
     created_at: ts,
     updated_at: ts,
     user_id: '',
@@ -83,6 +84,22 @@ export async function updateMandalartShowCheckbox(id: string, show: boolean): Pr
   await execute(
     'UPDATE mandalarts SET show_checkbox = ?, updated_at = ? WHERE id = ?',
     [show ? 1 : 0, now(), id],
+  )
+}
+
+/**
+ * マンダラート単位で「最後に開いていた sub-grid id」を更新 (migration 008 以降)。
+ * EditorLayout の `currentGridId` 変化監視 useEffect から呼ばれ、drill / drill-up / breadcrumb /
+ * parallel switch すべての遷移を 1 箇所でカバーする。`updated_at` も同時に bump して push 同期に乗せる。
+ * 第 2 引数 null で「未設定」に戻せる (stale gridId のクリア用)。
+ */
+export async function updateMandalartLastGridId(
+  id: string,
+  lastGridId: string | null,
+): Promise<void> {
+  await execute(
+    'UPDATE mandalarts SET last_grid_id = ?, updated_at = ? WHERE id = ?',
+    [lastGridId, now(), id],
   )
 }
 
@@ -250,7 +267,8 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const newRootCellId = cellIdMap.get(src.root_cell_id)
   if (!newRootCellId) throw new Error(`root_cell_id not found in source cells: ${src.root_cell_id}`)
 
-  // show_checkbox はコピー元の設定を継承する (テンプレ複製の自然な挙動)
+  // show_checkbox はコピー元の設定を継承する (テンプレ複製の自然な挙動)。
+  // last_grid_id は継承しない (新規コピーは root から始まるのが自然) → 列省略で NULL になる。
   await execute(
     'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
     [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, ts, ts],
@@ -290,6 +308,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     title: src.title,
     root_cell_id: newRootCellId,
     show_checkbox: src.show_checkbox,
+    last_grid_id: null,
     created_at: ts,
     updated_at: ts,
     user_id: '',

@@ -118,6 +118,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       title: m.title,
       root_cell_id: m.root_cell_id,
       show_checkbox: !!m.show_checkbox,
+      last_grid_id: m.last_grid_id ?? null,
       created_at: m.created_at,
       updated_at: m.updated_at,
       deleted_at: m.deleted_at ?? null,

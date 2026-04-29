@@ -64,6 +64,12 @@ type EditorState = {
   pushBreadcrumb: (item: BreadcrumbItem) => void
   popBreadcrumbTo: (gridId: string) => void
   resetBreadcrumb: (root: BreadcrumbItem) => void
+  /**
+   * breadcrumb 全段を一括 set + currentGridId を末尾 item に揃える。
+   * 用途: ダッシュボード再オープン時に `mandalarts.last_grid_id` から ancestry を構築して
+   * 復元するパス。`resetBreadcrumb` (root 1 段のみ) では足りないので新設。
+   */
+  setBreadcrumb: (items: BreadcrumbItem[]) => void
   // gridId に一致する breadcrumb エントリの一部フィールドを更新する (label / imagePath など)
   updateBreadcrumbItem: (gridId: string, updates: Partial<BreadcrumbItem>) => void
 
@@ -97,6 +103,12 @@ export const useEditorStore = create<EditorState>((set) => {
 
     resetBreadcrumb: (root) =>
       set({ breadcrumb: [root], currentGridId: root.gridId }),
+
+    setBreadcrumb: (items) =>
+      set({
+        breadcrumb: items,
+        currentGridId: items.length > 0 ? items[items.length - 1].gridId : null,
+      }),
 
     updateBreadcrumbItem: (gridId, updates) =>
       set((s) => {

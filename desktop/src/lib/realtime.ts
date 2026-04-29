@@ -114,17 +114,18 @@ async function applyMandalartChange(payload: { eventType: string; new: Record<st
     await execute('DELETE FROM mandalarts WHERE id = ?', [id])
     return true
   }
-  const m = payload.new as { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; created_at: string; updated_at: string; deleted_at: string | null }
+  const m = payload.new as { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; last_grid_id?: string | null; created_at: string; updated_at: string; deleted_at: string | null }
   if (!m.id) return false
-  const local = await query<{ title: string; root_cell_id: string; show_checkbox: number; deleted_at: string | null; updated_at: string }>(
-    'SELECT title, root_cell_id, show_checkbox, deleted_at, updated_at FROM mandalarts WHERE id = ?',
+  const local = await query<{ title: string; root_cell_id: string; show_checkbox: number; last_grid_id: string | null; deleted_at: string | null; updated_at: string }>(
+    'SELECT title, root_cell_id, show_checkbox, last_grid_id, deleted_at, updated_at FROM mandalarts WHERE id = ?',
     [m.id],
   )
   const showCheckboxInt = m.show_checkbox ? 1 : 0
+  const lastGridId = m.last_grid_id ?? null
   if (local.length === 0) {
     await execute(
-      'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?)',
-      [m.id, m.title, m.root_cell_id, showCheckboxInt, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
+      'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [m.id, m.title, m.root_cell_id, showCheckboxInt, lastGridId, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
     )
     return true
   }
@@ -133,6 +134,7 @@ async function applyMandalartChange(payload: { eventType: string; new: Record<st
     local[0].title === m.title &&
     local[0].root_cell_id === m.root_cell_id &&
     !!local[0].show_checkbox === !!m.show_checkbox &&
+    (local[0].last_grid_id ?? null) === lastGridId &&
     tsEqual(local[0].deleted_at, m.deleted_at)
   if (contentSame) {
     // echo: timestamp だけ揃えて UI reload はスキップ
@@ -143,8 +145,8 @@ async function applyMandalartChange(payload: { eventType: string; new: Record<st
     return false
   }
   await execute(
-    'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-    [m.title, m.root_cell_id, showCheckboxInt, m.updated_at, m.deleted_at, m.updated_at, m.id],
+    'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+    [m.title, m.root_cell_id, showCheckboxInt, lastGridId, m.updated_at, m.deleted_at, m.updated_at, m.id],
   )
   return true
 }

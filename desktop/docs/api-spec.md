@@ -55,6 +55,11 @@ updateMandalartTitle(id: string, title: string): Promise<void>
 // DB 値はマンダラート単位で push/pull/realtime によりデバイス間同期される。
 updateMandalartShowCheckbox(id: string, show: boolean): Promise<void>
 
+// 前回開いていた sub-grid の id を更新する (migration 008 以降)。
+// EditorLayout の `currentGridId` 変化監視 useEffect から都度呼ばれ、ダッシュボード再オープン時の
+// drill 階層復元に使われる。null で「未設定 = root にフォールバック」へ戻せる (stale クリア用)。
+updateMandalartLastGridId(id: string, lastGridId: string | null): Promise<void>
+
 // マンダラートと配下を削除する。
 // - 未同期行 (synced_at IS NULL): hard delete (orphan 防止)
 // - 同期済み行: soft delete (deleted_at) → push でクラウドに伝播
@@ -101,6 +106,14 @@ getChildGrids(parentCellId: string): Promise<Grid[]>
 // - X=C primary drilled / レガシー共有並列: 自 grid_id 配下の 8 peripherals に
 //   center_cell_id が指す cell を merge して 9 要素にする
 getGrid(id: string): Promise<Grid & { cells: Cell[] }>
+
+// 指定 gridId から root までの ancestry を返す (root が先頭、leaf=引数 gridId が末尾)。
+// 用途: ダッシュボードからマンダラート再オープン時に `mandalarts.last_grid_id` を読んで
+// breadcrumb を全段一括で復元するための材料を取る (migration 008 以降)。
+// - parent_cell_id を辿り、その cell が属する grid_id を逆引きしながら遡る
+// - 途中で grid / cell が見つからない (stale 参照) 場合は null を返す → 呼出側で root にフォールバック
+// - 循環参照は理論上起きないが防衛的に Set で検出して null 返却
+getGridAncestry(gridId: string): Promise<Array<Grid & { cells: Cell[] }> | null>
 
 // グリッドを新規作成する (3 モード)。
 // - parentCellId=null, centerCellId=null: root 初期作成 (createMandalart 経由)。
@@ -492,6 +505,9 @@ setViewMode(mode: '3x3' | '9x9'): void
 pushBreadcrumb(item: BreadcrumbItem): void
 popBreadcrumbTo(gridId: string): void
 resetBreadcrumb(root: BreadcrumbItem): void
+// breadcrumb 全段を一括 set + currentGridId を末尾 item に揃える。
+// 用途: マンダラート再オープン時に `mandalarts.last_grid_id` から ancestry を構築して復元する (migration 008 以降)。
+setBreadcrumb(items: BreadcrumbItem[]): void
 // gridId に一致するエントリの一部フィールドを更新 (label / imagePath / gridId 自身など)
 updateBreadcrumbItem(gridId: string, updates: Partial<BreadcrumbItem>): void
 

@@ -1,7 +1,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEditorStore } from '@/store/editorStore'
+import { useEditorStore, type BreadcrumbItem } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
 import { useClipboardStore } from '@/store/clipboardStore'
 import { useGrid } from '@/hooks/useGrid'
@@ -23,9 +23,9 @@ import type { ActionDropType } from '@/hooks/useDragAndDrop'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
-import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid } from '@/lib/api/grids'
+import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
-import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox } from '@/lib/api/mandalarts'
+import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
 import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
@@ -71,7 +71,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const {
     currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
     setMandalartId, setCurrentGrid, setViewMode,
-    pushBreadcrumb, popBreadcrumbTo, resetBreadcrumb, updateBreadcrumbItem,
+    pushBreadcrumb, popBreadcrumbTo, setBreadcrumb, updateBreadcrumbItem,
     bumpFontLevel, resetFontLevel,
   } = useEditorStore()
 
@@ -102,6 +102,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setToast({ message: `チェックボックス設定の保存に失敗: ${(e as Error).message}`, type: 'error' })
     }
   }, [showCheckbox, mandalartId])
+
+  // currentGridId 変化を `mandalarts.last_grid_id` に永続化 (migration 008 以降)。
+  // drill / drill-up / breadcrumb クリック / parallel switch すべての遷移を 1 箇所でカバーする。
+  // 失敗は console.warn のみで UI 動作は止めない。push/pull 同期で他デバイスにも伝播する。
+  useEffect(() => {
+    if (!mandalartId || !currentGridId) return
+    updateMandalartLastGridId(mandalartId, currentGridId).catch((e) => {
+      console.warn('updateMandalartLastGridId failed:', e)
+    })
+  }, [mandalartId, currentGridId])
 
   const { push: pushUndo } = useUndo()
   const { isOffline } = useOffline()
@@ -466,30 +476,98 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         }
         const root = roots[0]
 
+        // 復元用に mandalart.last_grid_id を読んで ancestry を組む。
+        // 組めれば「前回開いていた sub-grid に復帰」、組めなければ既定の root[0] にフォールバック。
+        // viewMode は Dashboard 経由で常に 3×3 にリセットされるが、9×9 で再 mount されたケースに備え
+        // 9×9 path でも target grid は ancestry 末尾で扱う。
+        const mandalartRow = await getMandalart(mandalartId).catch(() => null)
+        if (cancelled) return
+        let ancestry: Array<Grid & { cells: Cell[] }> | null = null
+        let parallelIdx = 0
+        if (mandalartRow?.last_grid_id) {
+          ancestry = await getGridAncestry(mandalartRow.last_grid_id)
+          if (cancelled) return
+          if (ancestry && ancestry.length > 0) {
+            const restoredRootId = ancestry[0].id
+            const idx = roots.findIndex((r) => r.id === restoredRootId)
+            if (idx >= 0) {
+              parallelIdx = idx
+            } else {
+              // 復元 root が現 mandalart の roots に含まれない (異常) → fallback
+              ancestry = null
+            }
+          }
+          if (!ancestry) {
+            // stale (grid が削除済み等) → DB の last_grid_id をクリア
+            updateMandalartLastGridId(mandalartId, null).catch((e) =>
+              console.warn('clear stale last_grid_id failed:', e),
+            )
+          }
+        }
+
+        // 表示対象 grid を決定: 復元できれば ancestry 末尾、それ以外は roots[0]
+        let targetGrid: Grid & { cells: Cell[] }
+        let breadcrumbItems: BreadcrumbItem[]
+        if (ancestry && ancestry.length > 0) {
+          targetGrid = ancestry[ancestry.length - 1]
+          // ancestry 各層について breadcrumb item を組む。
+          // - root 層 (i=0): label は root の center cell の text
+          // - drilled 層 (i>0): label / imagePath / highlightPosition は親 grid の peripheral cell から取る
+          breadcrumbItems = ancestry.map((g, i) => {
+            if (i === 0) {
+              const center = g.cells.find((c) => c.position === CENTER_POSITION)
+              return {
+                gridId: g.id,
+                cellId: null,
+                label: center?.text ?? '',
+                imagePath: center?.image_path ?? null,
+                cells: g.cells,
+                highlightPosition: null,
+              }
+            }
+            const parentGrid = ancestry![i - 1]
+            const parentCell = parentGrid.cells.find((c) => c.id === g.parent_cell_id)
+            return {
+              gridId: g.id,
+              cellId: g.parent_cell_id ?? null,
+              label: parentCell?.text ?? '',
+              imagePath: parentCell?.image_path ?? null,
+              cells: parentGrid.cells,
+              highlightPosition: parentCell?.position ?? null,
+            }
+          })
+        } else {
+          // デフォルト経路: root grid の 9 cells を直接 query で取得 (getGrid よりラウンドトリップ少)
+          const { query } = await import('@/lib/db')
+          if (cancelled) return
+          const rootCells = await query<Cell>(
+            'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
+            [root.id],
+          )
+          if (cancelled) return
+          targetGrid = { ...root, cells: rootCells }
+          const center = rootCells.find((c) => c.position === CENTER_POSITION)
+          breadcrumbItems = [{
+            gridId: root.id,
+            cellId: null,
+            label: center?.text ?? '',
+            imagePath: center?.image_path ?? null,
+            cells: rootCells,
+            highlightPosition: null,
+          }]
+        }
+
         // まず cells / childCounts / subGrids を全て prefetch してから setOrbit → setCurrentGrid の順で
         // state を反映することで、"ベアグリッドが一瞬見える" フラッシュを回避する。
         // orbit が先に active になっていれば、gridData 反映後の通常 render 経路はスキップされ、
         // orbit 経路でセルが描画される (事前フェッチ済み childCountsByCellId を使うので border も正しい)。
-        const { query } = await import('@/lib/db')
-        if (cancelled) return
-        const cells = await query<import('@/types').Cell>(
-          'SELECT * FROM cells WHERE grid_id = ? AND deleted_at IS NULL ORDER BY position',
-          [root.id],
-        )
-        if (cancelled) return
+        const cells = targetGrid.cells
         const childCountsByCellId = await fetchChildCountsFor(cells)
         if (cancelled) return
 
         setParallelGrids(roots)
-        setParallelIndex(0)
-        resetBreadcrumb({
-          gridId: root.id,
-          cellId: null,
-          label: cells.find((c: Cell) => c.position === CENTER_POSITION)?.text ?? '',
-          imagePath: cells.find((c: Cell) => c.position === CENTER_POSITION)?.image_path ?? null,
-          cells: cells,
-          highlightPosition: null,
-        })
+        setParallelIndex(parallelIdx)
+        setBreadcrumb(breadcrumbItems)
 
         // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in。
         // orbit を先にセットしてから setCurrentGrid (useGrid ロード開始) する。
@@ -500,13 +578,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           setOrbit9({
             targetRootCells: cells,
             targetSubGrids,
-            targetGridId: root.id,
+            targetGridId: targetGrid.id,
             childCountsByCellId,
             movingToPosition: null,
             movingFromPosition: 4,
             direction: 'initial',
           })
-          setCurrentGrid(root.id)
+          setCurrentGrid(targetGrid.id)
           await new Promise((r) =>
             setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
           )
@@ -522,14 +600,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           const initialDelayMs = fromDashboard ? CONVERGE_DURATION_MS : 0
           setOrbit({
             targetCells: cells,
-            targetGridId: root.id,
+            targetGridId: targetGrid.id,
             childCountsByCellId,
             movingCellId: null,
             movingFromPosition: 4,
             direction: 'initial',
             initialDelayMs,
           })
-          setCurrentGrid(root.id)
+          setCurrentGrid(targetGrid.id)
           await new Promise((r) =>
             setTimeout(r, initialDelayMs + ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
           )

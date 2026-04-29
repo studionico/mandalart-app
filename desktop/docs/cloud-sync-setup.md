@@ -128,6 +128,18 @@ ALTER TABLE mandalarts ADD COLUMN show_checkbox boolean NOT NULL DEFAULT false;
 RLS ポリシーへの影響はなし。
 旧 `mandalart.showCheckbox` localStorage は廃止 (新規 / 既存ともに OFF からスタートする)。
 
+### 必須スキーマ変更: 前回開いていた sub-grid の記憶 (`last_grid_id`)
+
+migration 008 で「ダッシュボードからマンダラートを再オープンしたときに、前回 drill していた sub-grid の階層を復元する」仕様を追加しました。Supabase 側では以下を実行してください:
+
+```sql
+ALTER TABLE mandalarts ADD COLUMN last_grid_id text;
+```
+
+ローカル側は migration 008 で自動的に適用されます (SQLite も TEXT、nullable、DEFAULT なし)。
+TEXT なので push/pull 時の型変換は不要、null は「未設定 = root を開く」を意味します。
+RLS ポリシーへの影響はなし。EditorLayout の `currentGridId` 変化監視 useEffect で都度書込・push 同期で他デバイスに伝播。stale (削除済み grid) の場合は復元時に root にフォールバック + DB 値を null に戻すクリーンアップが走ります。
+
 ---
 
 ## ステップ 4: Auth 設定

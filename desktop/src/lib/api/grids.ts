@@ -99,6 +99,46 @@ export async function getGrid(id: string): Promise<Grid & { cells: Cell[] }> {
 }
 
 /**
+ * 指定 gridId から root までの ancestry を返す (root が先頭、leaf=引数 gridId が末尾)。
+ *
+ * 用途: ダッシュボードからマンダラート再オープン時に `mandalarts.last_grid_id` を読んで
+ * 復元するときに、breadcrumb を「全段一括 set」するための材料を取る。
+ *
+ * - parent_cell_id を辿って、その cell が属する `grid_id` を逆引きしながら遡る
+ * - 途中で grid / cell が見つからない (削除済み等の stale 参照) 場合は null を返す → 呼出側で
+ *   root にフォールバック + DB 側の last_grid_id を null に戻す cleanup を行う
+ * - 循環参照は理論上起きないが防衛的に Set で検出して null 返却
+ */
+export async function getGridAncestry(
+  gridId: string,
+): Promise<Array<Grid & { cells: Cell[] }> | null> {
+  const ancestry: Array<Grid & { cells: Cell[] }> = []
+  const seen = new Set<string>()
+  let currentId: string | null = gridId
+  while (currentId) {
+    if (seen.has(currentId)) return null
+    seen.add(currentId)
+    let grid: (Grid & { cells: Cell[] }) | null
+    try {
+      grid = await getGrid(currentId)
+    } catch {
+      return null
+    }
+    if (!grid) return null
+    ancestry.unshift(grid)
+    if (!grid.parent_cell_id) break  // root 到達
+    const rows = await query<{ grid_id: string }>(
+      'SELECT grid_id FROM cells WHERE id = ? AND deleted_at IS NULL',
+      [grid.parent_cell_id],
+    )
+    const parentGridId = rows[0]?.grid_id
+    if (!parentGridId) return null  // parent_cell_id が指す cell が消えている
+    currentId = parentGridId
+  }
+  return ancestry
+}
+
+/**
  * グリッドを新規作成する。migration 006 以降の 3 モードをサポート。
  *
  * - `parentCellId = null, centerCellId = null`: root 初期作成 (createMandalart 経由)。
