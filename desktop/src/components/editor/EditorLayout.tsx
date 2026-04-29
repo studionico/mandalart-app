@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
+import { useConvergeStore } from '@/store/convergeStore'
 import { useClipboardStore } from '@/store/clipboardStore'
 import { useGrid } from '@/hooks/useGrid'
 import { useSubGrids, type SubGridData } from '@/hooks/useSubGrids'
@@ -45,6 +46,7 @@ import {
   ANIM_STAGGER_MS,
   SLIDE_DURATION_MS as SLIDE_MS,
   VIEW_SWITCH_TO_9_DELAY_MS as VIEW_SWITCH_TO_9_DELAY,
+  CONVERGE_DURATION_MS,
 } from '@/constants/timing'
 import {
   GRID_SIZE_CHANGE_THRESHOLD_PX,
@@ -211,6 +213,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
   const [viewSwitch, setViewSwitch] = useState<ViewSwitchState | null>(null)
   const [viewSwitchPhase, setViewSwitchPhase] = useState<'start' | 'end'>('start')
+
+  /**
+   * グリッド本体を「ストックタイル」or「ホームアイコン」位置に向けて
+   * translate + scale + opacity 0 で吸い込ませる収束アニメ用 state。
+   * 収束先までの相対 px (translate 量) を持つ。
+   * runConvergeAnim() が target DOM を測って算出する。
+   * unmount で消えるか setConverging(null) で瞬時復帰 (transition: none)。
+   * gridRef (既存の PNG/PDF export 用 ref) を共用してソース位置を測る。
+   */
+  const [converging, setConverging] = useState<{ tx: number; ty: number } | null>(null)
   // to-9x9: 0-400ms で中央 3×3 が scale(1)→scale(1/3)、200ms から周辺ブロックが時計回り stagger fade-in。
   //         total = 200 + 7 * 85 + 400 = 1195ms
   // to-3x3: 0-400ms 周辺ブロック fade-out、中央 9 セルが順次 [7,6,3,0,1,2,5,8,4] で 3×3 位置へ展開。
@@ -330,6 +342,26 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (dCol === 1 && dRow === 1) return 'orbit-from-se'
     return null
   }
+
+  /**
+   * グリッド本体を `target` (= `data-converge-target` 属性を持つ DOM) の中心へ向けて
+   * 縮みながらフェードアウトさせる収束アニメ。
+   * - target / グリッド ref のいずれかが取れない場合は no-op で graceful skip
+   * - other anim (orbit / orbit9 / viewSwitch / slide) 進行中も no-op で抜ける (二重発火防止)
+   * - 完了まで `await` で待つので、呼び出し側はアニメ後に actual DB 操作 / navigate を実行できる
+   */
+  const runConvergeAnim = useCallback(async (target: 'stock' | 'home'): Promise<void> => {
+    if (orbit || orbit9 || viewSwitch || slide) return
+    const targetEl = document.querySelector(`[data-converge-target="${target}"]`)
+    const sourceEl = gridRef.current
+    if (!targetEl || !sourceEl) return
+    const src = sourceEl.getBoundingClientRect()
+    const tgt = targetEl.getBoundingClientRect()
+    const tx = (tgt.left + tgt.width / 2) - (src.left + src.width / 2)
+    const ty = (tgt.top + tgt.height / 2) - (src.top + src.height / 2)
+    setConverging({ tx, ty })
+    await new Promise<void>((r) => setTimeout(r, CONVERGE_DURATION_MS))
+  }, [orbit, orbit9, viewSwitch, slide])
 
   // orbit / orbit9 の safety net: 各 drill handler が明示的に setOrbit(null) を呼ぶ前提の
   // もとで、例外やその他の理由で明示 clear が走らなかった場合の救済としてアニメ最大時間 +
@@ -723,10 +755,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         try {
           const isPrimaryRoot = isCenter ? await isPrimaryRootCell(cellId) : false
           if (isPrimaryRoot) {
-            // primary root center: snapshot をストックに残してマンダラート全体を完全削除
+            // primary root center: snapshot をストックに残してマンダラート全体を完全削除。
+            // 視覚的に「ホーム (= dashboard) へ吸い込まれる」演出を入れてから navigate
             await addToStock(cellId)
             setStockReloadKey((k) => k + 1)
             await permanentDeleteMandalart(mandalartId)
+            await runConvergeAnim('home')
             setToast({ message: 'ストックへ移動し、マンダラートを削除しました', type: 'success' })
             navigate('/dashboard')
           } else if (isSelfCenteredInCurrentGrid && gridData) {
@@ -735,24 +769,36 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             const deletedGridId = gridData.id
             await addToStock(cellId)
             setStockReloadKey((k) => k + 1)
+            await runConvergeAnim('stock')
             await permanentDeleteGrid(deletedGridId)
+            setConverging(null)
             setToast({ message: 'ストックへ移動し、並列グリッドを削除しました', type: 'success' })
             navigateAfterParallelDeleted(deletedGridId)
           } else {
             // X=C primary drilled center または周辺セル: 通常の moveCellToStock
+            // ストックへの吸い込み演出 → 実行 → 復帰
+            await runConvergeAnim('stock')
             await moveCellToStock(cellId)
             setStockReloadKey((k) => k + 1)
+            setConverging(null)
             setToast({ message: 'ストックに移動しました', type: 'success' })
             if (isCenter) navigateUpAfterAction()
             else reloadAll()
           }
         } catch (e) {
+          setConverging(null)
           setToast({ message: `移動失敗: ${(e as Error).message}`, type: 'error' })
         }
         return
       }
       case 'copy': {
-        await handleCopyAction(cellId)
+        // ストックへの吸い込み演出 → 実 add → 復帰
+        await runConvergeAnim('stock')
+        try {
+          await handleCopyAction(cellId)
+        } finally {
+          setConverging(null)
+        }
         return
       }
       case 'export': {
@@ -760,15 +806,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         return
       }
     }
-  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate])
+  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate, runConvergeAnim])
 
   const handleShredConfirm = useCallback(async () => {
     if (!shredConfirm) return
     const { cellId, isCenter, isPrimaryRoot, isSelfCenteredInCurrentGrid, gridIdForSelfCenter } = shredConfirm
     try {
       if (isPrimaryRoot) {
-        // primary root center 削除 → マンダラート全体を完全削除 (ゴミ箱に入れない)
+        // primary root center 削除 → マンダラート全体を完全削除 (ゴミ箱に入れない)。
+        // ホーム (= dashboard) へ吸い込まれる演出を入れてから navigate
         await permanentDeleteMandalart(mandalartId)
+        await runConvergeAnim('home')
         setToast({ message: 'マンダラートを削除しました', type: 'success' })
         navigate('/dashboard')
       } else if (isSelfCenteredInCurrentGrid && gridIdForSelfCenter) {
@@ -787,7 +835,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     } finally {
       setShredConfirm(null)
     }
-  }, [shredConfirm, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, mandalartId, navigate])
+  }, [shredConfirm, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, mandalartId, navigate, runConvergeAnim])
 
   const handleExportPick = useCallback(async (format: ExportFormat) => {
     if (!exportPicker) return
@@ -1481,11 +1529,58 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       breadcrumb.length === 1 &&
       parallelGrids.length === 1 &&
       gridData.center_cell_id === center?.id
-    if (centerEmpty && isSoleRoot) {
+    const willDelete = centerEmpty && isSoleRoot
+    if (willDelete) {
       await deleteMandalart(mandalartId)
     } else {
       // それ以外の "empty" は cleanupGridIfEmpty に判定を委譲
       await cleanupGridIfEmpty(gridData.id)
+    }
+    // 削除されないケースは「中心セル → ダッシュボードカード」の収束アニメ用に
+    // 中心セルの矩形と表示内容を ConvergeOverlay 経由で伝達する。
+    // 削除されるケースは対象カードが無いので skip。
+    if (!willDelete && center) {
+      const centerEl = document.querySelector(`[data-cell-id="${center.id}"]`) as HTMLElement | null
+      if (centerEl) {
+        const r = centerEl.getBoundingClientRect()
+        // overlay 出現時のテキスト位置/サイズを編集中の中心セルに pixel-perfect で揃えるため、
+        // Cell.tsx の計算式 (size / borderPx / showCheckbox / fontScale 等の組合せ) を
+        // 再現する代わりに、実際に描画されている text wrapper / span の DOM から値を読み出す。
+        // これにより 3×3 / 9×9 / checkbox 有無 / fontScale 変動にすべて自動追従する。
+        // 構造: [data-cell-id] > div.absolute.z-10 > span (Cell.tsx 497-504)。
+        // 画像のみのセルは text wrapper が存在しないが、その場合 overlay も画像のみ表示なので inset は不要 (default 値で fallback)。
+        let topInsetPx = 12
+        let sideInsetPx = 12
+        let fontPx = 28 * fontScale
+        const cs = getComputedStyle(centerEl)
+        const borderTop = parseFloat(cs.borderTopWidth) || 0
+        const borderLeft = parseFloat(cs.borderLeftWidth) || 0
+        const textWrapper = Array.from(centerEl.children).find(
+          (el) => el instanceof HTMLElement
+            && el.classList.contains('absolute')
+            && el.classList.contains('z-10')
+            && !el.classList.contains('inset-0'),
+        ) as HTMLElement | undefined
+        if (textWrapper) {
+          const wRect = textWrapper.getBoundingClientRect()
+          topInsetPx = wRect.top - r.top - borderTop
+          sideInsetPx = wRect.left - r.left - borderLeft
+          const span = textWrapper.querySelector('span')
+          if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
+        }
+        useConvergeStore.getState().setConverge(
+          mandalartId,
+          { left: r.left, top: r.top, width: r.width, height: r.height },
+          {
+            text: center.text,
+            imagePath: center.image_path,
+            color: center.color,
+            fontPx,
+            topInsetPx,
+            sideInsetPx,
+          },
+        )
+      }
     }
     navigate('/dashboard')
   }
@@ -1921,7 +2016,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             <div
               ref={gridRef}
               className="relative overflow-hidden"
-              style={{ width: gridSize, height: gridSize }}
+              // converging が設定されている間だけ transform / opacity を上書きして
+              // 「マンダラート → セルへ吸い込み」アニメを駆動する。null に戻すと
+              // transition: 'none' で瞬時復帰し、戻り用フェードは出さない設計
+              style={{
+                width: gridSize,
+                height: gridSize,
+                transition: converging
+                  ? `transform ${CONVERGE_DURATION_MS}ms cubic-bezier(0.4, 0, 1, 1), opacity ${CONVERGE_DURATION_MS}ms ease-in`
+                  : 'none',
+                transform: converging
+                  ? `translate(${converging.tx}px, ${converging.ty}px) scale(0.05)`
+                  : undefined,
+                opacity: converging ? 0 : 1,
+              }}
             >
               {viewSwitch && gridSize > 0 ? (
                 // 表示モード切替アニメーション (3×3 ↔ 9×9)
@@ -2712,7 +2820,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             拾って w-72 を上書きしてしまう問題があるので `min-w-0` で抑止し、`overflow-hidden`
             で内部の横方向 overflow を確実にクリップする。これで edit / preview / stock の
             3 タブで panel 幅が一定になる。 */}
-        <div className="hidden lg:flex w-72 shrink-0 min-w-0 overflow-hidden">
+        <div data-converge-target="stock" className="hidden lg:flex w-72 shrink-0 min-w-0 overflow-hidden">
           <SidePanel
             gridId={currentGridId}
             gridMemo={gridData?.memo ?? null}

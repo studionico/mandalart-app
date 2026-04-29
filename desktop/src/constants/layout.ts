@@ -48,8 +48,21 @@ export const GRID_SIZE_CHANGE_THRESHOLD_PX = 4
 
 // --- ダッシュボード ---
 
-/** ダッシュボードカードの 1 辺 (px) */
+/** ダッシュボードカードの 1 辺 (px)。
+ *
+ * カードは「中心セル (3×3 normal、~278px 角) を縮小したもの」として設計しており、
+ * スケール比 ≈ 130/278 ≈ 0.47 をベースに以下の値が決まっている。 */
 export const DASHBOARD_CARD_SIZE_PX = 130
 
-/** ダッシュボードカードのタイトル表示のフォントサイズ (px) */
+/** ダッシュボードカードのタイトル表示のフォントサイズ (px)。
+ * 中心セル `CELL_BASE_FONT_PX = 28` を ~0.47 縮小した 13.2 → 14 に丸めた値。 */
 export const DASHBOARD_CARD_FONT_PX = 14
+
+/** ダッシュボードカードの黒枠の太さ (px)。
+ * 中心セル `border-[6px]` を ~0.47 縮小した 2.8 → 3 に丸めた値。 */
+export const DASHBOARD_CARD_BORDER_PX = 3
+
+/** ダッシュボードカード外縁からテキストまでの余白 (px、border-box 内側起算)。
+ * 中心セルの実 inset (`CELL_TEXT_INSET_NORMAL_PX - border 6px = 12px`) を
+ * ~0.47 縮小した 5.6 → 6 に丸めた値。 */
+export const DASHBOARD_CARD_INSET_PX = 6

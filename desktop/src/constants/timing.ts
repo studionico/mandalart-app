@@ -34,6 +34,21 @@ export const ANIM_FADE_MS = 400
 /** to-9x9 で周辺ブロック fade-in が始まるまでの遅延 (ms、shrink の前半を見せる分) */
 export const VIEW_SWITCH_TO_9_DELAY_MS = 200
 
+// --- 収束アニメ (stock copy/move、ダッシュボード遷移時) ---
+
+/**
+ * 収束アニメ全体の速度倍率。動作確認用に > 1 にすると全 convergence が等比でスローになる
+ * (ConvergeOverlay の各プロパティ transition、EditorLayout のストック収束、すべて連動)。
+ * **リリース時は必ず 1 に戻すこと。** */
+export const CONVERGE_DEBUG_SLOW_FACTOR = 1
+
+/**
+ * グリッド全体を収束先 (ストックタイル / ダッシュボードカード = ホームアイコン位置)
+ * へ向けて translate + scale + fade-out するアニメの duration (ms)。
+ * 戻りは transition: none で瞬時復帰させるため戻りアニメ duration は別途持たない。
+ */
+export const CONVERGE_DURATION_MS = 400 * CONVERGE_DEBUG_SLOW_FACTOR
+
 // --- 同期 ---
 
 /** Supabase realtime 受信後の reload を間引く debounce (ms) */

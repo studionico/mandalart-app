@@ -59,6 +59,8 @@ export default function Breadcrumb({ onHome, onNavigate }: Props) {
     <nav className="flex items-center gap-1 overflow-x-auto py-1 px-1 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <button
         onClick={onHome}
+        // data-converge-target は EditorLayout の収束アニメで「ホーム位置」のターゲット解決に使う
+        data-converge-target="home"
         className="flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

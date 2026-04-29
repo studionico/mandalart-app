@@ -13,7 +13,11 @@ import ThemeToggle from '@/components/ThemeToggle'
 import { useAuthStore } from '@/store/authStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useSync } from '@/hooks/useSync'
-import { DASHBOARD_CARD_SIZE_PX, DASHBOARD_CARD_FONT_PX } from '@/constants/layout'
+import {
+  DASHBOARD_CARD_SIZE_PX,
+  DASHBOARD_CARD_FONT_PX,
+  DASHBOARD_CARD_INSET_PX,
+} from '@/constants/layout'
 import type { Mandalart } from '@/types'
 
 type SortKey = 'updated' | 'title'
@@ -335,7 +339,16 @@ function MandalartCard({
 
   return (
     <div
-      className="relative bg-white dark:bg-neutral-900 border-2 border-black dark:border-white rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+      // ConvergeOverlay の polling target。ホーム遷移時に中心セル overlay の
+      // 着地点をこの矩形で決める。
+      // 中心セル (3×3 normal) を ~0.47 縮小した姿として設計: border-[3px] / shadow-md /
+      // dark:bg-neutral-950 はすべて Cell.tsx 中心セルの class と揃えており、太さ・余白・font サイズは
+      // layout.ts の DASHBOARD_CARD_* 定数で proportional に縮小。
+      // 角丸は中心セルの `rounded-lg (8px)` をスケール 0.47 した ~3.76px に対応する `rounded (4px)` を採用。
+      // これにより収束アニメ終了時に overlay の scaled rounded とカードの rounded が視覚的に一致し、
+      // 角がパッと丸く戻るスナップを防ぐ。
+      data-converge-card={m.id}
+      className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer group overflow-hidden"
       style={{ width: DASHBOARD_CARD_SIZE_PX, height: DASHBOARD_CARD_SIZE_PX }}
       onClick={onOpen}
       title={m.title || '無題'}
@@ -343,11 +356,22 @@ function MandalartCard({
       {!titleFirstLine && imageUrl ? (
         <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
+        // Cell.tsx 中心セルのテキスト構造に合わせる:
+        // 絶対配置で inset 指定 + flex items-start + 行頭揃え。font-weight は html 全体の
+        // 300 (Light) を継承させ、中心セル (font-medium 等を当てない) と一致させる。
         <div
-          className="w-full h-full flex items-start justify-start p-3 text-left break-all leading-tight text-neutral-800 dark:text-neutral-100 font-medium"
-          style={{ fontSize: DASHBOARD_CARD_FONT_PX }}
+          style={{
+            top: DASHBOARD_CARD_INSET_PX,
+            right: DASHBOARD_CARD_INSET_PX,
+            bottom: DASHBOARD_CARD_INSET_PX,
+            left: DASHBOARD_CARD_INSET_PX,
+          }}
+          className="absolute z-10 flex items-start overflow-hidden"
         >
-          <span className="block w-full line-clamp-6 whitespace-pre-wrap">
+          <span
+            style={{ fontSize: DASHBOARD_CARD_FONT_PX, lineHeight: 1.25 }}
+            className="block w-full text-left leading-tight break-all whitespace-pre-wrap text-neutral-800 dark:text-neutral-100"
+          >
             {m.title || '無題'}
           </span>
         </div>
