@@ -31,7 +31,9 @@ export default function SidePanel({
   const [tab, setTab] = useState<Tab>('memo')
 
   return (
-    <div className="flex flex-col h-full border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+    // w-full で親 (w-72) に張り付かせ、min-w-0 + overflow-hidden で内部コンテンツの
+    // intrinsic 幅 (長 URL / pre block 等) が外側に伝播しないようにする
+    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
       {/* タブ (ドラッグ中は隠す) */}
       <div className={`flex border-b border-gray-200 dark:border-gray-800 ${isDragging ? 'invisible' : ''}`}>
         {(['memo', 'stock'] as Tab[]).map((t) => (

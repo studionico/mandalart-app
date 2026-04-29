@@ -127,7 +127,11 @@ export default function StockTab({
           </div>
         )}
 
-        <div className="grid gap-2 grid-cols-[repeat(auto-fill,80px)] justify-center">
+        {/* 親 (SidePanel 内幅) を 3 等分してタイルを敷き詰める。
+            タイルは aspect-square で正方形を維持しつつ、横幅は親に対する 1/3 の相対値となる。
+            これにより SidePanel 内幅が変わっても余白なくフィットし、メモ編集 / プレビュー /
+            ストックの 3 タブで描画幅が揃う。 */}
+        <div className="grid gap-2 grid-cols-3">
           {items.map((item) => {
             const isSourceDragging = dragSourceId === `stock:${item.id}`
             const text = item.snapshot.cell.text || '（テキストなし）'
@@ -136,7 +140,7 @@ export default function StockTab({
                 key={item.id}
                 onMouseDown={(e) => handleItemMouseDown(e, item.id)}
                 className={`
-                  relative w-[80px] h-[80px] bg-white dark:bg-gray-900
+                  relative w-full aspect-square bg-white dark:bg-gray-900
                   border-2 border-black dark:border-white rounded-xl
                   shadow-sm hover:shadow-md transition-shadow
                   cursor-grab active:cursor-grabbing select-none

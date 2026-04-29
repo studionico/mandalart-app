@@ -58,7 +58,10 @@ export default function MemoTab({ gridId, initialMemo }: Props) {
 
       {preview ? (
         <div
-          className="prose prose-sm flex-1 overflow-y-auto"
+          // edit / preview / stock の 3 タブで横幅が揃って見えるよう、prose の max-width 制約を
+          // 解除して w-full で SidePanel 親要素 (w-72) の内幅にフィットさせる。
+          // break-words で長い URL や英単語を折り返して intrinsic 幅を抑える
+          className="prose prose-sm w-full max-w-none flex-1 overflow-y-auto break-words"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(memo) }}
         />
       ) : (
@@ -66,7 +69,8 @@ export default function MemoTab({ gridId, initialMemo }: Props) {
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
           placeholder="Markdown でメモを書く..."
-          className="flex-1 text-sm resize-none border border-gray-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+          // textarea は cols 属性のデフォルト (~20ch) で intrinsic 幅を持つので w-full を明示
+          className="flex-1 w-full text-sm resize-none border border-gray-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
         />
       )}
     </div>

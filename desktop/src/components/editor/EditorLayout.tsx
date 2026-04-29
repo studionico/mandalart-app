@@ -2707,8 +2707,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           </div>
         </div>
 
-        {/* サイドパネル（デスクトップのみ） */}
-        <div className="hidden lg:flex w-72 shrink-0">
+        {/* サイドパネル（デスクトップのみ）。
+            flex item の `min-width: auto` がコンテンツ intrinsic 幅 (長 URL / pre block 等) を
+            拾って w-72 を上書きしてしまう問題があるので `min-w-0` で抑止し、`overflow-hidden`
+            で内部の横方向 overflow を確実にクリップする。これで edit / preview / stock の
+            3 タブで panel 幅が一定になる。 */}
+        <div className="hidden lg:flex w-72 shrink-0 min-w-0 overflow-hidden">
           <SidePanel
             gridId={currentGridId}
             gridMemo={gridData?.memo ?? null}
