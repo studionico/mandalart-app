@@ -164,6 +164,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     movingCellId: string | null
     movingFromPosition: number
     direction: 'drill-down' | 'drill-up' | 'initial'
+    /** orbit 全体の開始を遅らせる時間 (ms)。direction='initial' で「ダッシュボード → エディタ拡大
+     * (convergeStore direction='open')」経由で入った場合のみ CONVERGE_DURATION_MS が入る。
+     * delay 中は `animation-fill-mode: both` の効果でセルは opacity 0 で固定され、
+     * convergence overlay が中心セルへ morph している間は周辺セルが見えない。 */
+    initialDelayMs?: number
   }
   const [orbit, setOrbit] = useState<OrbitState | null>(null)
   // drill-down と drill-up を同じ感覚になるよう stagger / fade を揃える。
@@ -510,6 +515,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           setSubGrids(targetSubGrids)
           setOrbit9(null)
         } else {
+          // ダッシュボード → エディタ拡大 (convergeStore direction='open') で入ってきた場合は、
+          // convergence overlay の morph (CONVERGE_DURATION_MS) が完了してから初回 orbit fade-in を
+          // 始める。こうすることで「のの字」描画の前に中心セルが overlay からの引渡しで先に現れる。
+          const fromDashboard = useConvergeStore.getState().direction === 'open'
+          const initialDelayMs = fromDashboard ? CONVERGE_DURATION_MS : 0
           setOrbit({
             targetCells: cells,
             targetGridId: root.id,
@@ -517,10 +527,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             movingCellId: null,
             movingFromPosition: 4,
             direction: 'initial',
+            initialDelayMs,
           })
           setCurrentGrid(root.id)
           await new Promise((r) =>
-            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+            setTimeout(r, initialDelayMs + ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
           )
           if (cancelled) return
           setChildCounts(childCountsByCellId)
@@ -1555,6 +1566,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         const cs = getComputedStyle(centerEl)
         const borderTop = parseFloat(cs.borderTopWidth) || 0
         const borderLeft = parseFloat(cs.borderLeftWidth) || 0
+        const borderPx = borderTop
+        const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
         const textWrapper = Array.from(centerEl.children).find(
           (el) => el instanceof HTMLElement
             && el.classList.contains('absolute')
@@ -1569,6 +1582,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
         }
         useConvergeStore.getState().setConverge(
+          'home',
           mandalartId,
           { left: r.left, top: r.top, width: r.width, height: r.height },
           {
@@ -1578,6 +1592,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             fontPx,
             topInsetPx,
             sideInsetPx,
+            borderPx,
+            radiusPx,
           },
         )
       }
@@ -2015,6 +2031,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
             <div
               ref={gridRef}
+              // ConvergeOverlay の direction='open' (ダッシュボード → エディタ拡大) で
+              // 中心セルを polling するときの起点。`[data-mandalart-id="X"] [data-position="4"]` で
+              // 自身配下の中心セル DOM を一意に解決する。
+              data-mandalart-id={mandalartId}
               className="relative overflow-hidden"
               // converging が設定されている間だけ transform / opacity を上書きして
               // 「マンダラート → セルへ吸い込み」アニメを駆動する。null に戻すと
@@ -2441,13 +2461,27 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           : ORBIT_ORDER_PERIPHERAL
                     const center = orbit.targetCells.find((c) => c.position === CENTER_POSITION)
                     const centerEmpty = !center || isCellEmpty(center)
+                    // ダッシュボード → エディタ拡大経由の初回 orbit (initialDelayMs > 0) では、
+                    // convergence overlay の morph (CONVERGE_DURATION_MS) が終わるまで全セルを
+                    // opacity 0 で隠す。`animation-fill-mode: both` の効果で delay 中は from フレーム
+                    // (opacity 0) で固定される。中心セルだけは「overlay 終端と同じ瞬間に instant snap で
+                    // opacity 1 になる」必要があるので、duration を 1ms にして delay = initialDelayMs と
+                    // 揃える (overlay clear ≒ 中心セル可視化が同時に起きて handoff が seamless)。
+                    // duration 1ms は事実上の snap (60fps の 1 frame = 16ms 内で完了) で、
+                    // 「フェードしないが overlay 中は隠す」を両立する。
+                    const initialDelayMs = orbit.initialDelayMs ?? 0
+                    const isFromDashboard =
+                      orbit.direction === 'initial' && initialDelayMs > 0
                     return Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
                       const cell = orbit.targetCells.find((c) => c.position === pos)
                       const isCenter = isCenterPosition(pos)
                       const isDisabled = !isCenter && centerEmpty
                       const staggerIdx = order.indexOf(pos)
                       // drill-down で pos=4 (= 移動セル) は stagger に含まれないので delay 0
-                      const fadeDelay = staggerIdx >= 0 ? staggerIdx * stagger : 0
+                      const fadeDelay =
+                        staggerIdx >= 0 ? staggerIdx * stagger + initialDelayMs : 0
+                      // 中心セルのみ snap、それ以外は通常 fade
+                      const cellFade = isFromDashboard && isCenter ? 1 : fade
 
                       // 空 slot: GridView3x3 の空 placeholder と同じ styling + orbit-fade-in
                       // を適用して、入力ありセルと同じタイミングで「内容・背景・外枠」揃って
@@ -2457,7 +2491,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           <div
                             key={`empty-${pos}`}
                             style={{
-                              animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
+                              animation: `orbit-fade-in ${cellFade}ms ease-out ${fadeDelay}ms both`,
                               willChange: 'opacity',
                             }}
                             className={`
@@ -2499,7 +2533,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               willChange: 'transform',
                             }
                           : {
-                              animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
+                              animation: `orbit-fade-in ${cellFade}ms ease-out ${fadeDelay}ms both`,
                               willChange: 'opacity',
                             }
                       return (

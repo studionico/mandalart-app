@@ -12,12 +12,14 @@ import TrashDialog from '@/components/dashboard/TrashDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import { useAuthStore } from '@/store/authStore'
 import { useEditorStore } from '@/store/editorStore'
+import { useConvergeStore } from '@/store/convergeStore'
 import { useSync } from '@/hooks/useSync'
 import {
   DASHBOARD_CARD_SIZE_PX,
   DASHBOARD_CARD_FONT_PX,
   DASHBOARD_CARD_INSET_PX,
 } from '@/constants/layout'
+import { CONVERGE_DURATION_MS } from '@/constants/timing'
 import type { Mandalart } from '@/types'
 
 type SortKey = 'updated' | 'title'
@@ -321,7 +323,17 @@ function MandalartCard({
   onDelete: () => void
 }) {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
   const titleFirstLine = (m.title || '').split('\n')[0]
+
+  // direction='home' (エディタ → ダッシュボード収束) で自分がターゲットカードのとき、morph 中は
+  // 内容を隠す。overlay がカード位置に到達する前に「中身が先に見えている」のを防ぐため、
+  // open 方向の中心セル instant-snap と同じ trick (`orbit-fade-in 1ms ease-out CONVERGE_DURATION_MS both`)
+  // で morph 期間中は opacity 0、終端で 1ms snap → 1。
+  const convergeDirection = useConvergeStore((s) => s.direction)
+  const convergeMandalartId = useConvergeStore((s) => s.mandalartId)
+  const isConvergeTarget =
+    convergeDirection === 'home' && convergeMandalartId === m.id
 
   useEffect(() => {
     let cancelled = false
@@ -337,20 +349,70 @@ function MandalartCard({
     return () => { cancelled = true }
   }, [titleFirstLine, m.image_path])
 
+  // カードクリック → 「カード → 中心セル」拡大アニメの source 値を計測 → setConverge('open')
+  // → onOpen() で navigate。両端値の対称化のため EditorLayout の handleNavigateHome と同じ
+  // ロジック (source DOM 実測) でカード DOM を読む。
+  function handleClick() {
+    const cardEl = cardRef.current
+    if (!cardEl) { onOpen(); return }
+    const r = cardEl.getBoundingClientRect()
+    const cs = getComputedStyle(cardEl)
+    const borderTop = parseFloat(cs.borderTopWidth) || 0
+    const borderLeft = parseFloat(cs.borderLeftWidth) || 0
+    const borderPx = borderTop
+    const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
+    let topInsetPx = DASHBOARD_CARD_INSET_PX
+    let sideInsetPx = DASHBOARD_CARD_INSET_PX
+    let fontPx = DASHBOARD_CARD_FONT_PX
+    const cardText = Array.from(cardEl.children).find(
+      (el) => el instanceof HTMLElement
+        && el.classList.contains('absolute')
+        && el.classList.contains('z-10')
+        && !el.classList.contains('inset-0'),
+    ) as HTMLElement | undefined
+    if (cardText) {
+      const wRect = cardText.getBoundingClientRect()
+      topInsetPx = wRect.top - r.top - borderTop
+      sideInsetPx = wRect.left - r.left - borderLeft
+      const span = cardText.querySelector('span')
+      if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
+    }
+    useConvergeStore.getState().setConverge(
+      'open',
+      m.id,
+      { left: r.left, top: r.top, width: r.width, height: r.height },
+      {
+        // カードが image-only (タイトル空 + 画像あり) のときは imagePath を使い、それ以外は title 文字列を使う
+        text: titleFirstLine ? (m.title || '') : '',
+        imagePath: !titleFirstLine && m.image_path ? m.image_path : null,
+        color: null,  // ダッシュボードカードは色を持たない (mandalart 型に color 列なし)
+        fontPx, topInsetPx, sideInsetPx, borderPx, radiusPx,
+      },
+    )
+    onOpen()
+  }
+
   return (
     <div
-      // ConvergeOverlay の polling target。ホーム遷移時に中心セル overlay の
-      // 着地点をこの矩形で決める。
+      ref={cardRef}
+      // ConvergeOverlay の polling target (direction='home' = エディタ → ダッシュボード収束時の着地点)。
       // 中心セル (3×3 normal) を ~0.47 縮小した姿として設計: border-[3px] / shadow-md /
       // dark:bg-neutral-950 はすべて Cell.tsx 中心セルの class と揃えており、太さ・余白・font サイズは
       // layout.ts の DASHBOARD_CARD_* 定数で proportional に縮小。
       // 角丸は中心セルの `rounded-lg (8px)` をスケール 0.47 した ~3.76px に対応する `rounded (4px)` を採用。
-      // これにより収束アニメ終了時に overlay の scaled rounded とカードの rounded が視覚的に一致し、
-      // 角がパッと丸く戻るスナップを防ぐ。
       data-converge-card={m.id}
       className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer group overflow-hidden"
-      style={{ width: DASHBOARD_CARD_SIZE_PX, height: DASHBOARD_CARD_SIZE_PX }}
-      onClick={onOpen}
+      style={{
+        width: DASHBOARD_CARD_SIZE_PX,
+        height: DASHBOARD_CARD_SIZE_PX,
+        ...(isConvergeTarget
+          ? {
+              animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
+              willChange: 'opacity',
+            }
+          : {}),
+      }}
+      onClick={handleClick}
       title={m.title || '無題'}
     >
       {!titleFirstLine && imageUrl ? (
