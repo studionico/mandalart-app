@@ -8,7 +8,7 @@ import {
   CELL_TEXT_INSET_SMALL_PX,
 } from '@/constants/layout'
 import { GRID_SIDE } from '@/constants/grid'
-import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
+import { getCellImageUrl, getCachedCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
 import { isCellEmpty } from '@/lib/utils/grid'
 
 type Props = {
@@ -66,7 +66,10 @@ export default function Cell({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cellRef = useRef<HTMLDivElement>(null)
   const { bg, text: textColor } = getColorClasses(cell.color)
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  // remount (例: orbit アニメ完了 → 通常 grid render) 時にキャッシュ済み画像を 1 frame目から
+  // 描画するため、useState 初期値で同期キャッシュを覗く。未キャッシュ (初回ロード) は null で
+  // 始まり、下の useEffect が async に解決する。
+  const [imageUrl, setImageUrl] = useState<string | null>(() => getCachedCellImageUrl(cell.image_path))
   const [draftText, setDraftText] = useState(cell.text)
   // インライン編集中にテキストエリアをダブルクリックすると 3×3 サイズに拡大表示する
   const [expandedRect, setExpandedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)

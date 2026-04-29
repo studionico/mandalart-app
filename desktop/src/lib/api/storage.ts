@@ -53,6 +53,20 @@ export async function copyImageFromPath(absolutePath: string, cellId: string): P
 }
 
 /**
+ * image_path に対応する blob URL がメモリキャッシュに既にあれば返す (同期)。
+ * Cell.tsx の `useState` 初期化で「remount 時 1 frame だけ画像が消える」現象を避けるために使う:
+ * orbit アニメ後にセル DOM が unmount → remount するとき、`getCellImageUrl` は async なので
+ * useEffect 経由だと初期 render 直後に必ず 1 frame `imageUrl=null` の状態が挟まる。
+ * 既にキャッシュされた path については本関数で同期取得し、useState 初期値として渡せば
+ * remount 1 frame目から画像が表示される (まばたき消滅)。未キャッシュは null を返し、
+ * 通常通り useEffect の async load に委譲する。
+ */
+export function getCachedCellImageUrl(path: string | null | undefined): string | null {
+  if (!path) return null
+  return urlCache.get(path) ?? null
+}
+
+/**
  * image_path（AppData からの相対パス）を blob URL に変換して <img src> で表示できるようにする。
  */
 export async function getCellImageUrl(path: string): Promise<string> {
