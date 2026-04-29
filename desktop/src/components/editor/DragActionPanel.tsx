@@ -48,7 +48,7 @@ function ActionTile({
 }) {
   const baseClass = action === 'shred'
     ? 'border-red-300 dark:border-red-700 text-red-600 dark:text-red-400'
-    : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'
+    : 'border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300'
   const hoverClass = hovered
     ? action === 'shred'
       ? 'border-red-500 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 scale-[1.04]'
@@ -59,7 +59,7 @@ function ActionTile({
       data-action-drop={action}
       className={`
         flex flex-col items-center justify-center gap-1
-        bg-white dark:bg-gray-900 border-2 rounded-2xl shadow-sm
+        bg-white dark:bg-neutral-900 border-2 rounded-2xl shadow-sm
         transition-all
         ${baseClass} ${hoverClass}
       `}

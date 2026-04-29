@@ -67,18 +67,18 @@ export default function MemoTab({ gridId, initialMemo }: Props) {
         <div className="flex gap-1">
           <button
             onClick={() => setPreview(false)}
-            className={`text-xs px-2 py-1 rounded-md transition-colors ${!preview ? 'bg-gray-200 font-medium' : 'hover:bg-gray-100 text-gray-500'}`}
+            className={`text-xs px-2 py-1 rounded-md transition-colors ${!preview ? 'bg-neutral-200 font-medium' : 'hover:bg-neutral-100 text-neutral-500'}`}
           >
             編集
           </button>
           <button
             onClick={() => setPreview(true)}
-            className={`text-xs px-2 py-1 rounded-md transition-colors ${preview ? 'bg-gray-200 font-medium' : 'hover:bg-gray-100 text-gray-500'}`}
+            className={`text-xs px-2 py-1 rounded-md transition-colors ${preview ? 'bg-neutral-200 font-medium' : 'hover:bg-neutral-100 text-neutral-500'}`}
           >
             プレビュー
           </button>
         </div>
-        {saving && <span className="text-xs text-gray-400">保存中...</span>}
+        {saving && <span className="text-xs text-neutral-400">保存中...</span>}
       </div>
 
       {preview ? (
@@ -97,7 +97,7 @@ export default function MemoTab({ gridId, initialMemo }: Props) {
           // textarea は cols 属性のデフォルト (~20ch) で intrinsic 幅を持つので w-full を明示。
           // placeholder を多行で表示するため whitespace-pre-line を当てて改行を保つ
           // (textarea の placeholder は \n を改行として描画するが、念のため明示)
-          className="flex-1 w-full text-sm resize-none border border-gray-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono whitespace-pre-line"
+          className="flex-1 w-full text-sm resize-none border border-neutral-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono whitespace-pre-line"
         />
       )}
     </div>

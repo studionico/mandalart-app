@@ -6,7 +6,7 @@ export type PresetColor = {
 }
 
 // ダークモードでの塗り色は `*-900/40` (40% 不透明の *-900) を使う。
-// これにより cell 背景 (`bg-gray-900`) に対して色が薄く乗った印象になり、
+// これにより cell 背景 (`bg-neutral-900`) に対して色が薄く乗った印象になり、
 // ライトモードの「パステル *-100」の相対感を保てる。
 // テキストはライトモード `*-900` (暗色) → ダーク `*-100` (明色) で反転。
 export const PRESET_COLORS: PresetColor[] = [
@@ -19,7 +19,7 @@ export const PRESET_COLORS: PresetColor[] = [
   { key: 'indigo-100', label: 'インディゴ', bg: 'bg-indigo-100 dark:bg-indigo-900/40', text: 'text-indigo-900 dark:text-indigo-100' },
   { key: 'purple-100', label: '紫',       bg: 'bg-purple-100 dark:bg-purple-900/40', text: 'text-purple-900 dark:text-purple-100' },
   { key: 'pink-100',   label: 'ピンク',   bg: 'bg-pink-100 dark:bg-pink-900/40',     text: 'text-pink-900 dark:text-pink-100' },
-  { key: 'gray-100',   label: 'グレー',   bg: 'bg-gray-100 dark:bg-gray-700/40',     text: 'text-gray-900 dark:text-gray-100' },
+  { key: 'gray-100',   label: 'グレー',   bg: 'bg-neutral-100 dark:bg-neutral-700/40',     text: 'text-neutral-900 dark:text-neutral-100' },
 ]
 
 export const DEFAULT_COLOR_KEY = null
@@ -29,8 +29,8 @@ export const DEFAULT_COLOR_KEY = null
 // 本来の意図通りに知覚される (中心: 白強 / 子あり: gray-300 中 / 子なし: gray-700 弱)。
 export function getColorClasses(colorKey: string | null): { bg: string; text: string } {
   const fallback = {
-    bg: 'bg-white dark:bg-gray-900',
-    text: 'text-gray-900 dark:text-gray-100',
+    bg: 'bg-white dark:bg-neutral-900',
+    text: 'text-neutral-900 dark:text-neutral-100',
   }
   if (!colorKey) return fallback
   const color = PRESET_COLORS.find((c) => c.key === colorKey)

@@ -27,10 +27,10 @@ export default function BottomSheet({ open, onClose, title, children }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-10 h-1 bg-neutral-300 rounded-full" />
         </div>
         {title && (
-          <div className="px-6 pt-3 pb-4 border-b border-gray-100">
+          <div className="px-6 pt-3 pb-4 border-b border-neutral-100">
             <h2 className="text-base font-semibold">{title}</h2>
           </div>
         )}

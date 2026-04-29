@@ -35,12 +35,12 @@ export default function ReplaceConfirmDialog({ open, targetText, onCancel, onCon
   return (
     <Modal open={open} onClose={onCancel} title="セルを上書きしますか？" size="sm">
       <div className="flex flex-col gap-4">
-        <p className="text-sm text-gray-700 dark:text-gray-300">
+        <p className="text-sm text-neutral-700 dark:text-neutral-300">
           ターゲットセル
           {targetText ? <span className="font-semibold">「{targetText}」</span> : ''}
           とそのサブグリッド全体を破棄して、ストックの内容で上書きします。
         </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
           ※ 上書きされた内容は元に戻せません。
         </p>
         <div className="flex justify-end gap-2 pt-2">

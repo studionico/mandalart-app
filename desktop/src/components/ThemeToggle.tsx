@@ -11,7 +11,7 @@ export default function ThemeToggle() {
   const setPreference = useThemeStore((s) => s.setPreference)
 
   return (
-    <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs">
+    <div className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
       {OPTIONS.map((opt) => (
         <button
           key={opt.value}
@@ -20,7 +20,7 @@ export default function ThemeToggle() {
           className={`px-2 py-1.5 transition-colors ${
             preference === opt.value
               ? 'bg-blue-600 text-white'
-              : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300'
           }`}
         >
           {opt.label}

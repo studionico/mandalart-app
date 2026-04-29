@@ -41,9 +41,9 @@ export default function GridView9x9({
   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
 
   // 各サブグリッドラッパーの共通クラス
-  // gap-px + bg-gray-300 で「セル同士が共有する 1 本の境界線」を表現
-  const wrapperBase = 'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-700 rounded-xl overflow-hidden min-h-0 min-w-0'
-  const emptyCellClass = 'bg-white dark:bg-gray-900'
+  // gap-px + bg-neutral-300 で「セル同士が共有する 1 本の境界線」を表現
+  const wrapperBase = 'grid grid-cols-3 grid-rows-3 gap-px bg-neutral-300 dark:bg-neutral-700 rounded-xl overflow-hidden min-h-0 min-w-0'
+  const emptyCellClass = 'bg-white dark:bg-neutral-900'
 
   return (
     <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full">
@@ -105,8 +105,8 @@ export default function GridView9x9({
           ? (childCounts.get(rootCell.id) ?? 0) > 0
           : false
         const borderClass = hasMeaningfulSub
-          ? 'border-2 border-black dark:border-gray-300'
-          : 'border-2 border-gray-300 dark:border-gray-700'
+          ? 'border-2 border-black dark:border-neutral-300'
+          : 'border-2 border-neutral-300 dark:border-neutral-700'
 
         return (
           <div key={outerPos} data-grid-container className={`${wrapperBase} ${borderClass}`}>

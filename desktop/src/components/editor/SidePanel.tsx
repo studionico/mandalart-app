@@ -33,15 +33,15 @@ export default function SidePanel({
   return (
     // w-full で親 (w-72) に張り付かせ、min-w-0 + overflow-hidden で内部コンテンツの
     // intrinsic 幅 (長 URL / pre block 等) が外側に伝播しないようにする
-    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       {/* タブ (ドラッグ中は隠す) */}
-      <div className={`flex border-b border-gray-200 dark:border-gray-800 ${isDragging ? 'invisible' : ''}`}>
+      <div className={`flex border-b border-neutral-200 dark:border-neutral-800 ${isDragging ? 'invisible' : ''}`}>
         {(['memo', 'stock'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${
-              tab === t ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              tab === t ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
             }`}
           >
             {t === 'memo' ? 'メモ' : 'ストック'}
@@ -52,7 +52,7 @@ export default function SidePanel({
       <div className="flex-1 overflow-hidden p-3 relative">
         {/* ドラッグ中: 4 アクションアイコンを overlay で表示 */}
         {isDragging && (
-          <div className="absolute inset-0 z-10 bg-white dark:bg-gray-900 p-3">
+          <div className="absolute inset-0 z-10 bg-white dark:bg-neutral-900 p-3">
             <DragActionPanel hoveredAction={hoveredAction} />
           </div>
         )}

@@ -44,7 +44,7 @@ export default function MandalartCard({ mandalart, previewCells, onDeleted, onUp
   return (
     <>
       <div
-        className="bg-white border border-gray-200 rounded-2xl p-4 hover:shadow-md transition-shadow cursor-pointer relative"
+        className="bg-white border border-neutral-200 rounded-2xl p-4 hover:shadow-md transition-shadow cursor-pointer relative"
         onClick={handleOpen}
       >
         {/* ミニプレビュー 3×3 */}
@@ -55,11 +55,11 @@ export default function MandalartCard({ mandalart, previewCells, onDeleted, onUp
               <div
                 key={i}
                 className={`rounded-sm flex items-center justify-center text-[6px] overflow-hidden p-0.5 ${
-                  i === 4 ? 'bg-blue-100' : 'bg-gray-100'
+                  i === 4 ? 'bg-blue-100' : 'bg-neutral-100'
                 }`}
               >
                 {cell?.text && (
-                  <span className="truncate text-gray-700 leading-tight">{cell.text}</span>
+                  <span className="truncate text-neutral-700 leading-tight">{cell.text}</span>
                 )}
               </div>
             )
@@ -67,38 +67,38 @@ export default function MandalartCard({ mandalart, previewCells, onDeleted, onUp
         </div>
 
         <p className="font-medium text-sm truncate">{mandalart.title || '（タイトルなし）'}</p>
-        <p className="text-xs text-gray-400 mt-0.5">
+        <p className="text-xs text-neutral-400 mt-0.5">
           {new Date(mandalart.updated_at).toLocaleDateString('ja-JP')}
         </p>
 
         {/* 3点メニュー */}
         <button
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v) }}
-          className="absolute top-3 right-3 p-1 rounded-lg hover:bg-gray-100 text-gray-400"
+          className="absolute top-3 right-3 p-1 rounded-lg hover:bg-neutral-100 text-neutral-400"
         >
           ···
         </button>
 
         {menuOpen && (
           <div
-            className="absolute top-8 right-3 bg-white border border-gray-200 rounded-xl shadow-lg z-10 text-sm min-w-[120px]"
+            className="absolute top-8 right-3 bg-white border border-neutral-200 rounded-xl shadow-lg z-10 text-sm min-w-[120px]"
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => { setRenameOpen(true); setMenuOpen(false) }}
-              className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-t-xl"
+              className="w-full text-left px-4 py-2 hover:bg-neutral-50 rounded-t-xl"
             >
               リネーム
             </button>
             <button
               onClick={() => { handleDuplicate(); setMenuOpen(false) }}
-              className="w-full text-left px-4 py-2 hover:bg-gray-50"
+              className="w-full text-left px-4 py-2 hover:bg-neutral-50"
             >
               複製
             </button>
             <button
               onClick={() => { handleDelete(); setMenuOpen(false) }}
-              className="w-full text-left px-4 py-2 hover:bg-gray-50 text-red-600 rounded-b-xl"
+              className="w-full text-left px-4 py-2 hover:bg-neutral-50 text-red-600 rounded-b-xl"
             >
               削除
             </button>
@@ -112,7 +112,7 @@ export default function MandalartCard({ mandalart, previewCells, onDeleted, onUp
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleRename() }}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setRenameOpen(false)}>キャンセル</Button>

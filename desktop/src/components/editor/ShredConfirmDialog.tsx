@@ -43,7 +43,7 @@ export default function ShredConfirmDialog({
   return (
     <Modal open={open} onClose={onCancel} title={title} size="sm">
       <div className="flex flex-col gap-4">
-        <p className="text-sm text-gray-700 dark:text-gray-300">
+        <p className="text-sm text-neutral-700 dark:text-neutral-300">
           {isPrimaryRoot ? (
             <>
               マンダラート

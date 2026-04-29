@@ -22,7 +22,7 @@ export default function ExportFormatPicker({ open, targetText, onCancel, onPick 
   return (
     <Modal open={open} onClose={onCancel} title="エクスポート形式を選択" size="sm">
       <div className="flex flex-col gap-4">
-        <p className="text-sm text-gray-700 dark:text-gray-300">
+        <p className="text-sm text-neutral-700 dark:text-neutral-300">
           {targetText ? <span className="font-semibold">「{targetText}」</span> : '対象セル'}
           配下のサブグリッドをファイルとして書き出します。
         </p>

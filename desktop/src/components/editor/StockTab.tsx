@@ -119,10 +119,10 @@ export default function StockTab({
 
       {/* アイテム一覧 — ダッシュボードと同形式の正方形タイル */}
       <div className="flex-1 overflow-y-auto">
-        {loading && <div className="text-xs text-gray-400 py-4 text-center">読み込み中...</div>}
+        {loading && <div className="text-xs text-neutral-400 py-4 text-center">読み込み中...</div>}
 
         {!loading && items.length === 0 && (
-          <div className="text-xs text-gray-400 py-4 text-center">
+          <div className="text-xs text-neutral-400 py-4 text-center">
             <p>ストックは空です</p>
           </div>
         )}
@@ -140,7 +140,7 @@ export default function StockTab({
                 key={item.id}
                 onMouseDown={(e) => handleItemMouseDown(e, item.id)}
                 className={`
-                  relative w-full aspect-square bg-white dark:bg-gray-900
+                  relative w-full aspect-square bg-white dark:bg-neutral-900
                   border-2 border-black dark:border-white rounded-xl
                   shadow-sm hover:shadow-md transition-shadow
                   cursor-grab active:cursor-grabbing select-none
@@ -150,7 +150,7 @@ export default function StockTab({
                 title={text}
               >
                 <div
-                  className="w-full h-full flex items-start justify-start p-2 text-left break-all leading-tight text-gray-800 dark:text-gray-100 font-medium"
+                  className="w-full h-full flex items-start justify-start p-2 text-left break-all leading-tight text-neutral-800 dark:text-neutral-100 font-medium"
                   style={{ fontSize: 10 }}
                 >
                   <span className="block w-full line-clamp-5 whitespace-pre-wrap">
@@ -159,7 +159,7 @@ export default function StockTab({
                 </div>
 
                 {/* 作成日: hover 時のみ下部 */}
-                <div className="absolute bottom-0.5 left-1 right-1 text-[8px] text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
+                <div className="absolute bottom-0.5 left-1 right-1 text-[8px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
                   {new Date(item.created_at).toLocaleDateString('ja-JP')}
                 </div>
 
@@ -168,7 +168,7 @@ export default function StockTab({
                   <button
                     onClick={(e) => { e.stopPropagation(); onPaste(item) }}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[8px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center justify-center"
+                    className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center justify-center"
                     title="貼付"
                   >
                     ↓
@@ -176,7 +176,7 @@ export default function StockTab({
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(item.id) }}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[8px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
+                    className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
                     title="削除"
                   >
                     ✕

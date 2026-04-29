@@ -348,8 +348,8 @@ export default function Cell({
           : size === 'small'
             ? ''
             : childCount > 0
-              ? 'rounded-lg border-2 border-black dark:border-gray-300 shadow-sm'
-              : 'rounded-lg border border-gray-300 dark:border-gray-700 shadow-sm'
+              ? 'rounded-lg border-2 border-black dark:border-neutral-300 shadow-sm'
+              : 'rounded-lg border border-neutral-300 dark:border-neutral-700 shadow-sm'
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut || isDragSource ? 'opacity-40' : ''}
@@ -373,7 +373,7 @@ export default function Cell({
           className={`absolute top-2 left-2 z-20 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
             cell.done
               ? 'bg-black dark:bg-white border-black dark:border-white'
-              : 'bg-white dark:bg-gray-900 border-gray-400 dark:border-gray-500 hover:border-gray-700 dark:hover:border-gray-300'
+              : 'bg-white dark:bg-neutral-900 border-neutral-400 dark:border-neutral-500 hover:border-neutral-700 dark:hover:border-neutral-300'
           }`}
           title={cell.done ? 'チェック済 (クリックで解除)' : '未チェック (クリックで完了)'}
           aria-label={cell.done ? 'done' : 'not done'}
@@ -422,20 +422,20 @@ export default function Cell({
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={handleTextareaDoubleClick}
             style={{ fontSize: '22px', lineHeight: 1.5 }}
-            className={`relative z-10 flex-1 min-h-0 text-left bg-transparent resize-none outline-none overflow-auto p-5 ${getColorClasses(editingColor).text} placeholder-gray-300`}
+            className={`relative z-10 flex-1 min-h-0 text-left bg-transparent resize-none outline-none overflow-auto p-5 ${getColorClasses(editingColor).text} placeholder-neutral-300`}
             placeholder=""
           />
           {/* ツールバー (onMouseDown で focus 移譲を阻止し、textarea のフォーカスを維持) */}
           <div
             onMouseDown={(e) => e.preventDefault()}
-            className="relative z-10 shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-gray-900/90 backdrop-blur px-3 py-2 flex items-center gap-3 flex-wrap"
+            className="relative z-10 shrink-0 border-t border-neutral-200 dark:border-neutral-700 bg-white/90 dark:bg-neutral-900/90 backdrop-blur px-3 py-2 flex items-center gap-3 flex-wrap"
           >
             {/* カラーピッカー */}
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => handleSelectColor(null)}
-                className={`w-6 h-6 rounded-full border-2 bg-white ${editingColor === null ? 'border-blue-500 scale-110' : 'border-gray-300 dark:border-gray-600'} transition-transform`}
+                className={`w-6 h-6 rounded-full border-2 bg-white ${editingColor === null ? 'border-blue-500 scale-110' : 'border-neutral-300 dark:border-neutral-600'} transition-transform`}
                 title="デフォルト"
               />
               {PRESET_COLORS.map((c) => (
@@ -443,7 +443,7 @@ export default function Cell({
                   key={c.key}
                   type="button"
                   onClick={() => handleSelectColor(c.key)}
-                  className={`w-6 h-6 rounded-full border-2 ${c.bg} ${editingColor === c.key ? 'border-blue-500 scale-110' : 'border-gray-300 dark:border-gray-600'} transition-transform`}
+                  className={`w-6 h-6 rounded-full border-2 ${c.bg} ${editingColor === c.key ? 'border-blue-500 scale-110' : 'border-neutral-300 dark:border-neutral-600'} transition-transform`}
                   title={c.label}
                 />
               ))}
@@ -461,7 +461,7 @@ export default function Cell({
                   画像を削除
                 </button>
               ) : (
-                <label className="cursor-pointer text-xs text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 select-none">
+                <label className="cursor-pointer text-xs text-neutral-600 dark:text-neutral-300 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-700 select-none">
                   {uploadingImage ? 'アップロード中...' : '画像を追加'}
                   <input
                     type="file"
@@ -486,7 +486,7 @@ export default function Cell({
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={handleTextareaDoubleClick}
           style={{ ...fontStyle, ...textInsetStyle }}
-          className={`absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-gray-300`}
+          className={`absolute z-10 w-auto h-auto text-left leading-tight bg-transparent resize-none outline-none overflow-auto ${textColor} placeholder-neutral-300`}
           placeholder=""
         />
       ) : imageUrl ? (

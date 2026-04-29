@@ -63,10 +63,10 @@ export default function GridView3x3({
               data-grid-id={gridId}
               data-position={i}
               className={`
-                rounded-lg shadow-sm bg-white dark:bg-gray-900
+                rounded-lg shadow-sm bg-white dark:bg-neutral-900
                 ${isCenter
                   ? 'border-[6px] border-black dark:border-white shadow-md'
-                  : 'border border-gray-300 dark:border-gray-700'}
+                  : 'border border-neutral-300 dark:border-neutral-700'}
                 ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
                 ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
               `}

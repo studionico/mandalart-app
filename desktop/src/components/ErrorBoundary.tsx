@@ -22,12 +22,12 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="flex items-center justify-center min-h-screen bg-white dark:bg-gray-950 p-8">
+        <div className="flex items-center justify-center min-h-screen bg-white dark:bg-neutral-950 p-8">
           <div className="max-w-md text-center">
-            <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">
+            <h1 className="text-lg font-semibold text-neutral-800 dark:text-neutral-100 mb-2">
               予期しないエラーが発生しました
             </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 break-all">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4 break-all">
               {this.state.error.message}
             </p>
             <button

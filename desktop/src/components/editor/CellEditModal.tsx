@@ -105,23 +105,23 @@ export default function CellEditModal({
   const content = cell ? (
     <div className="flex flex-col gap-4">
       <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1.5">テキスト</label>
+        <label className="block text-xs font-medium text-neutral-500 mb-1.5">テキスト</label>
         <textarea
           ref={textRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={3}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="テキストを入力..."
         />
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1.5">画像</label>
+        <label className="block text-xs font-medium text-neutral-500 mb-1.5">画像</label>
         {imageUrl ? (
           <div className="relative inline-block">
-            <img src={imageUrl} alt="" className="h-24 w-24 object-cover rounded-lg border border-gray-200" />
+            <img src={imageUrl} alt="" className="h-24 w-24 object-cover rounded-lg border border-neutral-200" />
             <button
               onClick={handleImageRemove}
               className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
@@ -131,7 +131,7 @@ export default function CellEditModal({
           </div>
         ) : (
           <label className="flex items-center gap-2 cursor-pointer">
-            <div className="border border-dashed border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-500 hover:bg-gray-50 transition-colors">
+            <div className="border border-dashed border-neutral-300 rounded-lg px-4 py-2.5 text-sm text-neutral-500 hover:bg-neutral-50 transition-colors">
               {uploading ? 'アップロード中...' : '画像をアップロード'}
             </div>
             <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" disabled={uploading} />
@@ -140,18 +140,18 @@ export default function CellEditModal({
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1.5">背景色</label>
+        <label className="block text-xs font-medium text-neutral-500 mb-1.5">背景色</label>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setColor(null)}
-            className={`w-7 h-7 rounded-full border-2 bg-white ${color === null ? 'border-blue-500 scale-110' : 'border-gray-200'} transition-transform`}
+            className={`w-7 h-7 rounded-full border-2 bg-white ${color === null ? 'border-blue-500 scale-110' : 'border-neutral-200'} transition-transform`}
             title="デフォルト"
           />
           {PRESET_COLORS.map((c) => (
             <button
               key={c.key}
               onClick={() => setColor(c.key)}
-              className={`w-7 h-7 rounded-full border-2 ${c.bg} ${color === c.key ? 'border-blue-500 scale-110' : 'border-gray-200'} transition-transform`}
+              className={`w-7 h-7 rounded-full border-2 ${c.bg} ${color === c.key ? 'border-blue-500 scale-110' : 'border-neutral-200'} transition-transform`}
               title={c.label}
             />
           ))}

@@ -169,8 +169,8 @@ export default function DashboardPage() {
   }, [mandalarts, sortKey])
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
+      <header className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-6 py-4 flex items-center justify-between gap-4">
         <h1 className="text-lg font-bold shrink-0">マンダラート</h1>
 
         <div className="flex-1 flex items-center gap-2 max-w-xl">
@@ -179,12 +179,12 @@ export default function DashboardPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="タイトル・セル本文で検索..."
-            className="flex-1 text-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 text-sm border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg px-2 py-1.5 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
           >
             <option value="updated">更新日順</option>
             <option value="title">タイトル順</option>
@@ -203,7 +203,7 @@ export default function DashboardPage() {
               />
               <button
                 onClick={async () => { await signOut() }}
-                className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
                 title={user.email ?? ''}
               >
                 サインアウト
@@ -212,14 +212,14 @@ export default function DashboardPage() {
           ) : (
             <button
               onClick={() => setAuthOpen(true)}
-              className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors"
+              className="text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 px-3 py-2 rounded-lg transition-colors"
             >
               サインイン
             </button>
           )}
           <button
             onClick={() => setTrashOpen(true)}
-            className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors"
+            className="text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 px-3 py-2 rounded-lg transition-colors"
             title="削除済みの復元 / 完全削除"
           >
             ゴミ箱
@@ -227,7 +227,7 @@ export default function DashboardPage() {
           <button
             onClick={handleCleanupOrphans}
             disabled={cleanupState === 'busy'}
-            className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 px-3 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="過去バグ由来の孤立グリッド (root から辿れないバグチェーン) を整理"
           >
             {(() => {
@@ -243,7 +243,7 @@ export default function DashboardPage() {
           </button>
           <button
             onClick={() => setImportOpen(true)}
-            className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-2 rounded-lg transition-colors"
+            className="text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 px-3 py-2 rounded-lg transition-colors"
           >
             インポート
           </button>
@@ -275,14 +275,14 @@ export default function DashboardPage() {
 
       <main className="max-w-5xl mx-auto px-6 py-8">
         {!initialLoaded ? (
-          <p className="text-gray-400 dark:text-gray-500">読み込み中...</p>
+          <p className="text-neutral-400 dark:text-neutral-500">読み込み中...</p>
         ) : !query.trim() && mandalarts.length === 0 ? (
-          <div className="text-center py-20 text-gray-400 dark:text-gray-500">
+          <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
             <p className="text-lg mb-2">まだマンダラートがありません</p>
             <p className="text-sm">「+ 新規作成」から始めましょう</p>
           </div>
         ) : visible.length === 0 ? (
-          <div className="text-center py-20 text-gray-400 dark:text-gray-500">
+          <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
             <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
           </div>
         ) : (
@@ -335,7 +335,7 @@ function MandalartCard({
 
   return (
     <div
-      className="relative bg-white dark:bg-gray-900 border-2 border-black dark:border-white rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
+      className="relative bg-white dark:bg-neutral-900 border-2 border-black dark:border-white rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer group overflow-hidden"
       style={{ width: DASHBOARD_CARD_SIZE_PX, height: DASHBOARD_CARD_SIZE_PX }}
       onClick={onOpen}
       title={m.title || '無題'}
@@ -344,7 +344,7 @@ function MandalartCard({
         <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
         <div
-          className="w-full h-full flex items-start justify-start p-3 text-left break-all leading-tight text-gray-800 dark:text-gray-100 font-medium"
+          className="w-full h-full flex items-start justify-start p-3 text-left break-all leading-tight text-neutral-800 dark:text-neutral-100 font-medium"
           style={{ fontSize: DASHBOARD_CARD_FONT_PX }}
         >
           <span className="block w-full line-clamp-6 whitespace-pre-wrap">
@@ -353,21 +353,21 @@ function MandalartCard({
         </div>
       )}
       {/* 更新日: hover 時のみ下部にうっすら表示 */}
-      <div className="absolute bottom-1 left-2 right-2 text-[9px] text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
+      <div className="absolute bottom-1 left-2 right-2 text-[9px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
         {new Date(m.updated_at).toLocaleDateString('ja-JP')}
       </div>
       {/* アクション: hover 時に右上 */}
       <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e) => { e.stopPropagation(); onDuplicate() }}
-          className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center justify-center"
+          className="w-5 h-5 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 flex items-center justify-center"
           title="複製"
         >
           ⧉
         </button>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete() }}
-          className="w-5 h-5 rounded bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 text-[10px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
+          className="w-5 h-5 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[10px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
           title="削除"
         >
           ×
@@ -394,14 +394,14 @@ function SyncIndicator({
   const colorClass =
     status === 'syncing' ? 'text-blue-500' :
     status === 'error' ? 'text-red-500' :
-    'text-gray-500 dark:text-gray-400'
+    'text-neutral-500 dark:text-neutral-400'
 
   return (
     <button
       onClick={onSync}
       disabled={status === 'syncing'}
       title={error ?? '今すぐ同期'}
-      className={`text-xs ${colorClass} border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50`}
+      className={`text-xs ${colorClass} border border-neutral-200 dark:border-neutral-700 rounded-lg px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-50`}
     >
       ⟳ {label}
     </button>

@@ -128,7 +128,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
               type="file"
               accept=".json,.md,.txt,text/plain,application/json,text/markdown"
               onChange={handleFile}
-              className="block w-full text-xs text-gray-700 dark:text-gray-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 dark:file:bg-gray-800 file:text-gray-700 dark:file:text-gray-200 hover:file:bg-gray-200 dark:hover:file:bg-gray-700 file:cursor-pointer"
+              className="block w-full text-xs text-neutral-700 dark:text-neutral-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-neutral-100 dark:file:bg-neutral-800 file:text-neutral-700 dark:file:text-neutral-200 hover:file:bg-neutral-200 dark:hover:file:bg-neutral-700 file:cursor-pointer"
             />
           </label>
           <Button variant="secondary" size="sm" onClick={handlePasteClipboard}>
@@ -138,7 +138,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
 
         {/* テキスト入力エリア */}
         <div>
-          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
+          <label className="text-xs text-neutral-500 dark:text-neutral-400 mb-1 block">
             または直接貼り付け（JSON / Markdown 見出し / インデントテキスト）
           </label>
           <textarea
@@ -146,7 +146,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
             onChange={(e) => setRawText(e.target.value)}
             rows={8}
             placeholder={EXAMPLE_PLACEHOLDER}
-            className="w-full text-sm font-mono border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            className="w-full text-sm font-mono border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
           />
           <div className="flex justify-end mt-2">
             <Button size="sm" variant="secondary" onClick={handlePreview} disabled={!rawText.trim()}>
@@ -157,11 +157,11 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
 
         {/* プレビュー */}
         {parsed && (
-          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+          <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
             {parsed.ok ? (
               <>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">プレビュー（インポートされる構造）</p>
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 max-h-64 overflow-y-auto">
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">プレビュー（インポートされる構造）</p>
+                <div className="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 max-h-64 overflow-y-auto">
                   <SnapshotPreview snapshot={parsed.snapshot} />
                 </div>
               </>
@@ -172,7 +172,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
         )}
 
         {/* 実行ボタン */}
-        <div className="flex justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
+        <div className="flex justify-end gap-2 border-t border-neutral-100 dark:border-neutral-800 pt-4">
           <Button variant="ghost" onClick={handleClose}>キャンセル</Button>
           <Button
             onClick={handleExecute}
@@ -214,11 +214,11 @@ function SnapshotPreview({ snapshot, depth = 0 }: { snapshot: GridSnapshot; dept
 
   return (
     <div className="text-xs" style={{ paddingLeft: depth * 12 }}>
-      <div className="font-medium text-gray-700 dark:text-gray-200">
+      <div className="font-medium text-neutral-700 dark:text-neutral-200">
         {marker} {center?.text || '(空)'}
       </div>
       {peripherals.length > 0 && (
-        <ul className="ml-4 mt-0.5 text-gray-500 dark:text-gray-400 space-y-0.5">
+        <ul className="ml-4 mt-0.5 text-neutral-500 dark:text-neutral-400 space-y-0.5">
           {peripherals.map((c) => {
             const subs = subgridsByPos.get(c.position) ?? []
             return (

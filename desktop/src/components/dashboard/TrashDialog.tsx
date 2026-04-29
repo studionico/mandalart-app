@@ -112,9 +112,9 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
   return (
     <Modal open={open} onClose={onClose} title="ゴミ箱" size="lg">
       {loading ? (
-        <p className="text-sm text-gray-400 text-center py-6">読み込み中...</p>
+        <p className="text-sm text-neutral-400 text-center py-6">読み込み中...</p>
       ) : items.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-6">ゴミ箱は空です</p>
+        <p className="text-sm text-neutral-400 text-center py-6">ゴミ箱は空です</p>
       ) : (
         <>
           {/* すべて削除ボタン (件数付き、2 クリック確認) */}
@@ -135,13 +135,13 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
             {items.map((m) => (
               <div
                 key={m.id}
-                className="flex items-center gap-3 border border-gray-200 rounded-xl p-3"
+                className="flex items-center gap-3 border border-neutral-200 rounded-xl p-3"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">
+                  <p className="text-sm font-medium text-neutral-800 truncate">
                     {m.title || '無題'}
                   </p>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-xs text-neutral-400 mt-0.5">
                     削除日時: {m.deleted_at ? new Date(m.deleted_at).toLocaleString('ja-JP') : '?'}
                   </p>
                 </div>
@@ -168,7 +168,7 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
         </>
       )}
 
-      <div className="flex justify-end mt-4 border-t border-gray-100 pt-4">
+      <div className="flex justify-end mt-4 border-t border-neutral-100 pt-4">
         <Button variant="ghost" onClick={onClose}>閉じる</Button>
       </div>
     </Modal>

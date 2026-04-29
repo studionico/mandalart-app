@@ -77,18 +77,18 @@ export default function AuthDialog({ open, onClose }: Props) {
     <Modal open={open} onClose={handleClose} title={mode === 'signin' ? 'サインイン' : '新規登録'}>
       <form onSubmit={handleEmailSubmit} className="flex flex-col gap-3">
         <div>
-          <label className="text-xs text-gray-500">メールアドレス</label>
+          <label className="text-xs text-neutral-500">メールアドレス</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             disabled={submitting}
-            className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div>
-          <label className="text-xs text-gray-500">パスワード</label>
+          <label className="text-xs text-neutral-500">パスワード</label>
           <input
             type="password"
             value={password}
@@ -96,7 +96,7 @@ export default function AuthDialog({ open, onClose }: Props) {
             required
             minLength={6}
             disabled={submitting}
-            className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
 
@@ -116,8 +116,8 @@ export default function AuthDialog({ open, onClose }: Props) {
         </button>
       </form>
 
-      <div className="mt-5 pt-4 border-t border-gray-100 flex flex-col gap-2">
-        <p className="text-xs text-gray-500 text-center">外部アカウントでサインイン</p>
+      <div className="mt-5 pt-4 border-t border-neutral-100 flex flex-col gap-2">
+        <p className="text-xs text-neutral-500 text-center">外部アカウントでサインイン</p>
         <Button variant="secondary" onClick={() => handleOAuth('google')} disabled={submitting}>
           Google でサインイン
         </Button>

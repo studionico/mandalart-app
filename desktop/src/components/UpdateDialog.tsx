@@ -25,7 +25,7 @@ export default function UpdateDialog({ status, onInstall, onDismiss }: Props) {
           <div className="text-sm">
             <p className="font-medium">新しいバージョン {status.update.version} が利用できます</p>
             {status.update.body && (
-              <pre className="mt-3 text-xs text-gray-600 bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
+              <pre className="mt-3 text-xs text-neutral-600 bg-neutral-50 rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
                 {status.update.body}
               </pre>
             )}
@@ -40,7 +40,7 @@ export default function UpdateDialog({ status, onInstall, onDismiss }: Props) {
       {status.kind === 'downloading' && (
         <div className="flex flex-col gap-3">
           <p className="text-sm">ダウンロード中... {status.progress}%</p>
-          <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-neutral-100 rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-500 transition-all"
               style={{ width: `${status.progress}%` }}

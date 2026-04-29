@@ -20,7 +20,7 @@ export default function MandalartGrid({ initialMandalarts }: Props) {
 
   if (list.length === 0) {
     return (
-      <div className="text-center py-20 text-gray-400">
+      <div className="text-center py-20 text-neutral-400">
         <p className="text-lg">まだマンダラートがありません</p>
         <p className="text-sm mt-1">「+ 新規作成」から始めましょう</p>
       </div>

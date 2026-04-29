@@ -1794,7 +1794,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 overflow-hidden">
+    <div className="flex flex-col h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
       {/* オフラインインジケーター */}
       {isOffline && (
         <div className="bg-yellow-500 text-white text-xs text-center py-1">
@@ -1803,16 +1803,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       )}
 
       {/* ヘッダー */}
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center gap-2 shrink-0">
+      <header className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-4 py-2 flex items-center gap-2 shrink-0">
         <Breadcrumb onHome={handleNavigateHome} onNavigate={handleBreadcrumbNavigate} />
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <ThemeToggle />
 
           {/* 文字サイズ (-10 〜 +10、各段 ×1.1) */}
-          <div className="flex items-stretch rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs">
+          <div className="flex items-stretch rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
             <button
               onClick={() => bumpFontLevel(-1)}
-              className="px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-30"
+              className="px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 disabled:opacity-30"
               disabled={fontLevel <= -10}
               title="文字を小さく"
             >
@@ -1820,14 +1820,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             </button>
             <button
               onClick={() => resetFontLevel()}
-              className="px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 border-x border-gray-200 dark:border-gray-700 min-w-[3.5rem] text-center tabular-nums"
+              className="px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border-x border-neutral-200 dark:border-neutral-700 min-w-[3.5rem] text-center tabular-nums"
               title={`100% にリセット (現在 level ${fontLevel >= 0 ? '+' : ''}${fontLevel})`}
             >
               {(fontScale * 100).toFixed(0)}%
             </button>
             <button
               onClick={() => bumpFontLevel(1)}
-              className="px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-30"
+              className="px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 disabled:opacity-30"
               disabled={fontLevel >= 20}
               title="文字を大きく"
             >
@@ -1842,7 +1842,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
               showCheckbox
                 ? 'bg-blue-600 border-blue-600 text-white'
-                : 'bg-white dark:bg-gray-900 border-gray-400 dark:border-gray-500 hover:border-gray-700 dark:hover:border-gray-300 text-transparent'
+                : 'bg-white dark:bg-neutral-900 border-neutral-400 dark:border-neutral-500 hover:border-neutral-700 dark:hover:border-neutral-300 text-transparent'
             }`}
             title={showCheckbox ? 'チェックボックス表示中 (クリックで非表示)' : 'チェックボックス非表示 (クリックで表示)'}
             aria-label="toggle checkbox display"
@@ -1854,13 +1854,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           </button>
 
           {/* 表示モード切替 */}
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+          <div className="flex rounded-lg border border-neutral-200 overflow-hidden text-xs">
             {(['3x3', '9x9'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => handleViewModeSwitch(mode)}
                 disabled={viewSwitch != null}
-                className={`px-3 py-1.5 transition-colors disabled:opacity-60 ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                className={`px-3 py-1.5 transition-colors disabled:opacity-60 ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300'}`}
               >
                 {mode}
               </button>
@@ -1873,7 +1873,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               エクスポート ▾
             </Button>
             {exportMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 min-w-[140px]">
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-20 min-w-[140px]">
                 {(
                   [
                     { fmt: 'png', label: 'PNG' },
@@ -1886,7 +1886,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   <button
                     key={fmt}
                     onClick={() => handleExport(fmt)}
-                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 first:rounded-t-xl last:rounded-b-xl"
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 first:rounded-t-xl last:rounded-b-xl"
                   >
                     {label}
                   </button>
@@ -1908,7 +1908,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               {parallelIndex > 0 && (
                 <button
                   onClick={() => handleParallelNav('prev')}
-                  className="w-12 h-12 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 shadow-sm flex items-center justify-center"
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
                   title="前の並列グリッドへ"
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1936,8 +1936,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   const rootCenter = viewSwitch.rootCells.find((c) => c.position === CENTER_POSITION)
                   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
                   const innerWrapperBase =
-                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-700 rounded-xl overflow-hidden min-h-0 min-w-0'
-                  const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-neutral-300 dark:bg-neutral-700 rounded-xl overflow-hidden min-h-0 min-w-0'
+                  const innerEmptyCellClass = 'bg-white dark:bg-neutral-900'
 
                   // 共通: 周辺 9×9 ブロックをレンダリングする関数 (fade-in / fade-out 用)
                   function renderPeripheralBlock(outerPos: number, style: React.CSSProperties) {
@@ -1950,8 +1950,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       ? (viewSwitch!.childCountsByCellId.get(rootCell.id) ?? 0) > 0
                       : false
                     const blockBorder = hasMeaningfulSub
-                      ? 'border-2 border-black dark:border-gray-300'
-                      : 'border-2 border-gray-300 dark:border-gray-700'
+                      ? 'border-2 border-black dark:border-neutral-300'
+                      : 'border-2 border-neutral-300 dark:border-neutral-700'
 
                     // 子サブグリッドあり: 9 セルすべて描画
                     if (sub) {
@@ -2039,7 +2039,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     //
                     // これにより「transition layer 終了 (VIEW_SWITCH_TO_9_TOTAL_MS 時点) での
                     // swap で text 位置がわずかに内側に動く」pop が消える。target 側は実 9×9
-                    // render と同じ構造 (bg-gray-300 wrapper + 6px 外枠 + size='small' セル) を
+                    // render と同じ構造 (bg-neutral-300 wrapper + 6px 外枠 + size='small' セル) を
                     // 使っているのでピクセル一致する。
                     const order = ORBIT_ORDER_PERIPHERAL
                     const crossfadeDuration = FADE / 2
@@ -2195,10 +2195,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                   willChange: 'transform',
                                 }}
                                 className={`
-                                  rounded-lg shadow-sm bg-white dark:bg-gray-900
+                                  rounded-lg shadow-sm bg-white dark:bg-neutral-900
                                   ${isCenter
                                     ? 'border-[6px] border-black dark:border-white shadow-md'
-                                    : 'border border-gray-300 dark:border-gray-700'}
+                                    : 'border border-neutral-300 dark:border-neutral-700'}
                                 `}
                               />
                             )
@@ -2353,10 +2353,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               willChange: 'opacity',
                             }}
                             className={`
-                              rounded-lg shadow-sm bg-white dark:bg-gray-900
+                              rounded-lg shadow-sm bg-white dark:bg-neutral-900
                               ${isCenter
                                 ? 'border-[6px] border-black dark:border-white shadow-md'
-                                : 'border border-gray-300 dark:border-gray-700'}
+                                : 'border border-neutral-300 dark:border-neutral-700'}
                             `}
                           />
                         )
@@ -2448,8 +2448,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                   const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
                   // 各ブロック内の小サブグリッドラッパー共通クラス
                   const innerWrapperBase =
-                    'grid grid-cols-3 grid-rows-3 gap-px bg-gray-300 dark:bg-gray-700 rounded-xl overflow-hidden min-h-0 min-w-0'
-                  const innerEmptyCellClass = 'bg-white dark:bg-gray-900'
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-neutral-300 dark:bg-neutral-700 rounded-xl overflow-hidden min-h-0 min-w-0'
+                  const innerEmptyCellClass = 'bg-white dark:bg-neutral-900'
                   return (
                     <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
                       {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
@@ -2497,8 +2497,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                         const blockBorder = isCenterBlock
                           ? 'border-[6px] border-black dark:border-white'
                           : hasMeaningfulSub
-                            ? 'border-2 border-black dark:border-gray-300'
-                            : 'border-2 border-gray-300 dark:border-gray-700'
+                            ? 'border-2 border-black dark:border-neutral-300'
+                            : 'border-2 border-neutral-300 dark:border-neutral-700'
 
                         // 中央ブロックの内側セル
                         if (isCenterBlock) {
@@ -2673,7 +2673,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               {parallelIndex < parallelGrids.length - 1 ? (
                 <button
                   onClick={() => handleParallelNav('next')}
-                  className="w-12 h-12 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 shadow-sm flex items-center justify-center"
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
                   title="次の並列グリッドへ"
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2693,7 +2693,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 return (
                   <button
                     onClick={handleAddParallel}
-                    className="w-12 h-12 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-gray-50 dark:hover:bg-gray-800 shadow-sm flex items-center justify-center"
+                    className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
                     title="新しい並列グリッドを追加"
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2729,27 +2729,27 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       {/* コンテキストメニュー */}
       {contextMenu && (
         <div
-          className="fixed bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
+          className="fixed bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseLeave={() => setContextMenu(null)}
         >
-          <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-t-xl flex justify-between">
-            カット <span className="text-gray-400 dark:text-gray-500">⌘X</span>
+          <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between">
+            カット <span className="text-neutral-400 dark:text-neutral-500">⌘X</span>
           </button>
-          <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between">
-            コピー <span className="text-gray-400 dark:text-gray-500">⌘C</span>
+          <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between">
+            コピー <span className="text-neutral-400 dark:text-neutral-500">⌘C</span>
           </button>
           <button
             onClick={() => handleContextAction('paste')}
             disabled={!clipboard.sourceCellId}
-            className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
+            className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            ペースト <span className="text-gray-400 dark:text-gray-500">⌘V</span>
+            ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
           </button>
-          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800">
+          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800">
             ストックに追加
           </button>
-          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-b-xl">
+          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-b-xl">
             ここにインポート
           </button>
         </div>
