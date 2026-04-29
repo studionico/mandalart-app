@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import MemoTab from './MemoTab'
 import StockTab from './StockTab'
 import DragActionPanel, { type ActionDropType } from './DragActionPanel'
+import { useConvergeStore } from '@/store/convergeStore'
 import type { StockItem } from '@/types'
 
 type Tab = 'memo' | 'stock'
@@ -29,6 +30,16 @@ export default function SidePanel({
   onStockItemDragStart, dragSourceId,
 }: Props) {
   const [tab, setTab] = useState<Tab>('memo')
+
+  // copy/move ドロップで `direction='stock'` がセットされたら自動的にストックタブへ切替える。
+  // 着地点 (`[data-converge-stock="<id>"]`) は StockTab がマウントされていないと DOM に存在しないため、
+  // メモタブのままだと ConvergeOverlay の polling がタイムアウトしてアニメが再生されない。
+  // direction='stock' の間にタブを切替えれば、StockTab が render → 新エントリ DOM が出現 → polling 成功。
+  // 完了後 (direction が null に戻る) もタブはストックのまま (= ユーザーが格納先を確認できる)。
+  const convergeDirection = useConvergeStore((s) => s.direction)
+  useEffect(() => {
+    if (convergeDirection === 'stock') setTab('stock')
+  }, [convergeDirection])
 
   return (
     // w-full で親 (w-72) に張り付かせ、min-w-0 + overflow-hidden で内部コンテンツの

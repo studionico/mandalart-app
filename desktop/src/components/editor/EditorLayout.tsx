@@ -619,12 +619,60 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }, [gridData, pendingEdit])
   void pendingCellId  // 参照保持 (synthetic cell.id 計算で使う想定、現状は cellsForRender で完結)
 
-  // Copy アクション: snapshot をストックに追加 (元セルは変化なし)
+  // Copy アクション: snapshot をストックに追加 (元セルは変化なし)。返り値の StockItem は
+  // direction='stock' の収束アニメで polling target を解決するために使う。
   const handleCopyAction = useCallback(async (cellId: string) => {
-    await addToStock(cellId)
+    const stockItem = await addToStock(cellId)
     setStockReloadKey((k) => k + 1)
     setToast({ message: 'ストックにコピーしました', type: 'success' })
+    return stockItem
   }, [])
+
+  /**
+   * direction='stock' の収束アニメ source 値をエディタ内セル DOM から計測する。
+   * `handleNavigateHome` (中心セル → ダッシュボードカード) と同じ方法で text wrapper / span を
+   * 探索し、`getComputedStyle` で実描画の inset / font / border / radius を読み取る。
+   * 戻り値を `setConverge('stock', stockItem.id, rect, centerCell)` にそのまま渡せる形にした。
+   * cellEl が無い (drag 元セルが既に unmount されている等の corner case) ときは null。
+   */
+  const captureCellSource = useCallback((cellId: string) => {
+    const cellEl = document.querySelector(`[data-cell-id="${cellId}"]`) as HTMLElement | null
+    const cellData = gridData?.cells.find((c) => c.id === cellId)
+    if (!cellEl || !cellData) return null
+    const r = cellEl.getBoundingClientRect()
+    const cs = getComputedStyle(cellEl)
+    const borderTop = parseFloat(cs.borderTopWidth) || 0
+    const borderLeft = parseFloat(cs.borderLeftWidth) || 0
+    let topInsetPx = 12
+    let sideInsetPx = 12
+    let fontPx = 28 * fontScale
+    const textWrapper = Array.from(cellEl.children).find(
+      (el) => el instanceof HTMLElement
+        && el.classList.contains('absolute')
+        && el.classList.contains('z-10')
+        && !el.classList.contains('inset-0'),
+    ) as HTMLElement | undefined
+    if (textWrapper) {
+      const wRect = textWrapper.getBoundingClientRect()
+      topInsetPx = wRect.top - r.top - borderTop
+      sideInsetPx = wRect.left - r.left - borderLeft
+      const span = textWrapper.querySelector('span')
+      if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
+    }
+    return {
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      centerCell: {
+        text: cellData.text,
+        imagePath: cellData.image_path,
+        color: cellData.color,
+        fontPx,
+        topInsetPx,
+        sideInsetPx,
+        borderPx: borderTop,
+        radiusPx: parseFloat(cs.borderTopLeftRadius) || 0,
+      },
+    }
+  }, [gridData, fontScale])
 
   // 画像ファイルかどうかの簡易判定
   function isImagePath(p: string): boolean {
@@ -778,37 +826,45 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             // 並列 (root or drilled): snapshot 保存後に並列 grid 自体を完全削除
             // (shredCellSubtree では並列 grid 本体は消えないので明示的に permanentDeleteGrid)
             const deletedGridId = gridData.id
-            await addToStock(cellId)
+            // セル → ストックエントリ収束アニメの source 値 (cellEl が unmount される前に計測)
+            const source = captureCellSource(cellId)
+            const stockItem = await addToStock(cellId)
             setStockReloadKey((k) => k + 1)
-            await runConvergeAnim('stock')
+            if (source) {
+              useConvergeStore.getState().setConverge(
+                'stock', stockItem.id, source.rect, source.centerCell,
+              )
+            }
             await permanentDeleteGrid(deletedGridId)
-            setConverging(null)
             setToast({ message: 'ストックへ移動し、並列グリッドを削除しました', type: 'success' })
             navigateAfterParallelDeleted(deletedGridId)
           } else {
             // X=C primary drilled center または周辺セル: 通常の moveCellToStock
-            // ストックへの吸い込み演出 → 実行 → 復帰
-            await runConvergeAnim('stock')
-            await moveCellToStock(cellId)
+            const source = captureCellSource(cellId)
+            const stockItem = await moveCellToStock(cellId)
             setStockReloadKey((k) => k + 1)
-            setConverging(null)
+            if (source) {
+              useConvergeStore.getState().setConverge(
+                'stock', stockItem.id, source.rect, source.centerCell,
+              )
+            }
             setToast({ message: 'ストックに移動しました', type: 'success' })
             if (isCenter) navigateUpAfterAction()
             else reloadAll()
           }
         } catch (e) {
-          setConverging(null)
           setToast({ message: `移動失敗: ${(e as Error).message}`, type: 'error' })
         }
         return
       }
       case 'copy': {
-        // ストックへの吸い込み演出 → 実 add → 復帰
-        await runConvergeAnim('stock')
-        try {
-          await handleCopyAction(cellId)
-        } finally {
-          setConverging(null)
+        // セル → ストックエントリ収束アニメ。元セルは変化しないが、convergence は target = 新規 entry
+        const source = captureCellSource(cellId)
+        const stockItem = await handleCopyAction(cellId)
+        if (source) {
+          useConvergeStore.getState().setConverge(
+            'stock', stockItem.id, source.rect, source.centerCell,
+          )
         }
         return
       }
@@ -817,7 +873,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         return
       }
     }
-  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate, runConvergeAnim])
+  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate, runConvergeAnim, captureCellSource])
 
   const handleShredConfirm = useCallback(async () => {
     if (!shredConfirm) return

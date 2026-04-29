@@ -331,9 +331,9 @@ function MandalartCard({
   // open 方向の中心セル instant-snap と同じ trick (`orbit-fade-in 1ms ease-out CONVERGE_DURATION_MS both`)
   // で morph 期間中は opacity 0、終端で 1ms snap → 1。
   const convergeDirection = useConvergeStore((s) => s.direction)
-  const convergeMandalartId = useConvergeStore((s) => s.mandalartId)
+  const convergeTargetId = useConvergeStore((s) => s.targetId)
   const isConvergeTarget =
-    convergeDirection === 'home' && convergeMandalartId === m.id
+    convergeDirection === 'home' && convergeTargetId === m.id
 
   useEffect(() => {
     let cancelled = false

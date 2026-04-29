@@ -23,7 +23,7 @@ import { getCellImageUrl } from '@/lib/api/storage'
  */
 export default function ConvergeOverlay() {
   const direction = useConvergeStore((s) => s.direction)
-  const mandalartId = useConvergeStore((s) => s.mandalartId)
+  const targetId = useConvergeStore((s) => s.targetId)
   const sourceRect = useConvergeStore((s) => s.sourceRect)
   const centerCell = useConvergeStore((s) => s.centerCell)
   const clear = useConvergeStore((s) => s.clear)
@@ -48,7 +48,7 @@ export default function ConvergeOverlay() {
 
   // overlay → target 位置への morph アニメ駆動 (寸法/プロパティ並列 transition)
   useEffect(() => {
-    if (!direction || !mandalartId || !sourceRect || !centerCell) {
+    if (!direction || !targetId || !sourceRect || !centerCell) {
       animatingRef.current = false
       return
     }
@@ -60,11 +60,15 @@ export default function ConvergeOverlay() {
     let attempts = 0
 
     // direction によって polling target が変わる:
-    //  - 'home' = エディタ → ダッシュボード収束 → 着地点はカード
-    //  - 'open' = ダッシュボード → エディタ拡大 → 着地点はエディタ中心セル
-    const targetSelector = direction === 'home'
-      ? `[data-converge-card="${mandalartId}"]`
-      : `[data-mandalart-id="${mandalartId}"] [data-position="4"]`
+    //  - 'home'  = エディタ → ダッシュボード収束 → 着地点はカード
+    //  - 'open'  = ダッシュボード → エディタ拡大 → 着地点はエディタ中心セル
+    //  - 'stock' = エディタセル → ストックエントリ収束 → 着地点は新規ストックエントリ
+    const targetSelector =
+      direction === 'home'
+        ? `[data-converge-card="${targetId}"]`
+        : direction === 'open'
+          ? `[data-mandalart-id="${targetId}"] [data-position="4"]`
+          : `[data-converge-stock="${targetId}"]`
 
     function tryAnimate() {
       const overlay = overlayRef.current
@@ -165,7 +169,7 @@ export default function ConvergeOverlay() {
       if (pollTimer) clearTimeout(pollTimer)
       if (safetyTimer) clearTimeout(safetyTimer)
     }
-  }, [direction, mandalartId, sourceRect, centerCell, clear])
+  }, [direction, targetId, sourceRect, centerCell, clear])
 
   if (!sourceRect || !centerCell) return null
 

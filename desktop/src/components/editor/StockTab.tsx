@@ -1,8 +1,9 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
-import { CONFIRM_AUTO_RESET_MS } from '@/constants/timing'
+import { CONFIRM_AUTO_RESET_MS, CONVERGE_DURATION_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
+import { useConvergeStore } from '@/store/convergeStore'
 import type { StockItem } from '@/types'
 
 type Props = {
@@ -19,6 +20,10 @@ export default function StockTab({
 }: Props) {
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
+  // direction='stock' の収束アニメ着地点を判定するための購読。targetId === item.id のエントリは
+  // morph 期間中 opacity 0 で隠し、終端の 1ms snap で可視化する (open / home と同じ pattern)。
+  const convergeDirection = useConvergeStore((s) => s.direction)
+  const convergeTargetId = useConvergeStore((s) => s.targetId)
   // Tauri v2 の WebView は window.confirm が動作しないため、一括削除は 2 クリック方式。
   // 1 回目でボタン表記を切替え、2 回目で実行。CONFIRM_AUTO_RESET_MS 放置で自動解除。
   const [confirmingAll, setConfirmingAll] = useState(false)
@@ -135,9 +140,14 @@ export default function StockTab({
           {items.map((item) => {
             const isSourceDragging = dragSourceId === `stock:${item.id}`
             const text = item.snapshot.cell.text || '（テキストなし）'
+            const isConvergeTarget =
+              convergeDirection === 'stock' && convergeTargetId === item.id
             return (
               <div
                 key={item.id}
+                // ConvergeOverlay の polling target (direction='stock')。エディタ内セル → ストック収束で
+                // 「格納先がどこに入ったか」を視覚化する着地点。
+                data-converge-stock={item.id}
                 onMouseDown={(e) => handleItemMouseDown(e, item.id)}
                 className={`
                   relative w-full aspect-square bg-white dark:bg-neutral-900
@@ -147,13 +157,28 @@ export default function StockTab({
                   group overflow-hidden
                   ${isSourceDragging ? 'opacity-40' : ''}
                 `}
+                style={
+                  isConvergeTarget
+                    ? {
+                        // morph 中 (CONVERGE_DURATION_MS) は opacity 0 で隠し、終端で 1ms snap →
+                        // overlay の clear と同フレームで可視化 (home / open ターゲットと同じ pattern)
+                        animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
+                        willChange: 'opacity',
+                      }
+                    : undefined
+                }
                 title={text}
               >
+                {/* ConvergeOverlay が target inset/font を読み取れるよう、ダッシュボードカード /
+                    Cell.tsx と同じ構造 (`absolute z-10 ... not inset-0`) で描画する */}
                 <div
-                  className="w-full h-full flex items-start justify-start p-2 text-left break-all leading-tight text-neutral-800 dark:text-neutral-100 font-medium"
-                  style={{ fontSize: 10 }}
+                  style={{ top: 6, right: 6, bottom: 6, left: 6 }}
+                  className="absolute z-10 flex items-start overflow-hidden"
                 >
-                  <span className="block w-full line-clamp-5 whitespace-pre-wrap">
+                  <span
+                    style={{ fontSize: 10, lineHeight: 1.25 }}
+                    className="block w-full text-left leading-tight break-all whitespace-pre-wrap text-neutral-800 dark:text-neutral-100"
+                  >
                     {text}
                   </span>
                 </div>

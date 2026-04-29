@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 
 /**
- * エディタ ↔ ダッシュボード間の「中心セル ↔ カード」モーフィングアニメ用 state。
+ * エディタ ↔ ダッシュボード ↔ ストック間の「セル ↔ カード ↔ ストックエントリ」モーフィングアニメ用 state。
  *
- * 双方向に対応する:
+ * 3 方向に対応する:
  *
  * - **direction='home'** (エディタ → ダッシュボード): エディタのホームボタンで navigate する直前に
  *   中心セル DOM の rect と border/radius/inset/font を計測 → store にセット → navigate。
@@ -14,13 +14,18 @@ import { create } from 'zustand'
  *   カード DOM の rect と border/radius/inset/font を計測 → store にセット → navigate。
  *   overlay は初期状態 (カード相当) で描画され、エディタ側の `[data-mandalart-id="<id>"] [data-position="4"]`
  *   を polling で探して、中心セルの矩形に向けて morph する (overlay → 中心セル形状)。
+ * - **direction='stock'** (エディタ内セル → ストックエントリ): D&D で copy/move ドロップした直後に、
+ *   ドラッグ元セル DOM の rect/visuals を計測 → addToStock/moveCellToStock で stockItem.id を取得 →
+ *   store にセット。`[data-converge-stock="<id>"]` を polling で探して、新規ストックエントリの矩形に
+ *   向けて morph (overlay → ストックエントリ形状)。「コピー/移動の格納先が視覚的に分かる」UX。
  *
+ * `targetId` は方向によって意味が変わる polymorphic id (mandalart_id / mandalart_id / stock_item_id)。
  * 両端値はすべて DOM 実測なのでテーマ変更/フォント拡縮にも自動追従、html-to-image 等の重い処理は不要。
  */
 type SourceRect = { left: number; top: number; width: number; height: number }
 
-/** モーフィング元の見た目情報。両方向で「source 側 (ユーザーが直前に見ていた要素)」の値を持つ。
- * direction='home' なら editor 中心セル、direction='open' ならダッシュボードカード。 */
+/** モーフィング元の見た目情報。「source 側 (ユーザーが直前に見ていた要素)」の値を持つ。
+ * direction='home' なら editor 中心セル、'open' ならダッシュボードカード、'stock' なら editor 内のセル。 */
 type CenterCell = {
   text: string
   imagePath: string | null
@@ -38,12 +43,15 @@ type CenterCell = {
   radiusPx: number
 }
 
-/** モーフィング方向。`home` = エディタ → ダッシュボード収束、`open` = ダッシュボード → エディタ拡大。 */
-export type ConvergeDirection = 'home' | 'open'
+/** モーフィング方向。
+ * - `home`: エディタ中心セル → ダッシュボードカード収束
+ * - `open`: ダッシュボードカード → エディタ中心セル拡大
+ * - `stock`: エディタ内セル → ストックエントリ収束 (copy/move drop 時) */
+export type ConvergeDirection = 'home' | 'open' | 'stock'
 
 type ConvergeState = {
   direction: ConvergeDirection | null
-  mandalartId: string | null
+  targetId: string | null
   sourceRect: SourceRect | null
   centerCell: CenterCell | null
   setConverge: (
@@ -57,10 +65,10 @@ type ConvergeState = {
 
 export const useConvergeStore = create<ConvergeState>((set) => ({
   direction: null,
-  mandalartId: null,
+  targetId: null,
   sourceRect: null,
   centerCell: null,
   setConverge: (direction, id, rect, centerCell) =>
-    set({ direction, mandalartId: id, sourceRect: rect, centerCell }),
-  clear: () => set({ direction: null, mandalartId: null, sourceRect: null, centerCell: null }),
+    set({ direction, targetId: id, sourceRect: rect, centerCell }),
+  clear: () => set({ direction: null, targetId: null, sourceRect: null, centerCell: null }),
 }))
