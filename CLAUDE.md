@@ -15,7 +15,8 @@
 |---|---|
 | セルの見た目・操作 | [`requirements.md`](desktop/docs/requirements.md), [`typography.md`](desktop/docs/typography.md) |
 | D&D / 4 アクションアイコン / 中心セル禁止 ルール | [`requirements.md`](desktop/docs/requirements.md) "セルのドラッグ＆ドロップ" 節 |
-| アニメーション | [`animations.md`](desktop/docs/animations.md) |
+| アニメーション (slide / orbit / view-switch / morph) | [`animations.md`](desktop/docs/animations.md) |
+| クロスルート morph (エディタ ↔ ダッシュボード ↔ ストック の収束/拡大) | [`animations.md`](desktop/docs/animations.md) "Converge Overlay" 節, [`ConvergeOverlay.tsx`](desktop/src/components/ConvergeOverlay.tsx), [`convergeStore.ts`](desktop/src/store/convergeStore.ts) |
 | API (lib/api) | [`api-spec.md`](desktop/docs/api-spec.md), [`data-model.md`](desktop/docs/data-model.md) |
 | DB スキーマ変更 | [`data-model.md`](desktop/docs/data-model.md), [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) |
 | 同期・realtime | 本ファイル「落とし穴」節, [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) |
@@ -47,8 +48,8 @@
 | カテゴリ | ファイル | 代表定数 |
 |---|---|---|
 | グリッド構造 | [`grid.ts`](desktop/src/constants/grid.ts) | `CENTER_POSITION`, `GRID_CELL_COUNT`, `ORBIT_ORDER_*` |
-| タイミング (ms) | [`timing.ts`](desktop/src/constants/timing.ts) | `ANIM_STAGGER_MS`, `ANIM_FADE_MS`, `CLICK_DELAY_MS` |
-| レイアウト (px) | [`layout.ts`](desktop/src/constants/layout.ts) | `OUTER_GRID_GAP_PX`, `CELL_BASE_FONT_PX`, `DASHBOARD_CARD_SIZE_PX` |
+| タイミング (ms) | [`timing.ts`](desktop/src/constants/timing.ts) | `ANIM_STAGGER_MS`, `ANIM_FADE_MS`, `CLICK_DELAY_MS`, `CONVERGE_DURATION_MS`, `CONVERGE_DEBUG_SLOW_FACTOR` |
+| レイアウト (px) | [`layout.ts`](desktop/src/constants/layout.ts) | `OUTER_GRID_GAP_PX`, `CELL_BASE_FONT_PX`, `DASHBOARD_CARD_SIZE_PX`, `DASHBOARD_CARD_BORDER_PX`, `DASHBOARD_CARD_INSET_PX` |
 | localStorage キー | [`storage.ts`](desktop/src/constants/storage.ts) | `STORAGE_KEYS.fontLevel`, `STORAGE_KEYS.theme` |
 | カラー | [`colors.ts`](desktop/src/constants/colors.ts) | プリセットカラー定義 |
 | Tab 順 | [`tabOrder.ts`](desktop/src/constants/tabOrder.ts) | `TAB_ORDER`, `nextTabPosition()` |
@@ -67,7 +68,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 - **データモデル**: `mandalarts → grids → cells` の再帰階層。FK 制約なし (後述)。`deleted_at` でソフトデリート。**子グリッドの中心セル行の有無は 3 パターン**: ① root / 独立並列 (migration 006+) は自グリッド所属、② X=C primary drilled は親 peripheral と共有、③ レガシー共有並列 (migration 006 未満) は primary と center_cell_id 共有 (落とし穴 #10 参照)。並列の判定は `grids.parent_cell_id` (migration 006) で統一
 - **lazy cell creation** (migration 005+): 空セル行は DB に作らない。`upsertCellAt(grid_id, position)` で書込時に初めて INSERT
 - **同期**: `lib/sync/` で last-write-wins (updated_at 比較)、`lib/realtime.ts` で postgres_changes 購読。マンダラート単位の UI プリファレンス (`show_checkbox`、migration 007) も同期される
-- **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore`)。マンダラート単位の永続 UI 設定は DB カラム経由 (editorStore に置かない)
+- **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore` / `convergeStore`)。マンダラート単位の永続 UI 設定は DB カラム経由 (editorStore に置かない)。`convergeStore` は App 直下の `ConvergeOverlay` が購読し、エディタ ↔ ダッシュボード ↔ ストック 間のセル ↔ カード ↔ ストックエントリ morph アニメを駆動する
 - **ルーティング**: HashRouter — `/dashboard`, `/mandalart/:id`。認証ガードなし (ローカル専用モードで全機能使える)
 - 詳細は [`folder-structure.md`](desktop/docs/folder-structure.md)
 
@@ -113,6 +114,8 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 15. **D&D drop policy は cell-to-cell では 周辺→周辺 のみ** — Phase A 改修以降、中心セル絡みの cell-to-cell drop は `resolveDndAction` が NOOP を返す。中心セルからの操作は **D&D 中の右パネル 4 アクションアイコン** (シュレッダー / 移動 / コピー / エクスポート) に集約。新しい drop パターンを足すときはこの方針を維持し、中心セル直接 drop は再導入しないこと
 16. **アニメ render 経路で空 slot / checkbox を忘れる罠** — orbit / view-switch / slide で `orbit.targetCells.find(...)` が undefined のとき bare `<div />` を返すと、空 slot が animation 完了 swap の瞬間に枠付きで pop する。空 slot にも `GridView3x3` と同じ枠 + `orbit-fade-in` を当てる必要がある。同様に `onToggleDone` を渡し忘れると Cell 内 `done` checkbox が遅れて出現する (アニメ render に必ず `onToggleDone={showCheckbox ? handleToggleDone : undefined}` を渡す)
 17. **マンダラート単位の UI 設定は DB カラム + Supabase 手動 ALTER** — `mandalarts.show_checkbox` (migration 007) のように UI プリファレンスを DB に置く場合、Supabase 側で `ALTER TABLE mandalarts ADD COLUMN ... ;` を **新版配布前に手動実行** する必要がある。未実行のままだと push が `PGRST204: column not found` で失敗 → thrash 化する。手順は [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) 参照。同様に migration 006 の `grids.parent_cell_id` も同パターン
+18. **画像セル remount 時のまばたき** — orbit アニメ完了で Cell が unmount → 通常 grid 描画で remount される際、`useState(null)` 初期化 + `useEffect` の async load パターンだと**キャッシュ hit でも 1 frame だけ `imageUrl=null`** が挟まり画像が一瞬消える。対処: [`storage.ts:getCachedCellImageUrl`](desktop/src/lib/api/storage.ts) で同期 cache lookup → `useState(() => getCachedCellImageUrl(cell.image_path))` に渡して 1 frame目から画像を出す。新規 image_path (未キャッシュ) は null 返しで従来の async useEffect に委譲され挙動維持
+19. **Converge overlay の morph 構造仮定** — [`ConvergeOverlay.tsx`](desktop/src/components/ConvergeOverlay.tsx) の polling は target DOM の子要素から `div.absolute.z-10:not(.inset-0) > span` を探して終端 inset/font を読む。Cell.tsx / DashboardPage MandalartCard / StockTab はすべてこの構造に揃えてあるので、新しい着地候補要素を追加するときも同じ DOM 構造で書くこと (異なる構造だと morph end のテキスト位置/サイズが補間されない)
 
 ## ドキュメント一覧
 

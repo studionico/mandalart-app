@@ -91,6 +91,7 @@ src/
 │   ├── AuthDialog.tsx        # メール/OAuth サインインダイアログ
 │   ├── UpdateDialog.tsx      # 自動アップデート確認・進捗・再起動ダイアログ
 │   ├── ThemeToggle.tsx       # ☀ ◐ ☾ のテーマ切替セグメント
+│   ├── ConvergeOverlay.tsx   # App 直下常駐の単一 overlay。エディタ ↔ ダッシュボード ↔ ストック 間の morph アニメ駆動 (寸法/枠/角丸/inset/font 並列 transition)
 │   │
 │   ├── dashboard/
 │   │   └── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
@@ -103,9 +104,10 @@ src/
 │   │   ├── CellEditModal.tsx     # 詳細編集モーダル (色・画像・長文)
 │   │   ├── Breadcrumb.tsx        # パンくずリスト (階層ナビゲーション)
 │   │   ├── ParallelNav.tsx       # 並列グリッド ← → ナビゲーション
-│   │   ├── SidePanel.tsx         # 右サイドパネル (メモ・ストック タブ)
+│   │   ├── SidePanel.tsx         # 右サイドパネル (メモ・ストック タブ + ドラッグ中の DragActionPanel オーバーレイ)
+│   │   ├── DragActionPanel.tsx   # D&D 中の右パネル 4 アクションアイコン (シュレッダー / 移動 / コピー / エクスポート)
 │   │   ├── MemoTab.tsx           # メモタブ (Markdown エディタ)
-│   │   ├── StockTab.tsx          # ストックタブ (保管セル一覧 + drop zone)
+│   │   ├── StockTab.tsx          # ストックタブ (保管セル一覧 + ConvergeOverlay polling target)
 │   │   └── ImportDialog.tsx      # インポートダイアログ (新規 / 既存セル配下)
 │   │
 │   └── ui/                   # 汎用 UI コンポーネント
@@ -132,7 +134,8 @@ src/
 │   ├── undoStore.ts          # 操作履歴スタック
 │   ├── clipboardStore.ts     # mode / sourceCellId (スナップショットは持たない)
 │   ├── authStore.ts          # session / user / loading
-│   └── themeStore.ts         # light / dark / system
+│   ├── themeStore.ts         # light / dark / system
+│   └── convergeStore.ts      # クロスルート morph 用 overlay state (direction='home'|'open'|'stock' / targetId / sourceRect / centerCell)
 │
 ├── lib/
 │   ├── db/
@@ -160,6 +163,10 @@ src/
 │   └── offline.ts            # オフラインスタブ (将来の pending updates 用)
 │
 ├── constants/
+│   ├── grid.ts               # CENTER_POSITION / GRID_CELL_COUNT / ORBIT_ORDER_*
+│   ├── timing.ts             # ANIM_*, CLICK_DELAY_MS, CONVERGE_DURATION_MS, CONVERGE_DEBUG_SLOW_FACTOR 等
+│   ├── layout.ts             # OUTER_GRID_GAP_PX / CELL_BASE_FONT_PX / DASHBOARD_CARD_* 等の寸法定数
+│   ├── storage.ts            # STORAGE_KEYS (localStorage キー一元化)
 │   ├── colors.ts             # プリセットカラー定義
 │   └── tabOrder.ts           # Tab 移動順 [4, 7, 6, 3, 0, 1, 2, 5, 8]
 │

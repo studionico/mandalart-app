@@ -130,7 +130,7 @@ Shift+Tab は逆順
 
 ### 4 アクションアイコン (D&D 中のみ右パネルに表示)
 
-ドラッグ開始すると右パネルのメモ / ストックタブが消え、4 アクションアイコンが大きく縦並びで表示される。各アイコンへのドロップで以下の操作が実行される:
+**エディタ内セル**をドラッグ開始すると右パネルのメモ / ストックタブが消え、4 アクションアイコンが大きく縦並びで表示される。各アイコンへのドロップで以下の操作が実行される:
 
 | アイコン | 動作 |
 |---|---|
@@ -143,6 +143,10 @@ Shift+Tab は逆順
 - drilled grid 中心 → 親 grid に戻る (breadcrumb 1 段戻し)
 - root grid 中心 → dashboard へ
 - 独立並列 grid 中心 → 親 grid へ
+
+**移動 / コピー** にドロップしてストックに格納された際は、選択セル → 新規ストックエントリへの morph アニメ (Converge Overlay) で「格納先がストックのどこに入ったか」を視覚的に示す ([`animations.md`](animations.md) "5. Converge Overlay" 節)。メモタブがアクティブだった場合は SidePanel が `convergeStore.direction === 'stock'` を購読してストックタブへ自動切替するため、メモタブで drop しても着地点が必ず可視化される。
+
+**ストックエントリ**をドラッグした場合は、4 アクションアイコンへの drop 経路が無いため (ストック → 4 アイコンは意味を持たない) DragActionPanel を**出さず**、メモ / ストックタブをそのまま表示する (drag 起点が見えていてユーザーが drag 元を確認できる)。
 
 ### ストック → セルへの drop
 
@@ -193,9 +197,11 @@ Shift+Tab は逆順
 - 複製ではタイトルにサフィックス (「〜 のコピー」等) を付けない。同じ名前のマンダラートが複数存在しても問題なし
 
 ### ダッシュボードカードの表示
-- 各カードはルート中心セル 1 つを等倍で並べた「セルのグリッド」のような見た目
-- アスペクト比は正方形固定、一定サイズ (行/列の数は画面幅に応じてレスポンシブ)
-- 中身はルート中心セルのテキストを小さめフォントで表示。長文でも可能な限り見えるよう複数行 + line-clamp
+- 各カードは **ルート中心セルを ~0.47 縮小した姿** として設計し、エディタ中心セルと視覚言語を統一する
+  - サイズ 130×130 (`DASHBOARD_CARD_SIZE_PX`)、border 3px (`DASHBOARD_CARD_BORDER_PX`、中心セル `border-[6px]` の縮小)、rounded 4px (`rounded`、中心セル `rounded-lg=8px` の縮小)、shadow-md、`bg-white dark:bg-neutral-950` (中心セルと同一)
+  - text inset 6px (`DASHBOARD_CARD_INSET_PX`)、font-size 14px (`DASHBOARD_CARD_FONT_PX`、中心セル 28px の縮小)、font-weight は html 全体の `300` (Light) 継承で中心セルとウェイト一致
+  - 内部 text wrapper は `<div class="absolute z-10 flex items-start overflow-hidden"> <span>...</span> </div>` 構造に統一。ConvergeOverlay の polling が終端 inset/font を読むためのインターフェースでもある
+- 中身はルート中心セルのテキストを表示。画像のみ (タイトル空 + image_path あり) のときは画像で埋める
 - 更新日 / 複製 / 削除は hover 時のみ表示
 
 ### ゴミ箱
@@ -388,6 +394,8 @@ Shift+Tab は逆順
 - **表示モード切替 (View Switch)**: 3×3 ↔ 9×9 のトグルで連続性のある演出
   - `to-9x9` (約 1195ms): 現在の 3×3 が中央原点で 1/3 に縮小しつつ、周辺 8 ブロックが時計回りに fade-in。終端で実 9×9 中央ブロックへクロスフェードして swap pop を回避
   - `to-3x3` (約 1080ms): 中央ブロックの 9 セルが時計回り `[7,6,3,0,1,2,5,8,4]` (中心最後) で 3×3 natural 位置へ拡大展開、周辺 8 ブロックは fade-out
+- **Converge Overlay (Morph、400ms)**: ルート (route) を跨ぐ「セル ↔ ダッシュボードカード ↔ ストックエントリ」の寸法 morph アニメ。`transform: scale()` を使わず `width / height / border-width / border-radius / inset / font-size` の並列 CSS transition で morph するため終端で subpixel 描画差が原理的に発生しない。3 方向 (`home` = エディタ → ダッシュボード収束、`open` = ダッシュボード → エディタ拡大、`stock` = エディタセル → ストックエントリ収束) を `convergeStore.direction` で切替。`open` direction 後の orbit fade-in は morph 完了を待ってから「のの字」順で peripheral cells を出すため、source の中身が overlay 到着前に裸で見えてしまう違和感を回避する
+- **画像セル remount まばたき抑止**: orbit アニメ完了で Cell が unmount → 通常 grid 描画で remount される際、`getCachedCellImageUrl` (同期 cache lookup) を `useState` 初期値に渡して 1 frame 目から画像を出すことで「画像が一瞬消える」現象を抑止
 - 詳細は [`animations.md`](./animations.md) 参照
 
 ---

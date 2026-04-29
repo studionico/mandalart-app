@@ -215,13 +215,16 @@ getStockItems(): Promise<StockItem[]>
 // 指定セル (とそのサブツリー) のスナップショットをストックに追加
 // - 周辺セル: parent_cell_id = cellId の全 grids を子として再帰スナップショット
 // - 中央セル: center_cell_id = cellId のグリッド (root parallels 含む) を再帰スナップショット
+// 戻り値の StockItem.id は ConvergeOverlay の direction='stock' 着地点
+// (`[data-converge-stock="<id>"]`) を解決するために使われる。
 addToStock(cellId: string): Promise<StockItem>
 
 // ストックアイテムを削除
 deleteStockItem(id: string): Promise<void>
 
 // 「移動」アクション: addToStock + shredCellSubtree。
-// snapshot をストック保存してから元セル + 配下を完全削除する (= カット to ストック)
+// snapshot をストック保存してから元セル + 配下を完全削除する (= カット to ストック)。
+// 戻り値の StockItem.id は同じく ConvergeOverlay 着地点解決用。
 moveCellToStock(cellId: string): Promise<StockItem>
 
 // ストックアイテムの内容 + サブツリーをターゲットセルに貼り付け
@@ -254,6 +257,11 @@ copyImageFromPath(absolutePath: string, cellId: string): Promise<string>
 // 相対パスを blob URL に変換 (cache 付き)
 // Cell コンポーネントが <img src={blobUrl}> で表示するために使う
 getCellImageUrl(path: string): Promise<string>
+
+// 同期版: メモリキャッシュを直接覗く。未キャッシュは null を返す。
+// Cell.tsx の useState 初期値 (`useState(() => getCachedCellImageUrl(cell.image_path))`) で使い、
+// orbit アニメ後の remount 時にキャッシュ済み画像を 1 frame目から描画してまばたきを防ぐ。
+getCachedCellImageUrl(path: string | null | undefined): string | null
 
 // ローカルファイルを削除 + blob URL をキャッシュから破棄
 deleteCellImage(path: string): Promise<void>
@@ -543,3 +551,49 @@ setLoading(loading: boolean): void
 preference: 'light' | 'dark' | 'system'
 setPreference(pref: 'light' | 'dark' | 'system'): void
 ```
+
+### convergeStore
+
+App 直下にマウントされた `ConvergeOverlay` がエディタ ↔ ダッシュボード ↔ ストック の morph アニメ
+(寸法/枠/角丸/inset/font の並列 CSS transition) を駆動するための一時 state。route 切替を跨いで
+保持され、`clear()` で消える。詳細は [`animations.md`](./animations.md) "5. Converge Overlay" 節参照。
+
+```typescript
+type ConvergeDirection = 'home' | 'open' | 'stock'
+
+type SourceRect = { left: number; top: number; width: number; height: number }
+
+type CenterCell = {
+  text: string
+  imagePath: string | null
+  color: string | null
+  fontPx: number          // source の text フォントサイズ (px)
+  topInsetPx: number      // text wrapper top inset (border-box 内側起算)
+  sideInsetPx: number     // text wrapper right/bottom/left inset (〃)
+  borderPx: number        // source の border-width (px)
+  radiusPx: number        // source の border-radius (px)
+}
+
+direction: ConvergeDirection | null  // 'home' | 'open' | 'stock' | null
+targetId: string | null              // 着地点識別子 (mandalartId or stockItemId)
+sourceRect: SourceRect | null        // 起点要素の viewport 矩形
+centerCell: CenterCell | null        // 起点要素の表示内容 + 計測値
+
+// trigger 側 (handleNavigateHome / DashboardPage MandalartCard / handleDndAction) が呼ぶ
+setConverge(
+  direction: ConvergeDirection,
+  id: string,
+  rect: SourceRect,
+  centerCell: CenterCell,
+): void
+
+// ConvergeOverlay が morph 完了 (transitionend or safetyTimer) で呼ぶ
+clear(): void
+```
+
+**direction の意味**:
+- `home`: エディタ中心セル → ダッシュボードカード収束 (ホームボタン押下時)
+- `open`: ダッシュボードカード → エディタ中心セル拡大 (カードクリック時)
+- `stock`: エディタ内セル → 新規ストックエントリ収束 (D&D で copy/move drop 時)
+
+`targetId` は polymorphic id (前 2 つは `mandalart.id`、`stock` は `stock_item.id`)。`centerCell` は起点側 DOM の実測値で overlay の**初期**スタイルとして使い、終端値は polling した target DOM の `getComputedStyle` から読む。
