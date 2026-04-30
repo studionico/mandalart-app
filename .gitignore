@@ -41,4 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 # Claude Code
-.claude/
+# .claude/ 配下は基本的に ignore (会話履歴 / plan ファイル / agent state 等は個人用)。
+# ただし `commands/` だけはチームで versioning したいので exception とする。
+.claude/*
+!.claude/commands/

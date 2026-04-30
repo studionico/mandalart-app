@@ -39,6 +39,12 @@
 - **pre-commit hook** ([`.husky/pre-commit`](desktop/.husky/pre-commit)): `lint-staged` → `typecheck` の順。失敗で commit 拒否
 - **CI** ([`ci.yml`](.github/workflows/ci.yml)): 全 branch push + PR で typecheck / lint / test / build
 
+### プロジェクト専用 slash command
+
+| コマンド | 用途 |
+|---|---|
+| `/sync-docs [<range>]` ([`.claude/commands/sync-docs.md`](.claude/commands/sync-docs.md)) | コード変更が `desktop/docs/` / `CLAUDE.md` に反映されているか検査する。引数は `git diff` の範囲指定 (空 = uncommitted、`HEAD~N`、`main` 等)。書込みは行わずレポートのみ返し、ユーザーが承認した後で個別に docs を更新する流れ。**migration 追加時は Supabase 手動 ALTER 漏れの警告を必ず出す** (落とし穴 #17 防止) |
+
 ## コーディング規約
 
 ### ハードコーディング禁止
