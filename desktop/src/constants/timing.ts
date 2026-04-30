@@ -54,6 +54,11 @@ export const CONVERGE_DURATION_MS = 400 * CONVERGE_DEBUG_SLOW_FACTOR
 /** Supabase realtime 受信後の reload を間引く debounce (ms) */
 export const SYNC_DEBOUNCE_MS = 300
 
+// --- メモ ---
+
+/** MemoTab の auto-save debounce (ms)。typing 後この時間内に追加入力が無ければ保存。 */
+export const MEMO_SAVE_DEBOUNCE_MS = 800
+
 // --- UI 確認ダイアログ ---
 
 /**

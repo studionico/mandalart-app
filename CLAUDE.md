@@ -44,6 +44,7 @@
 | コマンド | 用途 |
 |---|---|
 | `/sync-docs [<range>]` ([`.claude/commands/sync-docs.md`](.claude/commands/sync-docs.md)) | コード変更が `desktop/docs/` / `CLAUDE.md` に反映されているか検査する。引数は `git diff` の範囲指定 (空 = uncommitted、`HEAD~N`、`main` 等)。書込みは行わずレポートのみ返し、ユーザーが承認した後で個別に docs を更新する流れ。**migration 追加時は Supabase 手動 ALTER 漏れの警告を必ず出す** (落とし穴 #17 防止) |
+| `/check-rules [<scope>]` ([`.claude/commands/check-rules.md`](.claude/commands/check-rules.md)) | 「コーディング規約」+「落とし穴一覧」違反を grep ベースで検出する (ハードコーディング / `localStorage` 直接使用 / Tauri 落とし穴 / `position === 数値` の裸比較等)。引数は走査範囲 (空 = 全 src、ファイル/glob、`--diff` で uncommitted のみ)。書込みは行わずレポートのみ返し、🔴/🟡/🟢 で優先度分類して file:line リンク + 修正案ドラフトを提示。tasks.md 29.1 の ESLint plugin 化までの繋ぎ |
 
 ### プロジェクト専用 subagent
 

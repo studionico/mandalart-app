@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { updateGridMemo } from '@/lib/api/grids'
+import { MEMO_SAVE_DEBOUNCE_MS } from '@/constants/timing'
 
 type Props = {
   gridId: string | null
@@ -57,7 +58,7 @@ export default function MemoTab({ gridId, initialMemo }: Props) {
   // debounce 保存
   useEffect(() => {
     if (!gridId) return
-    const timer = setTimeout(() => save(memo), 800)
+    const timer = setTimeout(() => save(memo), MEMO_SAVE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [memo, save, gridId])
 
