@@ -45,6 +45,12 @@
 |---|---|
 | `/sync-docs [<range>]` ([`.claude/commands/sync-docs.md`](.claude/commands/sync-docs.md)) | コード変更が `desktop/docs/` / `CLAUDE.md` に反映されているか検査する。引数は `git diff` の範囲指定 (空 = uncommitted、`HEAD~N`、`main` 等)。書込みは行わずレポートのみ返し、ユーザーが承認した後で個別に docs を更新する流れ。**migration 追加時は Supabase 手動 ALTER 漏れの警告を必ず出す** (落とし穴 #17 防止) |
 
+### プロジェクト専用 subagent
+
+| エージェント | 自動起動条件 / 用途 |
+|---|---|
+| `migration-release-check` ([`.claude/agents/migration-release-check.md`](.claude/agents/migration-release-check.md)) | リリース前 / `desktop/src-tauri/migrations/*.sql` の新規追加検知時に proactively 起動。各 migration の schema 変更について **(1) lib.rs Migration 登録、(2) cloud-sync-setup.md の Supabase 手動 ALTER 手順、(3) push.ts / pull.ts / realtime.ts の sync 配線、(4) types/index.ts の型追加** が漏れなく揃っているか網羅監査 → 漏れには copy-paste 可能な ALTER SQL を提示。落とし穴 #17 (PGRST204 thrash) 予防専用 |
+
 ## コーディング規約
 
 ### ハードコーディング禁止

@@ -42,6 +42,7 @@ next-env.d.ts
 
 # Claude Code
 # .claude/ 配下は基本的に ignore (会話履歴 / plan ファイル / agent state 等は個人用)。
-# ただし `commands/` だけはチームで versioning したいので exception とする。
+# ただし `commands/` と `agents/` はチームで versioning したいので exception とする。
 .claude/*
 !.claude/commands/
+!.claude/agents/
