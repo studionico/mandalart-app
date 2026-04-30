@@ -41,6 +41,8 @@
 
 ### プロジェクト専用 slash command
 
+各ツールの**組合せワークフロー** (コミット前 / PR 前 / リリース前 / 週次健康診断) は [`workflows.md`](desktop/docs/workflows.md) を参照。
+
 | コマンド | 用途 |
 |---|---|
 | `/sync-docs [<range>]` ([`.claude/commands/sync-docs.md`](.claude/commands/sync-docs.md)) | コード変更が `desktop/docs/` / `CLAUDE.md` に反映されているか検査する。引数は `git diff` の範囲指定 (空 = uncommitted、`HEAD~N`、`main` 等)。書込みは行わずレポートのみ返し、ユーザーが承認した後で個別に docs を更新する流れ。**migration 追加時は Supabase 手動 ALTER 漏れの警告を必ず出す** (落とし穴 #17 防止) |
@@ -143,3 +145,4 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 | [`tasks.md`](desktop/docs/tasks.md) | フェーズ別タスクチェックリスト (進捗の単一情報源) |
 | [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) | Supabase セットアップ・スキーマ修正・トラブルシューティング |
 | [`updater-setup.md`](desktop/docs/updater-setup.md) | 自動アップデート署名鍵・GitHub Secrets・リリースフロー |
+| [`workflows.md`](desktop/docs/workflows.md) | プロジェクト専用 slash command / subagent の組合せワークフロー (コミット前 / PR 前 / リリース前 / 週次健康診断) |
