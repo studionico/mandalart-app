@@ -13,6 +13,7 @@ import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/sto
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { CardLikeText } from '@/components/CardLikeText'
 import { isCellEmpty } from '@/lib/utils/grid'
+import { trackDragThreshold } from '@/lib/utils/dragThreshold'
 
 type Props = {
   cell: CellType
@@ -40,7 +41,6 @@ type Props = {
   wrapperStyle?: React.CSSProperties
 }
 
-const DRAG_THRESHOLD = 5   // ドラッグ判定の移動距離（px）
 const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
 
 export default function Cell({
@@ -189,28 +189,11 @@ export default function Cell({
     // 既に編集中ならテキスト選択を阻害しない
     if (isInlineEditing) return
 
-    const startX = e.clientX
-    const startY = e.clientY
     didDrag.current = false
-
-    function onMove(e2: MouseEvent) {
-      const dx = e2.clientX - startX
-      const dy = e2.clientY - startY
-      if (!didDrag.current && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
-        didDrag.current = true
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup',   onUp)
-        onDragStart?.(cell)
-      }
-    }
-
-    function onUp() {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup',   onUp)
-    }
-
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup',   onUp)
+    trackDragThreshold(e, () => {
+      didDrag.current = true
+      onDragStart?.(cell)
+    })
   }
 
   // セルが空かどうか (text も image も無い)

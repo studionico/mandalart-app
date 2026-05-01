@@ -7,6 +7,7 @@ import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { useTwoClickConfirm } from '@/hooks/useTwoClickConfirm'
+import { trackDragThreshold } from '@/lib/utils/dragThreshold'
 import { useConvergeStore } from '@/store/convergeStore'
 import type { StockItem } from '@/types'
 
@@ -16,8 +17,6 @@ type Props = {
   onItemDragStart?: (itemId: string) => void
   dragSourceId?: string | null
 }
-
-const DRAG_THRESHOLD = 5
 
 export default function StockTab({
   onPaste, reloadKey, onItemDragStart, dragSourceId,
@@ -76,25 +75,7 @@ export default function StockTab({
     // ボタン上でのクリックはドラッグ開始しない
     const targetTag = (e.target as HTMLElement).tagName
     if (targetTag === 'BUTTON' || (e.target as HTMLElement).closest('button')) return
-
-    const startX = e.clientX
-    const startY = e.clientY
-
-    function onMove(e2: MouseEvent) {
-      const dx = e2.clientX - startX
-      const dy = e2.clientY - startY
-      if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        onItemDragStart?.(itemId)
-      }
-    }
-    function onUp() {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    trackDragThreshold(e, () => onItemDragStart?.(itemId))
   }
 
   return (

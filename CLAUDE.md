@@ -108,7 +108,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 
 以下は実際にハマった問題。該当領域を触る前に頭に入れておくこと。
 
-1. **Tauri WebKit の HTML5 DnD が動かない** — `mousedown`/`mousemove`/`mouseup` + `document.elementFromPoint` で自前実装 ([`useDragAndDrop.ts`](desktop/src/hooks/useDragAndDrop.ts))。`draggable` / `onDragStart` は使わない。**`<img>` の native drag は [`index.css`](desktop/src/index.css) のグローバル `img { -webkit-user-drag: none; user-select: none; }` で一括抑止**しているので個別に `draggable={false}` を書く必要はない
+1. **Tauri WebKit の HTML5 DnD が動かない** — `mousedown`/`mousemove`/`mouseup` + `document.elementFromPoint` で自前実装 ([`useDragAndDrop.ts`](desktop/src/hooks/useDragAndDrop.ts))。閾値判定 (5px) だけが必要なら [`trackDragThreshold`](desktop/src/lib/utils/dragThreshold.ts) を使う。`draggable` / `onDragStart` は使わない。**`<img>` の native drag は [`index.css`](desktop/src/index.css) のグローバル `img { -webkit-user-drag: none; user-select: none; }` で一括抑止**しているので個別に `draggable={false}` を書く必要はない
 2. **FK 制約を張らない** — `grids ↔ cells` の循環 FK が CASCADE 再帰で壊れる + `tauri-plugin-sql` のプール問題。カスケードは API 層で明示実装。詳細は [`data-model.md`](desktop/docs/data-model.md)
 3. **WAL モード必須** — `PRAGMA journal_mode = WAL` + `busy_timeout = 5000` がないと sync 中に "database is locked"
 4. **Realtime の table フィルタが混線する** — `postgres_changes` の `{ table: 'X' }` が効かないことがある。各ハンドラで `if (payload.table !== 'X') return` を必ず入れる

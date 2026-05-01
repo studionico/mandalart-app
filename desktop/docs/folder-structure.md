@@ -163,6 +163,7 @@ src/
 │   ├── utils/
 │   │   ├── grid.ts                   # isCellEmpty / hasPeripheralContent / getCenterCell
 │   │   ├── dnd.ts                    # resolveDndAction (D&D ルール判定)
+│   │   ├── dragThreshold.ts          # mousedown ベース自前 D&D の閾値判定 listener 共通化 (落とし穴 #1 対策、Cell / StockTab / useDashboardDnd で使用)
 │   │   ├── export.ts                 # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
 │   │   └── captureCardLikeSource.ts  # カード相当 DOM (中心セル / dashboard カード / ストックエントリ) から ConvergeOverlay morph source 値 (rect / border / radius / inset / font) を共通計測
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり)

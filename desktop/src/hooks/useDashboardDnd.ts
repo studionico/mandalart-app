@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DRAG_CLICK_SUPPRESS_MS } from '@/constants/timing'
+import { trackDragThreshold } from '@/lib/utils/dragThreshold'
 import type { ActionDropType } from '@/components/editor/DragActionPanel'
 
 /**
@@ -18,8 +19,6 @@ import type { ActionDropType } from '@/components/editor/DragActionPanel'
  * stock 起源の drag 中は `dragOverCardIndex` が更新されるので、各 MandalartCard 側で
  * `index >= dragOverCardIndex` のとき右に slide する transform を当てる (drop space を開ける視覚演出)。
  */
-
-const DRAG_THRESHOLD = 5
 
 type DragSourceKind = 'card' | 'stock'
 
@@ -158,24 +157,7 @@ export function useDashboardDnd({ onDrop }: Opts) {
     if (e.button !== 0) return  // 左クリックのみ
     // 既に drag 中なら何もしない (重複起動防止)
     if (movingRef.current) return
-    const startX = e.clientX
-    const startY = e.clientY
-
-    function onCheckThreshold(ev: MouseEvent) {
-      const dx = ev.clientX - startX
-      const dy = ev.clientY - startY
-      if (dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD) {
-        document.removeEventListener('mousemove', onCheckThreshold)
-        document.removeEventListener('mouseup', onCancelCheck)
-        beginDrag({ kind: 'card', id: mandalartId })
-      }
-    }
-    function onCancelCheck() {
-      document.removeEventListener('mousemove', onCheckThreshold)
-      document.removeEventListener('mouseup', onCancelCheck)
-    }
-    document.addEventListener('mousemove', onCheckThreshold)
-    document.addEventListener('mouseup', onCancelCheck)
+    trackDragThreshold(e, () => beginDrag({ kind: 'card', id: mandalartId }))
   }, [beginDrag])
 
   /**
