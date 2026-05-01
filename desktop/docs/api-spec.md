@@ -60,6 +60,13 @@ updateMandalartShowCheckbox(id: string, show: boolean): Promise<void>
 // drill 階層復元に使われる。null で「未設定 = root にフォールバック」へ戻せる (stale クリア用)。
 updateMandalartLastGridId(id: string, lastGridId: string | null): Promise<void>
 
+// stock item を起点に新しいマンダラートを作成する。
+// 空 mandalart を `createMandalart()` で生成し、root_cell_id (空の root center cell) に
+// `pasteFromStock` で stock snapshot を貼付け、root grid 全体を populate する。
+// 用途: ダッシュボードの D&D で stock entry を空エリア / 既存カードに drop した際の新規作成
+// (破壊的「stock → 既存カード置換」は実装しないため本 API は新規作成のみ提供)。
+createMandalartFromStockItem(stockItemId: string): Promise<Mandalart>
+
 // マンダラートと配下を削除する。
 // - 未同期行 (synced_at IS NULL): hard delete (orphan 防止)
 // - 同期済み行: soft delete (deleted_at) → push でクラウドに伝播

@@ -113,6 +113,20 @@ export async function pasteFromStock(stockItemId: string, targetCellId: string):
     [snapshot.cell.text, snapshot.cell.image_path, snapshot.cell.color, ts, targetCellId],
   )
 
+  // 1b) ターゲットがマンダラートの root_cell_id ならば mandalarts.title も同期する。
+  // 通常は `updateCell` (cells.ts) が title を mirror するが、本関数は直接 UPDATE するため
+  // 明示的に同期しないと新規マンダラート作成 (createMandalartFromStockItem) で title=「無題」のまま残る。
+  const rootOwners = await query<{ id: string }>(
+    'SELECT id FROM mandalarts WHERE root_cell_id = ? AND deleted_at IS NULL',
+    [targetCellId],
+  )
+  if (rootOwners[0]) {
+    await execute(
+      'UPDATE mandalarts SET title = ?, updated_at = ? WHERE id = ?',
+      [snapshot.cell.text, ts, rootOwners[0].id],
+    )
+  }
+
   // 2) 中心セル snapshot 判定 (ストック元が root 中心で、grid 全体を保存している)
   const isCenterSnapshot = snapshot.position === CENTER_POSITION
 
@@ -148,15 +162,29 @@ async function expandGridSnapshotInto(
   )
   const cellIdByPos = new Map(existingCells.map((c) => [c.position, c.id]))
 
-  // snapshot の peripherals で既存 peripherals を上書き
+  // snapshot の peripherals で 8 枠を上書き / 不足分は新規 INSERT (lazy creation 対応)。
+  // 新規マンダラートに paste するケースでは root grid に center cell しか存在しないため、
+  // 既存 cell ベースのループだけでは peripherals が永遠に作成されない (旧バグ)。
   const snapByPos = new Map(gridSnap.cells.map((c) => [c.position, c]))
-  for (const [pos, existingId] of cellIdByPos) {
+  for (let pos = 0; pos < 9; pos++) {
     if (pos === CENTER_POSITION) continue
     const sc = snapByPos.get(pos)
-    await execute(
-      'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
-      [sc?.text ?? '', sc?.image_path ?? null, sc?.color ?? null, ts, existingId],
-    )
+    const existingId = cellIdByPos.get(pos)
+    if (existingId) {
+      // 既存 cell を上書き (空でも UPDATE する旧挙動踏襲)
+      await execute(
+        'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
+        [sc?.text ?? '', sc?.image_path ?? null, sc?.color ?? null, ts, existingId],
+      )
+    } else if (sc && (sc.text !== '' || sc.image_path !== null || sc.color !== null)) {
+      // 不足セルを新規 INSERT (空セルは lazy policy により skip)
+      const newCellId = generateId()
+      await execute(
+        'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
+        [newCellId, targetGridId, pos, sc.text, sc.image_path, sc.color, ts, ts],
+      )
+      cellIdByPos.set(pos, newCellId)
+    }
   }
 
   // 子グリッドを parentPosition に従って正しいセルに紐付け

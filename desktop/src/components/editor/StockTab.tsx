@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
+import { getCellImageUrl, getCachedCellImageUrl } from '@/lib/api/storage'
 import { CONFIRM_AUTO_RESET_MS, CONVERGE_DURATION_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
 import { useConvergeStore } from '@/store/convergeStore'
@@ -137,80 +138,139 @@ export default function StockTab({
             これにより SidePanel 内幅が変わっても余白なくフィットし、メモ編集 / プレビュー /
             ストックの 3 タブで描画幅が揃う。 */}
         <div className="grid gap-2 grid-cols-3">
-          {items.map((item) => {
-            const isSourceDragging = dragSourceId === `stock:${item.id}`
-            const text = item.snapshot.cell.text || '（テキストなし）'
-            const isConvergeTarget =
-              convergeDirection === 'stock' && convergeTargetId === item.id
-            return (
-              <div
-                key={item.id}
-                // ConvergeOverlay の polling target (direction='stock')。エディタ内セル → ストック収束で
-                // 「格納先がどこに入ったか」を視覚化する着地点。
-                data-converge-stock={item.id}
-                onMouseDown={(e) => handleItemMouseDown(e, item.id)}
-                className={`
-                  relative w-full aspect-square bg-white dark:bg-neutral-900
-                  border-2 border-black dark:border-white rounded-xl
-                  shadow-sm hover:shadow-md transition-shadow
-                  cursor-grab active:cursor-grabbing select-none
-                  group overflow-hidden
-                  ${isSourceDragging ? 'opacity-40' : ''}
-                `}
-                style={
-                  isConvergeTarget
-                    ? {
-                        // morph 中 (CONVERGE_DURATION_MS) は opacity 0 で隠し、終端で 1ms snap →
-                        // overlay の clear と同フレームで可視化 (home / open ターゲットと同じ pattern)
-                        animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
-                        willChange: 'opacity',
-                      }
-                    : undefined
-                }
-                title={text}
-              >
-                {/* ConvergeOverlay が target inset/font を読み取れるよう、ダッシュボードカード /
-                    Cell.tsx と同じ構造 (`absolute z-10 ... not inset-0`) で描画する */}
-                <div
-                  style={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                  className="absolute z-10 flex items-start overflow-hidden"
-                >
-                  <span
-                    style={{ fontSize: 10, lineHeight: 1.25 }}
-                    className="block w-full text-left leading-tight break-all whitespace-pre-wrap text-neutral-800 dark:text-neutral-100"
-                  >
-                    {text}
-                  </span>
-                </div>
-
-                {/* 作成日: hover 時のみ下部 */}
-                <div className="absolute bottom-0.5 left-1 right-1 text-[8px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
-                  {new Date(item.created_at).toLocaleDateString('ja-JP')}
-                </div>
-
-                {/* アクション: hover 時に右上 */}
-                <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onPaste(item) }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center justify-center"
-                    title="貼付"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDelete(item.id) }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
-                    title="削除"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            )
-          })}
+          {items.map((item) => (
+            <StockEntry
+              key={item.id}
+              item={item}
+              isSourceDragging={dragSourceId === `stock:${item.id}`}
+              isConvergeTarget={convergeDirection === 'stock' && convergeTargetId === item.id}
+              onMouseDown={handleItemMouseDown}
+              onPaste={onPaste}
+              onDelete={handleDelete}
+            />
+          ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 1 件のストックエントリ。スナップショットの `image_path` が存在し text が空の場合は画像を、
+ * それ以外は text を描画する。画像ロードは `getCachedCellImageUrl` の同期ルックアップ +
+ * `useEffect` の async 解決の組合せで MandalartCard と同じ「remount 時 1 frame 目から画像表示」を担保。
+ */
+function StockEntry({
+  item, isSourceDragging, isConvergeTarget, onMouseDown, onPaste, onDelete,
+}: {
+  item: StockItem
+  isSourceDragging: boolean
+  isConvergeTarget: boolean
+  onMouseDown: (e: React.MouseEvent, itemId: string) => void
+  onPaste: (item: StockItem) => void
+  onDelete: (id: string) => void
+}) {
+  const text = item.snapshot.cell.text
+  const imagePath = item.snapshot.cell.image_path
+  // 画像優先表示の判定: 中心セル相当の取扱い (テキスト空 + image_path あり) でのみ画像表示
+  const showImage = !text && !!imagePath
+  const [imageUrl, setImageUrl] = useState<string | null>(() =>
+    showImage && imagePath ? getCachedCellImageUrl(imagePath) : null,
+  )
+  useEffect(() => {
+    let cancelled = false
+    if (!showImage || !imagePath) {
+      setImageUrl(null)
+      return
+    }
+    // キャッシュ hit 時は同期で初期化済みなのでここでは async load のみ走る (未キャッシュ時のみ実 fetch)
+    const cached = getCachedCellImageUrl(imagePath)
+    if (cached) {
+      setImageUrl(cached)
+      return
+    }
+    getCellImageUrl(imagePath).then((url) => {
+      if (!cancelled) setImageUrl(url || null)
+    })
+    return () => { cancelled = true }
+  }, [showImage, imagePath])
+
+  const displayText = text || '（テキストなし）'
+  const titleAttr = text || (showImage ? '画像' : '（テキストなし）')
+
+  return (
+    <div
+      // ConvergeOverlay の polling target (direction='stock')。エディタ内セル / ダッシュボードカード →
+      // ストック収束の着地点。
+      data-converge-stock={item.id}
+      onMouseDown={(e) => onMouseDown(e, item.id)}
+      className={`
+        relative w-full aspect-square bg-white dark:bg-neutral-900
+        border-2 border-black dark:border-white rounded-xl
+        shadow-sm hover:shadow-md transition-shadow
+        cursor-grab active:cursor-grabbing select-none
+        group overflow-hidden
+        ${isSourceDragging ? 'opacity-40' : ''}
+      `}
+      style={
+        isConvergeTarget
+          ? {
+              // morph 中 (CONVERGE_DURATION_MS) は opacity 0 で隠し、終端で 1ms snap →
+              // overlay の clear と同フレームで可視化 (home / open ターゲットと同じ pattern)
+              animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
+              willChange: 'opacity',
+            }
+          : undefined
+      }
+      title={titleAttr}
+    >
+      {showImage && imageUrl ? (
+        // draggable={false} で <img> の HTML5 native drag を無効化 (mousedown ベース drag を妨害させない)
+        <img
+          src={imageUrl}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 w-full h-full object-cover select-none"
+        />
+      ) : (
+        // ConvergeOverlay が target inset/font を読み取れるよう、ダッシュボードカード /
+        // Cell.tsx と同じ構造 (`absolute z-10 ... not inset-0`) で描画する
+        <div
+          style={{ top: 6, right: 6, bottom: 6, left: 6 }}
+          className="absolute z-10 flex items-start overflow-hidden"
+        >
+          <span
+            style={{ fontSize: 10, lineHeight: 1.25 }}
+            className="block w-full text-left leading-tight break-all whitespace-pre-wrap text-neutral-800 dark:text-neutral-100"
+          >
+            {displayText}
+          </span>
+        </div>
+      )}
+
+      {/* 作成日: hover 時のみ下部 */}
+      <div className="absolute bottom-0.5 left-1 right-1 text-[8px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
+        {new Date(item.created_at).toLocaleDateString('ja-JP')}
+      </div>
+
+      {/* アクション: hover 時に右上 */}
+      <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => { e.stopPropagation(); onPaste(item) }}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center justify-center"
+          title="貼付"
+        >
+          ↓
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(item.id) }}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
+          title="削除"
+        >
+          ✕
+        </button>
       </div>
     </div>
   )

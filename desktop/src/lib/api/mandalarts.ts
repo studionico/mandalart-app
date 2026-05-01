@@ -1,6 +1,7 @@
 import { query, execute, generateId, now } from '../db'
 import { supabase, isSupabaseConfigured } from '../supabase/client'
 import { CENTER_POSITION } from '@/constants/grid'
+import { pasteFromStock } from './stock'
 import type { Mandalart, Cell } from '../../types'
 
 // ルート中心セル (= mandalarts.root_cell_id が指す cell) の image_path を取得する共通式。
@@ -21,8 +22,13 @@ export async function getMandalarts(): Promise<Mandalart[]> {
 }
 
 export async function getMandalart(id: string): Promise<Mandalart | null> {
+  // image_path も JOIN で拾う (`getMandalarts` と shape を揃える)。
+  // 画像のみの新規マンダラート (例: createMandalartFromStockItem 経由) で title 空のとき、
+  // ダッシュボードカードが「無題」テキストではなく画像で描画されるよう、image_path が必須。
   const rows = await query<Mandalart>(
-    'SELECT * FROM mandalarts WHERE id = ? AND deleted_at IS NULL',
+    `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
+     FROM mandalarts m
+     WHERE m.id = ? AND m.deleted_at IS NULL`,
     [id],
   )
   return rows[0] ?? null
@@ -85,6 +91,24 @@ export async function updateMandalartShowCheckbox(id: string, show: boolean): Pr
     'UPDATE mandalarts SET show_checkbox = ?, updated_at = ? WHERE id = ?',
     [show ? 1 : 0, now(), id],
   )
+}
+
+/**
+ * stock item を起点に新しいマンダラートを作成する。
+ *
+ * 空 mandalart を `createMandalart()` で生成し、その root_cell_id (= 空の root center cell) に
+ * `pasteFromStock` で stock snapshot を貼り付ける。stock 中心セル snapshot は `pasteFromStock`
+ * の中心セル経路 (snapshot.position === CENTER_POSITION) で root grid 全体に展開され、配下の
+ * peripheral / 子 grid もすべて再帰挿入される。
+ *
+ * 用途: ダッシュボードの D&D で stock entry を空エリア / 既存カードに drop した際の新規マンダラート
+ * 作成 (破壊的な「stock → 既存カード置換」は別途禁止しているため本 API は新規作成のみ提供)。
+ */
+export async function createMandalartFromStockItem(stockItemId: string): Promise<Mandalart> {
+  const m = await createMandalart()
+  await pasteFromStock(stockItemId, m.root_cell_id)
+  // root cell text が paste で更新されたので title を refetch
+  return (await getMandalart(m.id)) ?? m
 }
 
 /**

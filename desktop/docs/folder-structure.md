@@ -119,7 +119,8 @@ src/
 ├── hooks/                    # React カスタムフック
 │   ├── useGrid.ts            # グリッド + セルデータの取得・更新
 │   ├── useSubGrids.ts        # 9×9 表示用のサブグリッド一括取得
-│   ├── useDragAndDrop.ts     # D&D 実装 (cell source / stock source 両対応、mousedown ベース)
+│   ├── useDragAndDrop.ts     # エディタの D&D 実装 (cell source / stock source 両対応、mousedown ベース)
+│   ├── useDashboardDnd.ts    # ダッシュボードの D&D 実装 (card / stock source、editor とは別 policy)
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
 │   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)

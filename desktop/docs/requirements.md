@@ -204,6 +204,20 @@ Shift+Tab は逆順
 - 中身はルート中心セルのテキストを表示。画像のみ (タイトル空 + image_path あり) のときは画像で埋める
 - 更新日 / 複製 / 削除は hover 時のみ表示
 
+### ダッシュボードのストックエリアと D&D
+- 右側に lg breakpoint 以上で `StockTab` が常駐表示される (editor 側 SidePanel と同じ w-72 幅)。エディタを開かずに stock 内容を一覧 / 削除 / paste できる
+- カード ↔ ストックの D&D は editor のセル D&D と同じ「4 アクションアイコン」UX を採用 (mandalart カードを drag 開始すると、右パネルの StockTab が **`DragActionPanel`** に切替わってシュレッダー / 移動 / コピー / エクスポートの 4 アイコンが現れる)
+  - `shred`: 確認ダイアログ → `permanentDeleteMandalart` でマンダラートを完全削除 (cloud 含む)
+  - `move`: `addToStock(root_cell_id)` で snapshot 保存 → `permanentDeleteMandalart` で削除 (= cut to stock)
+  - `copy`: `addToStock(root_cell_id)` のみ (元 mandalart は残る)
+  - `export`: 形式選択ポップアップ (JSON / Markdown / IndentText) → `$DOWNLOAD` フォルダに保存
+- ストックエントリを drag したときは `DragActionPanel` を出さず、ダッシュボード側に drop すると **新規マンダラート作成** (`createMandalartFromStockItem` で空 mandalart に snapshot を貼付け、root grid を populate)
+  - 既存カードに重ねると、そのカード以降が **右にスライドしてドロップスペースを開ける視覚フィードバック** (CSS transition で 200ms morphing)。drop 完了後はカードが natural 位置に戻る
+  - 実 sort_order は `updated_at` 降順なので drop 位置に関わらず top に出現する。slide はあくまで **アフォーダンス (intent indicator)** として機能
+  - 破壊的な「stock → 既存カード置換」は実装しない (常に新規作成のみ、既存 mandalart には影響を与えない)
+- card → 4 アクションアイコン以外、stock → stock area、card → card 等の no-op なドロップは黙って無視
+- D&D 実装は `desktop/src/hooks/useDashboardDnd.ts` (mousedown ベース、editor の `useDragAndDrop` とは別実装)。drag 直後の click は 150ms suppression で誤発火 navigate を防ぐ
+
 ### ゴミ箱
 - ダッシュボード上部の「ゴミ箱」ボタンから `TrashDialog` を開くと、`deleted_at IS NOT NULL` のマンダラートが削除日時の新しい順に並ぶ
 - 各行で「復元」「完全削除」が選べる

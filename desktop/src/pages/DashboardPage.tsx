@@ -2,25 +2,34 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getMandalarts, createMandalart, deleteMandalart, duplicateMandalart,
-  searchMandalarts,
+  searchMandalarts, permanentDeleteMandalart, createMandalartFromStockItem,
 } from '@/lib/api/mandalarts'
-import { findOrphanGrids, cleanupOrphanGrids } from '@/lib/api/grids'
+import { findOrphanGrids, cleanupOrphanGrids, getRootGrids } from '@/lib/api/grids'
+import { addToStock } from '@/lib/api/stock'
+import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
+import { downloadJSON, downloadText } from '@/lib/utils/export'
 import { signOut } from '@/lib/api/auth'
 import ImportDialog from '@/components/editor/ImportDialog'
+import StockTab from '@/components/editor/StockTab'
+import DragActionPanel from '@/components/editor/DragActionPanel'
+import ShredConfirmDialog from '@/components/editor/ShredConfirmDialog'
+import ExportFormatPicker, { type ExportFormat } from '@/components/editor/ExportFormatPicker'
 import AuthDialog from '@/components/AuthDialog'
 import TrashDialog from '@/components/dashboard/TrashDialog'
 import ThemeToggle from '@/components/ThemeToggle'
+import Toast from '@/components/ui/Toast'
 import { useAuthStore } from '@/store/authStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
 import { useSync } from '@/hooks/useSync'
+import { useDashboardDnd, type DashboardDropAction } from '@/hooks/useDashboardDnd'
 import {
   DASHBOARD_CARD_SIZE_PX,
   DASHBOARD_CARD_FONT_PX,
   DASHBOARD_CARD_INSET_PX,
 } from '@/constants/layout'
 import { CONVERGE_DURATION_MS } from '@/constants/timing'
-import type { Mandalart } from '@/types'
+import type { Mandalart, StockItem } from '@/types'
 
 type SortKey = 'updated' | 'title'
 
@@ -49,6 +58,21 @@ export default function DashboardPage() {
     | { type: 'error'; message: string }
   type CleanupState = null | 'busy' | number | CleanupResult
   const [cleanupState, setCleanupState] = useState<CleanupState>(null)
+
+  // ダッシュボード D&D 関連 state
+  const [stockReloadKey, setStockReloadKey] = useState(0)
+  const [cardShredConfirm, setCardShredConfirm] = useState<
+    | { mandalartId: string; title: string }
+    | null
+  >(null)
+  const [cardExportPicker, setCardExportPicker] = useState<
+    | { mandalartId: string; title: string }
+    | null
+  >(null)
+  const [toast, setToast] = useState<
+    | { message: string; type: 'info' | 'success' | 'error' }
+    | null
+  >(null)
 
   const user = useAuthStore((s) => s.user)
   const { status: syncStatus, lastSync, error: syncError, sync, reloadKey } = useSync()
@@ -163,6 +187,172 @@ export default function DashboardPage() {
     }
   }
 
+  // stock entry からの paste = 新規マンダラート作成
+  const handleStockPaste = useCallback(async (item: StockItem) => {
+    try {
+      const m = await createMandalartFromStockItem(item.id)
+      setMandalarts((prev) => [m, ...prev])
+      setToast({ message: '新規マンダラートを作成しました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `作成失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [])
+
+  /**
+   * card DOM から ConvergeOverlay の direction='stock' source 値を計測する。
+   * editor 側 `captureCellSource` (EditorLayout) のダッシュボード版。
+   * `[data-converge-card="<id>"]` で card 要素を引き、`getBoundingClientRect` + `getComputedStyle`
+   * で border / radius / 内部 text wrapper の inset / span の font-size を読み取る。
+   * 画像のみカード (`titleFirstLine` 空 + image_path あり) では text wrapper が無いので default 値を返す。
+   */
+  function captureCardSource(mandalartId: string, mandalart: Mandalart) {
+    const cardEl = document.querySelector(`[data-converge-card="${mandalartId}"]`) as HTMLElement | null
+    if (!cardEl) return null
+    const r = cardEl.getBoundingClientRect()
+    const cs = getComputedStyle(cardEl)
+    const borderTop = parseFloat(cs.borderTopWidth) || 0
+    const borderLeft = parseFloat(cs.borderLeftWidth) || 0
+    const borderPx = borderTop
+    const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
+    let topInsetPx = DASHBOARD_CARD_INSET_PX
+    let sideInsetPx = DASHBOARD_CARD_INSET_PX
+    let fontPx = DASHBOARD_CARD_FONT_PX
+    const cardText = Array.from(cardEl.children).find(
+      (el) => el instanceof HTMLElement
+        && el.classList.contains('absolute')
+        && el.classList.contains('z-10')
+        && !el.classList.contains('inset-0'),
+    ) as HTMLElement | undefined
+    if (cardText) {
+      const wRect = cardText.getBoundingClientRect()
+      topInsetPx = wRect.top - r.top - borderTop
+      sideInsetPx = wRect.left - r.left - borderLeft
+      const span = cardText.querySelector('span')
+      if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
+    }
+    const titleFirstLine = (mandalart.title || '').split('\n')[0]
+    return {
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      centerCell: {
+        // 画像のみカード (titleFirstLine 空 + image_path あり) は image を、それ以外は title を表示
+        text: titleFirstLine ? (mandalart.title || '') : '',
+        imagePath: !titleFirstLine && mandalart.image_path ? mandalart.image_path : null,
+        color: null,
+        fontPx, topInsetPx, sideInsetPx, borderPx, radiusPx,
+      },
+    }
+  }
+
+  // card → 4 アクションアイコン / stock → ダッシュボード の drop dispatcher
+  const handleDashboardDrop = useCallback(async (action: DashboardDropAction) => {
+    if (!action) return
+    if (action.kind === 'stock-to-new') {
+      // 既存 handleStockPaste と同じ経路だが stockItemId しか持たないので fetch なしで
+      // 直接 API 呼出。エラー処理は同形式。
+      try {
+        const m = await createMandalartFromStockItem(action.stockItemId)
+        setMandalarts((prev) => [m, ...prev])
+        setToast({ message: '新規マンダラートを作成しました', type: 'success' })
+      } catch (e) {
+        setToast({ message: `作成失敗: ${(e as Error).message}`, type: 'error' })
+      }
+      return
+    }
+    // card-action
+    const target = mandalarts.find((m) => m.id === action.mandalartId)
+    if (!target) return
+    const titleLabel = target.title || '無題'
+    switch (action.action) {
+      case 'shred':
+        setCardShredConfirm({ mandalartId: target.id, title: titleLabel })
+        return
+      case 'move':
+        try {
+          // card 削除前に source 値を計測 (DOM 削除後は計測不可)
+          const source = captureCardSource(target.id, target)
+          const stockItem = await addToStock(target.root_cell_id)
+          await permanentDeleteMandalart(target.id)
+          setMandalarts((prev) => prev.filter((m) => m.id !== target.id))
+          setStockReloadKey((k) => k + 1)
+          if (source) {
+            useConvergeStore.getState().setConverge(
+              'stock', stockItem.id, source.rect, source.centerCell,
+            )
+          }
+          setToast({ message: 'ストックへ移動し、マンダラートを削除しました', type: 'success' })
+        } catch (e) {
+          setToast({ message: `移動失敗: ${(e as Error).message}`, type: 'error' })
+        }
+        return
+      case 'copy':
+        try {
+          const source = captureCardSource(target.id, target)
+          const stockItem = await addToStock(target.root_cell_id)
+          setStockReloadKey((k) => k + 1)
+          if (source) {
+            useConvergeStore.getState().setConverge(
+              'stock', stockItem.id, source.rect, source.centerCell,
+            )
+          }
+          setToast({ message: 'ストックにコピーしました', type: 'success' })
+        } catch (e) {
+          setToast({ message: `コピー失敗: ${(e as Error).message}`, type: 'error' })
+        }
+        return
+      case 'export':
+        setCardExportPicker({ mandalartId: target.id, title: titleLabel })
+        return
+    }
+  }, [mandalarts])
+
+  // useDashboardDnd は handleDashboardDrop を購読
+  const dnd = useDashboardDnd({ onDrop: handleDashboardDrop })
+
+  // shred 確認ダイアログの最終アクション
+  const handleCardShredConfirm = useCallback(async () => {
+    if (!cardShredConfirm) return
+    const { mandalartId, title } = cardShredConfirm
+    setCardShredConfirm(null)
+    try {
+      await permanentDeleteMandalart(mandalartId)
+      setMandalarts((prev) => prev.filter((m) => m.id !== mandalartId))
+      setToast({ message: `「${title}」を削除しました`, type: 'success' })
+    } catch (e) {
+      setToast({ message: `削除失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [cardShredConfirm])
+
+  // export 形式選択後の最終アクション
+  const handleCardExportPick = useCallback(async (format: ExportFormat) => {
+    if (!cardExportPicker) return
+    const { mandalartId, title } = cardExportPicker
+    setCardExportPicker(null)
+    try {
+      const baseName = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) || 'mandalart'
+      // mandalart 全体 = primary root grid 起点でエクスポート
+      const roots = await getRootGrids(mandalartId)
+      const targetGridId = roots[0]?.id
+      if (!targetGridId) {
+        setToast({ message: 'エクスポート対象の grid が見つかりません', type: 'info' })
+        return
+      }
+      let filename: string
+      if (format === 'json') {
+        const snap = await exportToJSON(targetGridId)
+        filename = await downloadJSON(snap, baseName)
+      } else if (format === 'markdown') {
+        const md = await exportToMarkdown(targetGridId)
+        filename = await downloadText(md, 'md', baseName)
+      } else {
+        const txt = await exportToIndentText(targetGridId)
+        filename = await downloadText(txt, 'txt', baseName)
+      }
+      setToast({ message: `保存しました: ${filename}`, type: 'success' })
+    } catch (e) {
+      setToast({ message: `エクスポート失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [cardExportPicker])
+
   // 絞り込みはサーバ側 (searchMandalarts) で行うので、ここではソートのみ
   const visible = useMemo(() => {
     const sorted = [...mandalarts].sort((a, b) => {
@@ -175,8 +365,8 @@ export default function DashboardPage() {
   }, [mandalarts, sortKey])
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
-      <header className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-6 py-4 flex items-center justify-between gap-4">
+    <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
+      <header className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-6 py-4 flex items-center justify-between gap-4 shrink-0">
         <h1 className="text-lg font-bold shrink-0">マンダラート</h1>
 
         <div className="flex-1 flex items-center gap-2 max-w-xl">
@@ -279,48 +469,127 @@ export default function DashboardPage() {
         }}
       />
 
-      <main className="max-w-5xl mx-auto px-6 py-8">
-        {!initialLoaded ? (
-          <p className="text-neutral-400 dark:text-neutral-500">読み込み中...</p>
-        ) : !query.trim() && mandalarts.length === 0 ? (
-          <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
-            <p className="text-lg mb-2">まだマンダラートがありません</p>
-            <p className="text-sm">「+ 新規作成」から始めましょう</p>
+      {/* body row: 左 = main (card grid、scrollable)、右 = aside (StockTab、viewport 右端で full-height、editor SidePanel と同じ位置) */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* 左: card grid (drop zone も兼ねる)。max-w-5xl で中央寄せしつつ overflow-y-auto で内部スクロール */}
+        <main
+          data-dashboard-drop-zone
+          className="flex-1 min-w-0 overflow-y-auto px-6 py-8"
+        >
+          <div className="max-w-5xl mx-auto">
+          {!initialLoaded ? (
+            <p className="text-neutral-400 dark:text-neutral-500">読み込み中...</p>
+          ) : !query.trim() && mandalarts.length === 0 ? (
+            <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
+              <p className="text-lg mb-2">まだマンダラートがありません</p>
+              <p className="text-sm">「+ 新規作成」から始めましょう</p>
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
+              <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
+            </div>
+          ) : (
+            <div
+              className="grid gap-3"
+              style={{
+                gridTemplateColumns: `repeat(auto-fill, ${DASHBOARD_CARD_SIZE_PX}px)`,
+              }}
+            >
+              {visible.map((m, index) => {
+                // stock 起源 drag 中、hover 中のカード以降を右に slide してドロップスペースを開ける
+                const shouldShiftRight =
+                  dnd.dragSourceKind === 'stock' &&
+                  dnd.dragOverCardIndex !== null &&
+                  index >= dnd.dragOverCardIndex
+                return (
+                  <MandalartCard
+                    key={m.id}
+                    mandalart={m}
+                    index={index}
+                    shouldShiftRight={shouldShiftRight}
+                    onOpen={() => openMandalart(m.id)}
+                    onDuplicate={() => handleDuplicate(m)}
+                    onDelete={() => handleDelete(m.id)}
+                    onMouseDown={dnd.onCardMouseDown}
+                    wasRecentlyDragged={dnd.wasRecentlyDragged}
+                  />
+                )
+              })}
+            </div>
+          )}
           </div>
-        ) : visible.length === 0 ? (
-          <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
-            <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
+        </main>
+
+        {/* 右: ストックパネル (lg 以上で表示)、viewport 右端で full-height (editor SidePanel と同じ位置)。
+            card 起源 drag 中は DragActionPanel をオーバーレイ */}
+        <aside
+          data-dashboard-stock-drop-zone
+          className="hidden lg:flex w-72 shrink-0 flex-col border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
+        >
+          <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 text-xs font-medium text-neutral-600 dark:text-neutral-300 shrink-0">
+            ストック
           </div>
-        ) : (
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns: `repeat(auto-fill, ${DASHBOARD_CARD_SIZE_PX}px)`,
-            }}
-          >
-            {visible.map((m) => (
-              <MandalartCard
-                key={m.id}
-                mandalart={m}
-                onOpen={() => openMandalart(m.id)}
-                onDuplicate={() => handleDuplicate(m)}
-                onDelete={() => handleDelete(m.id)}
+          <div className="flex-1 overflow-hidden p-3 relative">
+            {/* card 起源 drag 中: 4 アクションアイコンを overlay で表示 (editor SidePanel と同じパターン) */}
+            {dnd.dragSourceKind === 'card' && (
+              <div className="absolute inset-0 z-10 bg-white dark:bg-neutral-900 p-3">
+                <DragActionPanel hoveredAction={dnd.hoveredAction} />
+              </div>
+            )}
+            <div className={`h-full ${dnd.dragSourceKind === 'card' ? 'invisible' : ''}`}>
+              <StockTab
+                onPaste={handleStockPaste}
+                reloadKey={stockReloadKey}
+                onItemDragStart={dnd.onStockItemDragStart}
+                dragSourceId={dnd.dragSourceKind === 'stock' && dnd.dragSourceId
+                  ? `stock:${dnd.dragSourceId}` : null}
               />
-            ))}
+            </div>
           </div>
-        )}
-      </main>
+        </aside>
+      </div>
+
+      {/* card → shred drop の確認ダイアログ */}
+      <ShredConfirmDialog
+        open={cardShredConfirm !== null}
+        targetText={cardShredConfirm?.title}
+        isPrimaryRoot={true}
+        onCancel={() => setCardShredConfirm(null)}
+        onConfirm={handleCardShredConfirm}
+      />
+
+      {/* card → export drop の形式選択ダイアログ */}
+      <ExportFormatPicker
+        open={cardExportPicker !== null}
+        targetText={cardExportPicker?.title}
+        onCancel={() => setCardExportPicker(null)}
+        onPick={handleCardExportPick}
+      />
+
+      {/* トースト (D&D action の feedback) */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   )
 }
 
 function MandalartCard({
-  mandalart: m, onOpen, onDuplicate, onDelete,
+  mandalart: m, index, shouldShiftRight, onOpen, onDuplicate, onDelete,
+  onMouseDown, wasRecentlyDragged,
 }: {
   mandalart: Mandalart
+  index: number
+  shouldShiftRight: boolean
   onOpen: () => void
   onDuplicate: () => void
   onDelete: () => void
+  onMouseDown: (mandalartId: string, e: React.MouseEvent) => void
+  wasRecentlyDragged: () => boolean
 }) {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -352,7 +621,10 @@ function MandalartCard({
   // カードクリック → 「カード → 中心セル」拡大アニメの source 値を計測 → setConverge('open')
   // → onOpen() で navigate。両端値の対称化のため EditorLayout の handleNavigateHome と同じ
   // ロジック (source DOM 実測) でカード DOM を読む。
+  // ただし drag 直後 (wasRecentlyDragged が true) は drag → cancel 系操作とみなして click を
+  // suppress する (誤発火 navigate 回避)。
   function handleClick() {
+    if (wasRecentlyDragged()) return
     const cardEl = cardRef.current
     if (!cardEl) { onOpen(); return }
     const r = cardEl.getBoundingClientRect()
@@ -401,10 +673,14 @@ function MandalartCard({
       // layout.ts の DASHBOARD_CARD_* 定数で proportional に縮小。
       // 角丸は中心セルの `rounded-lg (8px)` をスケール 0.47 した ~3.76px に対応する `rounded (4px)` を採用。
       data-converge-card={m.id}
+      data-dashboard-card-index={index}
       className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer group overflow-hidden"
       style={{
         width: DASHBOARD_CARD_SIZE_PX,
         height: DASHBOARD_CARD_SIZE_PX,
+        // stock 起源 drag 中、drag が hover している card 以降は右に slide してドロップスペースを開ける
+        transform: shouldShiftRight ? 'translateX(calc(100% + 12px))' : undefined,
+        transition: 'transform 200ms ease-out',
         ...(isConvergeTarget
           ? {
               animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
@@ -412,11 +688,15 @@ function MandalartCard({
             }
           : {}),
       }}
+      onMouseDown={(e) => onMouseDown(m.id, e)}
       onClick={handleClick}
       title={m.title || '無題'}
     >
       {!titleFirstLine && imageUrl ? (
-        <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        // draggable={false} で <img> の HTML5 native drag (画像保存ダイアログ) を無効化。
+        // これがないと mousedown 時に native drag が triggering して useDashboardDnd の
+        // mousemove ベース実装が乗っ取られ、画像カードがドラッグできなくなる。
+        <img src={imageUrl} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover select-none" />
       ) : (
         // Cell.tsx 中心セルのテキスト構造に合わせる:
         // 絶対配置で inset 指定 + flex items-start + 行頭揃え。font-weight は html 全体の
