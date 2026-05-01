@@ -31,6 +31,7 @@ import { copyImageFromPath } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
+import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
 import { nextTabPosition } from '@/constants/tabOrder'
 import {
   CENTER_POSITION,
@@ -717,37 +718,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const cellEl = document.querySelector(`[data-cell-id="${cellId}"]`) as HTMLElement | null
     const cellData = gridData?.cells.find((c) => c.id === cellId)
     if (!cellEl || !cellData) return null
-    const r = cellEl.getBoundingClientRect()
-    const cs = getComputedStyle(cellEl)
-    const borderTop = parseFloat(cs.borderTopWidth) || 0
-    const borderLeft = parseFloat(cs.borderLeftWidth) || 0
-    let topInsetPx = 12
-    let sideInsetPx = 12
-    let fontPx = 28 * fontScale
-    const textWrapper = Array.from(cellEl.children).find(
-      (el) => el instanceof HTMLElement
-        && el.classList.contains('absolute')
-        && el.classList.contains('z-10')
-        && !el.classList.contains('inset-0'),
-    ) as HTMLElement | undefined
-    if (textWrapper) {
-      const wRect = textWrapper.getBoundingClientRect()
-      topInsetPx = wRect.top - r.top - borderTop
-      sideInsetPx = wRect.left - r.left - borderLeft
-      const span = textWrapper.querySelector('span')
-      if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
-    }
+    const m_ = captureCardLikeSource(cellEl, {
+      // Cell.tsx の textInsetPx 計算 (CELL_TEXT_INSET_NORMAL_PX 18 - border 6) のフォールバック
+      topInsetPx: 12,
+      sideInsetPx: 12,
+      fontPx: 28 * fontScale,
+    })
     return {
-      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      rect: m_.rect,
       centerCell: {
         text: cellData.text,
         imagePath: cellData.image_path,
         color: cellData.color,
-        fontPx,
-        topInsetPx,
-        sideInsetPx,
-        borderPx: borderTop,
-        radiusPx: parseFloat(cs.borderTopLeftRadius) || 0,
+        fontPx: m_.fontPx,
+        topInsetPx: m_.topInsetPx,
+        sideInsetPx: m_.sideInsetPx,
+        borderPx: m_.borderPx,
+        radiusPx: m_.radiusPx,
       },
     }
   }, [gridData, fontScale])
@@ -1687,47 +1674,26 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!willDelete && center) {
       const centerEl = document.querySelector(`[data-cell-id="${center.id}"]`) as HTMLElement | null
       if (centerEl) {
-        const r = centerEl.getBoundingClientRect()
-        // overlay 出現時のテキスト位置/サイズを編集中の中心セルに pixel-perfect で揃えるため、
-        // Cell.tsx の計算式 (size / borderPx / showCheckbox / fontScale 等の組合せ) を
-        // 再現する代わりに、実際に描画されている text wrapper / span の DOM から値を読み出す。
-        // これにより 3×3 / 9×9 / checkbox 有無 / fontScale 変動にすべて自動追従する。
-        // 構造: [data-cell-id] > div.absolute.z-10 > span (Cell.tsx 497-504)。
-        // 画像のみのセルは text wrapper が存在しないが、その場合 overlay も画像のみ表示なので inset は不要 (default 値で fallback)。
-        let topInsetPx = 12
-        let sideInsetPx = 12
-        let fontPx = 28 * fontScale
-        const cs = getComputedStyle(centerEl)
-        const borderTop = parseFloat(cs.borderTopWidth) || 0
-        const borderLeft = parseFloat(cs.borderLeftWidth) || 0
-        const borderPx = borderTop
-        const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
-        const textWrapper = Array.from(centerEl.children).find(
-          (el) => el instanceof HTMLElement
-            && el.classList.contains('absolute')
-            && el.classList.contains('z-10')
-            && !el.classList.contains('inset-0'),
-        ) as HTMLElement | undefined
-        if (textWrapper) {
-          const wRect = textWrapper.getBoundingClientRect()
-          topInsetPx = wRect.top - r.top - borderTop
-          sideInsetPx = wRect.left - r.left - borderLeft
-          const span = textWrapper.querySelector('span')
-          if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
-        }
+        // 共通ユーティリティで rect / border / radius / inset / font を実測 (3×3 / 9×9 /
+        // checkbox / fontScale すべてに自動追従)。画像のみセルは text wrapper 不在で default fallback。
+        const m_ = captureCardLikeSource(centerEl, {
+          topInsetPx: 12,
+          sideInsetPx: 12,
+          fontPx: 28 * fontScale,
+        })
         useConvergeStore.getState().setConverge(
           'home',
           mandalartId,
-          { left: r.left, top: r.top, width: r.width, height: r.height },
+          m_.rect,
           {
             text: center.text,
             imagePath: center.image_path,
             color: center.color,
-            fontPx,
-            topInsetPx,
-            sideInsetPx,
-            borderPx,
-            radiusPx,
+            fontPx: m_.fontPx,
+            topInsetPx: m_.topInsetPx,
+            sideInsetPx: m_.sideInsetPx,
+            borderPx: m_.borderPx,
+            radiusPx: m_.radiusPx,
           },
         )
       }

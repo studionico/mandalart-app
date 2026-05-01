@@ -1,9 +1,10 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
-import { getCellImageUrl, getCachedCellImageUrl } from '@/lib/api/storage'
 import { CONFIRM_AUTO_RESET_MS, CONVERGE_DURATION_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
+import { CardLikeText } from '@/components/CardLikeText'
+import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { useConvergeStore } from '@/store/convergeStore'
 import type { StockItem } from '@/types'
 
@@ -174,26 +175,8 @@ function StockEntry({
   const imagePath = item.snapshot.cell.image_path
   // 画像優先表示の判定: 中心セル相当の取扱い (テキスト空 + image_path あり) でのみ画像表示
   const showImage = !text && !!imagePath
-  const [imageUrl, setImageUrl] = useState<string | null>(() =>
-    showImage && imagePath ? getCachedCellImageUrl(imagePath) : null,
-  )
-  useEffect(() => {
-    let cancelled = false
-    if (!showImage || !imagePath) {
-      setImageUrl(null)
-      return
-    }
-    // キャッシュ hit 時は同期で初期化済みなのでここでは async load のみ走る (未キャッシュ時のみ実 fetch)
-    const cached = getCachedCellImageUrl(imagePath)
-    if (cached) {
-      setImageUrl(cached)
-      return
-    }
-    getCellImageUrl(imagePath).then((url) => {
-      if (!cancelled) setImageUrl(url || null)
-    })
-    return () => { cancelled = true }
-  }, [showImage, imagePath])
+  // 共通フックで同期キャッシュ初期値 + async fallback による remount 1 frame 目描画 (落とし穴 #18)
+  const imageUrl = useCellImageUrl(showImage ? imagePath : null)
 
   const displayText = text || '（テキストなし）'
   const titleAttr = text || (showImage ? '画像' : '（テキストなし）')
@@ -225,27 +208,11 @@ function StockEntry({
       title={titleAttr}
     >
       {showImage && imageUrl ? (
-        // draggable={false} で <img> の HTML5 native drag を無効化 (mousedown ベース drag を妨害させない)
-        <img
-          src={imageUrl}
-          alt=""
-          draggable={false}
-          className="absolute inset-0 w-full h-full object-cover select-none"
-        />
+        // HTML5 native drag 抑止は index.css の global `img` rule で一括対応 (落とし穴 #1)。
+        <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
-        // ConvergeOverlay が target inset/font を読み取れるよう、ダッシュボードカード /
-        // Cell.tsx と同じ構造 (`absolute z-10 ... not inset-0`) で描画する
-        <div
-          style={{ top: 6, right: 6, bottom: 6, left: 6 }}
-          className="absolute z-10 flex items-start overflow-hidden"
-        >
-          <span
-            style={{ fontSize: 10, lineHeight: 1.25 }}
-            className="block w-full text-left leading-tight break-all whitespace-pre-wrap text-neutral-800 dark:text-neutral-100"
-          >
-            {displayText}
-          </span>
-        </div>
+        // 共通 <CardLikeText>: ConvergeOverlay polling 互換構造を統一
+        <CardLikeText text={displayText} fontPx={10} sideInsetPx={6} />
       )}
 
       {/* 作成日: hover 時のみ下部 */}

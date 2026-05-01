@@ -18,6 +18,9 @@ import AuthDialog from '@/components/AuthDialog'
 import TrashDialog from '@/components/dashboard/TrashDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
+import { CardLikeText } from '@/components/CardLikeText'
+import { useCellImageUrl } from '@/hooks/useCellImageUrl'
+import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
 import { useAuthStore } from '@/store/authStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
@@ -200,45 +203,31 @@ export default function DashboardPage() {
 
   /**
    * card DOM から ConvergeOverlay の direction='stock' source 値を計測する。
-   * editor 側 `captureCellSource` (EditorLayout) のダッシュボード版。
-   * `[data-converge-card="<id>"]` で card 要素を引き、`getBoundingClientRect` + `getComputedStyle`
-   * で border / radius / 内部 text wrapper の inset / span の font-size を読み取る。
-   * 画像のみカード (`titleFirstLine` 空 + image_path あり) では text wrapper が無いので default 値を返す。
+   * 共通ユーティリティ `captureCardLikeSource` を `[data-converge-card="<id>"]` 要素に適用し、
+   * data 由来の値 (text / imagePath / color) を組合せて convergeStore の expected shape に整える。
+   * 画像のみカード (titleFirstLine 空 + image_path あり) では text wrapper 不在 → default 値で fallback。
    */
   function captureCardSource(mandalartId: string, mandalart: Mandalart) {
     const cardEl = document.querySelector(`[data-converge-card="${mandalartId}"]`) as HTMLElement | null
     if (!cardEl) return null
-    const r = cardEl.getBoundingClientRect()
-    const cs = getComputedStyle(cardEl)
-    const borderTop = parseFloat(cs.borderTopWidth) || 0
-    const borderLeft = parseFloat(cs.borderLeftWidth) || 0
-    const borderPx = borderTop
-    const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
-    let topInsetPx = DASHBOARD_CARD_INSET_PX
-    let sideInsetPx = DASHBOARD_CARD_INSET_PX
-    let fontPx = DASHBOARD_CARD_FONT_PX
-    const cardText = Array.from(cardEl.children).find(
-      (el) => el instanceof HTMLElement
-        && el.classList.contains('absolute')
-        && el.classList.contains('z-10')
-        && !el.classList.contains('inset-0'),
-    ) as HTMLElement | undefined
-    if (cardText) {
-      const wRect = cardText.getBoundingClientRect()
-      topInsetPx = wRect.top - r.top - borderTop
-      sideInsetPx = wRect.left - r.left - borderLeft
-      const span = cardText.querySelector('span')
-      if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
-    }
+    const m_ = captureCardLikeSource(cardEl, {
+      topInsetPx: DASHBOARD_CARD_INSET_PX,
+      sideInsetPx: DASHBOARD_CARD_INSET_PX,
+      fontPx: DASHBOARD_CARD_FONT_PX,
+    })
     const titleFirstLine = (mandalart.title || '').split('\n')[0]
     return {
-      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      rect: m_.rect,
       centerCell: {
         // 画像のみカード (titleFirstLine 空 + image_path あり) は image を、それ以外は title を表示
         text: titleFirstLine ? (mandalart.title || '') : '',
         imagePath: !titleFirstLine && mandalart.image_path ? mandalart.image_path : null,
         color: null,
-        fontPx, topInsetPx, sideInsetPx, borderPx, radiusPx,
+        fontPx: m_.fontPx,
+        topInsetPx: m_.topInsetPx,
+        sideInsetPx: m_.sideInsetPx,
+        borderPx: m_.borderPx,
+        radiusPx: m_.radiusPx,
       },
     }
   }
@@ -591,9 +580,10 @@ function MandalartCard({
   onMouseDown: (mandalartId: string, e: React.MouseEvent) => void
   wasRecentlyDragged: () => boolean
 }) {
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const titleFirstLine = (m.title || '').split('\n')[0]
+  // 画像 URL: タイトル空 + image_path あり時のみ解決 (textが優先)
+  const imageUrl = useCellImageUrl(!titleFirstLine ? m.image_path : null)
 
   // direction='home' (エディタ → ダッシュボード収束) で自分がターゲットカードのとき、morph 中は
   // 内容を隠す。overlay がカード位置に到達する前に「中身が先に見えている」のを防ぐため、
@@ -604,20 +594,6 @@ function MandalartCard({
   const isConvergeTarget =
     convergeDirection === 'home' && convergeTargetId === m.id
 
-  useEffect(() => {
-    let cancelled = false
-    if (titleFirstLine || !m.image_path) {
-      setImageUrl(null)
-      return
-    }
-    import('@/lib/api/storage').then(({ getCellImageUrl }) =>
-      getCellImageUrl(m.image_path!).then((url) => {
-        if (!cancelled) setImageUrl(url || null)
-      })
-    )
-    return () => { cancelled = true }
-  }, [titleFirstLine, m.image_path])
-
   // カードクリック → 「カード → 中心セル」拡大アニメの source 値を計測 → setConverge('open')
   // → onOpen() で navigate。両端値の対称化のため EditorLayout の handleNavigateHome と同じ
   // ロジック (source DOM 実測) でカード DOM を読む。
@@ -627,38 +603,25 @@ function MandalartCard({
     if (wasRecentlyDragged()) return
     const cardEl = cardRef.current
     if (!cardEl) { onOpen(); return }
-    const r = cardEl.getBoundingClientRect()
-    const cs = getComputedStyle(cardEl)
-    const borderTop = parseFloat(cs.borderTopWidth) || 0
-    const borderLeft = parseFloat(cs.borderLeftWidth) || 0
-    const borderPx = borderTop
-    const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
-    let topInsetPx = DASHBOARD_CARD_INSET_PX
-    let sideInsetPx = DASHBOARD_CARD_INSET_PX
-    let fontPx = DASHBOARD_CARD_FONT_PX
-    const cardText = Array.from(cardEl.children).find(
-      (el) => el instanceof HTMLElement
-        && el.classList.contains('absolute')
-        && el.classList.contains('z-10')
-        && !el.classList.contains('inset-0'),
-    ) as HTMLElement | undefined
-    if (cardText) {
-      const wRect = cardText.getBoundingClientRect()
-      topInsetPx = wRect.top - r.top - borderTop
-      sideInsetPx = wRect.left - r.left - borderLeft
-      const span = cardText.querySelector('span')
-      if (span) fontPx = parseFloat(getComputedStyle(span).fontSize) || fontPx
-    }
+    const m_ = captureCardLikeSource(cardEl, {
+      topInsetPx: DASHBOARD_CARD_INSET_PX,
+      sideInsetPx: DASHBOARD_CARD_INSET_PX,
+      fontPx: DASHBOARD_CARD_FONT_PX,
+    })
     useConvergeStore.getState().setConverge(
       'open',
       m.id,
-      { left: r.left, top: r.top, width: r.width, height: r.height },
+      m_.rect,
       {
         // カードが image-only (タイトル空 + 画像あり) のときは imagePath を使い、それ以外は title 文字列を使う
         text: titleFirstLine ? (m.title || '') : '',
         imagePath: !titleFirstLine && m.image_path ? m.image_path : null,
         color: null,  // ダッシュボードカードは色を持たない (mandalart 型に color 列なし)
-        fontPx, topInsetPx, sideInsetPx, borderPx, radiusPx,
+        fontPx: m_.fontPx,
+        topInsetPx: m_.topInsetPx,
+        sideInsetPx: m_.sideInsetPx,
+        borderPx: m_.borderPx,
+        radiusPx: m_.radiusPx,
       },
     )
     onOpen()
@@ -693,30 +656,15 @@ function MandalartCard({
       title={m.title || '無題'}
     >
       {!titleFirstLine && imageUrl ? (
-        // draggable={false} で <img> の HTML5 native drag (画像保存ダイアログ) を無効化。
-        // これがないと mousedown 時に native drag が triggering して useDashboardDnd の
-        // mousemove ベース実装が乗っ取られ、画像カードがドラッグできなくなる。
-        <img src={imageUrl} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover select-none" />
+        // HTML5 native drag 抑止は index.css の global `img` rule で一括対応 (落とし穴 #1)。
+        <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
-        // Cell.tsx 中心セルのテキスト構造に合わせる:
-        // 絶対配置で inset 指定 + flex items-start + 行頭揃え。font-weight は html 全体の
-        // 300 (Light) を継承させ、中心セル (font-medium 等を当てない) と一致させる。
-        <div
-          style={{
-            top: DASHBOARD_CARD_INSET_PX,
-            right: DASHBOARD_CARD_INSET_PX,
-            bottom: DASHBOARD_CARD_INSET_PX,
-            left: DASHBOARD_CARD_INSET_PX,
-          }}
-          className="absolute z-10 flex items-start overflow-hidden"
-        >
-          <span
-            style={{ fontSize: DASHBOARD_CARD_FONT_PX, lineHeight: 1.25 }}
-            className="block w-full text-left leading-tight break-all whitespace-pre-wrap text-neutral-800 dark:text-neutral-100"
-          >
-            {m.title || '無題'}
-          </span>
-        </div>
+        // 共通 <CardLikeText>: ConvergeOverlay polling 互換構造を統一
+        <CardLikeText
+          text={m.title || '無題'}
+          fontPx={DASHBOARD_CARD_FONT_PX}
+          sideInsetPx={DASHBOARD_CARD_INSET_PX}
+        />
       )}
       {/* 更新日: hover 時のみ下部にうっすら表示 */}
       <div className="absolute bottom-1 left-2 right-2 text-[9px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">

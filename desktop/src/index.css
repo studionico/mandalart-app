@@ -15,6 +15,16 @@ html {
   font-weight: 300;
 }
 
+/* 全 <img> の HTML5 native drag を抑止 (落とし穴 #1)。
+   Tauri WebKit では HTML5 drag が壊れていて mousedown ベース実装を乗っ取るので、画像セル /
+   ダッシュボードカード / ストックエントリの drag が機能しなくなる。`<img draggable={false}>`
+   を毎回個別に書く代わりに、ここで一括抑止して将来の <img> 追加にも自動適用する。
+   `user-select: none` も併せて当てておく (テキスト選択経由の drag start 抑止)。 */
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
 /* 並列グリッド切替時のスライドアニメーション */
 /* 2 枚のグリッドを横並び (幅 200%) にして translateX で動かす。
    forward: 現在地 → 右隣、backward: 右隣 → 現在地 */

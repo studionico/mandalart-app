@@ -8,7 +8,9 @@ import {
   CELL_TEXT_INSET_SMALL_PX,
 } from '@/constants/layout'
 import { GRID_SIDE } from '@/constants/grid'
-import { getCellImageUrl, getCachedCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
+import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/storage'
+import { useCellImageUrl } from '@/hooks/useCellImageUrl'
+import { CardLikeText } from '@/components/CardLikeText'
 import { isCellEmpty } from '@/lib/utils/grid'
 
 type Props = {
@@ -66,10 +68,8 @@ export default function Cell({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cellRef = useRef<HTMLDivElement>(null)
   const { bg, text: textColor } = getColorClasses(cell.color)
-  // remount (例: orbit アニメ完了 → 通常 grid render) 時にキャッシュ済み画像を 1 frame目から
-  // 描画するため、useState 初期値で同期キャッシュを覗く。未キャッシュ (初回ロード) は null で
-  // 始まり、下の useEffect が async に解決する。
-  const [imageUrl, setImageUrl] = useState<string | null>(() => getCachedCellImageUrl(cell.image_path))
+  // 共通フック: 同期キャッシュ初期値 + async fallback で remount まばたきを抑止 (落とし穴 #18)
+  const imageUrl = useCellImageUrl(cell.image_path)
   const [draftText, setDraftText] = useState(cell.text)
   // インライン編集中にテキストエリアをダブルクリックすると 3×3 サイズに拡大表示する
   const [expandedRect, setExpandedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
@@ -80,19 +80,6 @@ export default function Cell({
   const [editingImagePath, setEditingImagePath] = useState<string | null>(cell.image_path)
   const [editingImageUrl, setEditingImageUrl] = useState<string | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
-
-  // 画像読み込み
-  useEffect(() => {
-    let cancelled = false
-    if (!cell.image_path) {
-      setImageUrl(null)
-      return
-    }
-    getCellImageUrl(cell.image_path).then((url) => {
-      if (!cancelled) setImageUrl(url || null)
-    })
-    return () => { cancelled = true }
-  }, [cell.image_path])
 
   // 編集モードに入ったら textarea にフォーカス + 末尾にカーソル + ドラフトを初期化
   useLayoutEffect(() => {
@@ -391,16 +378,8 @@ export default function Cell({
 
       {imageUrl && (
         <div className="absolute inset-0 overflow-hidden">
-          {/* draggable={false} で <img> の HTML5 native drag (画像保存ダイアログ) を無効化。
-              これがないと mousedown 時に native drag が triggering して useDragAndDrop の
-              mousemove ベース実装が乗っ取られ、画像セルがドラッグできなくなる (落とし穴 #1)。
-              dashboard / StockTab の <img> と同じパターン。 */}
-          <img
-            src={imageUrl}
-            alt=""
-            draggable={false}
-            className="w-full h-full object-cover select-none"
-          />
+          {/* HTML5 native drag 抑止は index.css の global `img` rule で一括対応 (落とし穴 #1)。 */}
+          <img src={imageUrl} alt="" className="w-full h-full object-cover" />
         </div>
       )}
 
@@ -506,14 +485,14 @@ export default function Cell({
         // 画像レイヤーは上で <div className="absolute inset-0"> として既に描画済み。
         null
       ) : (
-        <div style={textInsetStyle} className="absolute z-10 flex items-start overflow-hidden">
-          <span
-            style={fontStyle}
-            className={`block w-full text-left leading-tight break-all whitespace-pre-wrap ${textColor}`}
-          >
-            {cell.text}
-          </span>
-        </div>
+        // 共通 <CardLikeText> で ConvergeOverlay polling 互換構造を統一
+        <CardLikeText
+          text={cell.text}
+          fontPx={baseFontPx * fontScale}
+          topInsetPx={topInsetPx}
+          sideInsetPx={textInsetPx}
+          textColorClass={textColor}
+        />
       )}
 
     </div>

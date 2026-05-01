@@ -92,6 +92,7 @@ src/
 │   ├── UpdateDialog.tsx      # 自動アップデート確認・進捗・再起動ダイアログ
 │   ├── ThemeToggle.tsx       # ☀ ◐ ☾ のテーマ切替セグメント
 │   ├── ConvergeOverlay.tsx   # App 直下常駐の単一 overlay。エディタ ↔ ダッシュボード ↔ ストック 間の morph アニメ駆動 (寸法/枠/角丸/inset/font 並列 transition)
+│   ├── CardLikeText.tsx      # 中心セル / カード / ストックエントリのテキスト描画共通 (ConvergeOverlay polling 互換構造)
 │   │
 │   ├── dashboard/
 │   │   └── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
@@ -121,6 +122,7 @@ src/
 │   ├── useSubGrids.ts        # 9×9 表示用のサブグリッド一括取得
 │   ├── useDragAndDrop.ts     # エディタの D&D 実装 (cell source / stock source 両対応、mousedown ベース)
 │   ├── useDashboardDnd.ts    # ダッシュボードの D&D 実装 (card / stock source、editor とは別 policy)
+│   ├── useCellImageUrl.ts    # セル / カード相当の image_path → blob URL 解決 (sync cache + async fallback、remount まばたき抑止)
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
 │   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)
@@ -156,9 +158,10 @@ src/
 │   ├── supabase/
 │   │   └── client.ts         # Supabase クライアント (env 欠損時フォールバック)
 │   ├── utils/
-│   │   ├── grid.ts           # isCellEmpty / hasPeripheralContent / getCenterCell
-│   │   ├── dnd.ts            # resolveDndAction (D&D ルール判定)
-│   │   └── export.ts         # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
+│   │   ├── grid.ts                   # isCellEmpty / hasPeripheralContent / getCenterCell
+│   │   ├── dnd.ts                    # resolveDndAction (D&D ルール判定)
+│   │   ├── export.ts                 # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
+│   │   └── captureCardLikeSource.ts  # カード相当 DOM (中心セル / dashboard カード / ストックエントリ) から ConvergeOverlay morph source 値 (rect / border / radius / inset / font) を共通計測
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり)
 │   ├── realtime.ts           # Supabase Realtime (postgres_changes) 購読
 │   └── offline.ts            # オフラインスタブ (将来の pending updates 用)
