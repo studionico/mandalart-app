@@ -18,6 +18,7 @@ import AuthDialog from '@/components/AuthDialog'
 import TrashDialog from '@/components/dashboard/TrashDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
+import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
@@ -670,23 +671,13 @@ function MandalartCard({
       <div className="absolute bottom-1 left-2 right-2 text-[9px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
         {new Date(m.updated_at).toLocaleDateString('ja-JP')}
       </div>
-      {/* アクション: hover 時に右上 */}
-      <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={(e) => { e.stopPropagation(); onDuplicate() }}
-          className="w-5 h-5 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 flex items-center justify-center"
-          title="複製"
-        >
-          ⧉
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
-          className="w-5 h-5 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[10px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
-          title="削除"
-        >
-          ×
-        </button>
-      </div>
+      <HoverActionButtons
+        size="md"
+        actions={[
+          { icon: '⧉', variant: 'neutral', onClick: onDuplicate, title: '複製' },
+          { icon: '×', variant: 'red', onClick: onDelete, title: '削除' },
+        ]}
+      />
     </div>
   )
 }

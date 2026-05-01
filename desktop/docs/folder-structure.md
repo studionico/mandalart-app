@@ -115,7 +115,9 @@ src/
 │       ├── Button.tsx        # primary / secondary / ghost / danger バリアント (dark 対応)
 │       ├── Modal.tsx         # オーバーレイモーダル (size prop、max-h-[90vh])
 │       ├── BottomSheet.tsx   # モバイル用ボトムシート
-│       └── Toast.tsx         # トースト通知 (info / success / error + Undo)
+│       ├── Toast.tsx         # トースト通知 (info / success / error + Undo)
+│       ├── HoverActionButtons.tsx # カード/タイル右上の hover アクションアイコン群 (StockEntry / MandalartCard 共通、size: sm/md)
+│       └── ColorPicker.tsx   # PRESET_COLORS の円形ピッカー (Cell 拡大エディタ / CellEditModal 共通、size: sm/md)
 │
 ├── hooks/                    # React カスタムフック
 │   ├── useGrid.ts            # グリッド + セルデータの取得・更新

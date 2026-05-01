@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Modal from '@/components/ui/Modal'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
-import { PRESET_COLORS } from '@/constants/colors'
+import { ColorPicker } from '@/components/ui/ColorPicker'
 import { nextTabPosition } from '@/constants/tabOrder'
 import { CENTER_POSITION } from '@/constants/grid'
 import type { Cell } from '@/types'
@@ -141,21 +141,7 @@ export default function CellEditModal({
 
       <div>
         <label className="block text-xs font-medium text-neutral-500 mb-1.5">背景色</label>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setColor(null)}
-            className={`w-7 h-7 rounded-full border-2 bg-white ${color === null ? 'border-blue-500 scale-110' : 'border-neutral-200'} transition-transform`}
-            title="デフォルト"
-          />
-          {PRESET_COLORS.map((c) => (
-            <button
-              key={c.key}
-              onClick={() => setColor(c.key)}
-              className={`w-7 h-7 rounded-full border-2 ${c.bg} ${color === c.key ? 'border-blue-500 scale-110' : 'border-neutral-200'} transition-transform`}
-              title={c.label}
-            />
-          ))}
-        </div>
+        <ColorPicker value={color} onChange={setColor} size="md" />
       </div>
 
       <div className="flex justify-end gap-2 pt-1">

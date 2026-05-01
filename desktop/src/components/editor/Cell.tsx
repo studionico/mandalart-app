@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Cell as CellType } from '@/types'
-import { getColorClasses, PRESET_COLORS } from '@/constants/colors'
+import { getColorClasses } from '@/constants/colors'
+import { ColorPicker } from '@/components/ui/ColorPicker'
 import { CLICK_DELAY_MS } from '@/constants/timing'
 import {
   CELL_BASE_FONT_PX,
@@ -422,23 +423,7 @@ export default function Cell({
             className="relative z-10 shrink-0 border-t border-neutral-200 dark:border-neutral-700 bg-white/90 dark:bg-neutral-900/90 backdrop-blur px-3 py-2 flex items-center gap-3 flex-wrap"
           >
             {/* カラーピッカー */}
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => handleSelectColor(null)}
-                className={`w-6 h-6 rounded-full border-2 bg-white ${editingColor === null ? 'border-blue-500 scale-110' : 'border-neutral-300 dark:border-neutral-600'} transition-transform`}
-                title="デフォルト"
-              />
-              {PRESET_COLORS.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => handleSelectColor(c.key)}
-                  className={`w-6 h-6 rounded-full border-2 ${c.bg} ${editingColor === c.key ? 'border-blue-500 scale-110' : 'border-neutral-300 dark:border-neutral-600'} transition-transform`}
-                  title={c.label}
-                />
-              ))}
-            </div>
+            <ColorPicker value={editingColor} onChange={handleSelectColor} size="sm" />
 
             {/* 画像 */}
             <div className="flex items-center gap-2 ml-auto">

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
 import { CONVERGE_DURATION_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
+import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { useTwoClickConfirm } from '@/hooks/useTwoClickConfirm'
@@ -213,25 +214,13 @@ function StockEntry({
         {new Date(item.created_at).toLocaleDateString('ja-JP')}
       </div>
 
-      {/* アクション: hover 時に右上 */}
-      <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={(e) => { e.stopPropagation(); onPaste(item) }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center justify-center"
-          title="貼付"
-        >
-          ↓
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(item.id) }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="w-4 h-4 rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 text-[8px] text-red-500 hover:text-red-700 dark:hover:text-red-300 flex items-center justify-center"
-          title="削除"
-        >
-          ✕
-        </button>
-      </div>
+      <HoverActionButtons
+        size="sm"
+        actions={[
+          { icon: '↓', variant: 'blue', onClick: () => onPaste(item), title: '貼付' },
+          { icon: '✕', variant: 'red', onClick: () => onDelete(item.id), title: '削除' },
+        ]}
+      />
     </div>
   )
 }
