@@ -17,6 +17,13 @@
  */
 export const CLICK_DELAY_MS = 400
 
+/**
+ * mousedown ベース drag の終了直後に発火する click を抑止するための guard 期間 (ms)。
+ * Tauri WebKit では HTML5 D&D が動かないため自前 mousedown 実装をしているが、drag 終了の
+ * mouseup は通常の click event も連発する。この期間内の click は drag 余韻と見なして無視。
+ */
+export const DRAG_CLICK_SUPPRESS_MS = 150
+
 // --- 並列グリッドスライド ---
 
 /** 並列グリッド切替時の横スライド duration (ms) */

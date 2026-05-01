@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { DRAG_CLICK_SUPPRESS_MS } from '@/constants/timing'
 import type { ActionDropType } from '@/components/editor/DragActionPanel'
 
 /**
@@ -138,7 +139,7 @@ export function useDashboardDnd({ onDrop }: Opts) {
       cleanup()
       // drag 完了直後の click は suppress (cardClickGuard 経由で参照される)
       recentlyDraggedRef.current = true
-      setTimeout(() => { recentlyDraggedRef.current = false }, 150)
+      setTimeout(() => { recentlyDraggedRef.current = false }, DRAG_CLICK_SUPPRESS_MS)
       // onDrop は cleanup 後に呼ぶ (state リセット後の callback 内で副作用を許容)
       void Promise.resolve(onDropRef.current(action))
     }

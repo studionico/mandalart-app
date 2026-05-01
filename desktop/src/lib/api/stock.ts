@@ -1,5 +1,5 @@
 import { query, execute, generateId, now } from '../db'
-import { CENTER_POSITION } from '@/constants/grid'
+import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
 import { deleteGrid } from './grids'
 import { shredCellSubtree } from './cells'
 import type { Cell, StockItem, CellSnapshot, GridSnapshot } from '../../types'
@@ -166,7 +166,7 @@ async function expandGridSnapshotInto(
   // 新規マンダラートに paste するケースでは root grid に center cell しか存在しないため、
   // 既存 cell ベースのループだけでは peripherals が永遠に作成されない (旧バグ)。
   const snapByPos = new Map(gridSnap.cells.map((c) => [c.position, c]))
-  for (let pos = 0; pos < 9; pos++) {
+  for (let pos = 0; pos < GRID_CELL_COUNT; pos++) {
     if (pos === CENTER_POSITION) continue
     const sc = snapByPos.get(pos)
     const existingId = cellIdByPos.get(pos)
@@ -220,7 +220,7 @@ async function insertGridSnapshot(
   // peripherals 8 個を挿入 (position=4 は skip)
   const byPos = new Map(snap.cells.map((c) => [c.position, c]))
   const newCellIds = new Map<number, string>()
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < GRID_CELL_COUNT; i++) {
     if (i === CENTER_POSITION) continue
     const c = byPos.get(i)
     const cellId = generateId()
