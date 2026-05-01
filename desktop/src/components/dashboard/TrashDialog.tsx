@@ -4,7 +4,7 @@ import Button from '@/components/ui/Button'
 import {
   getDeletedMandalarts, restoreMandalart, permanentDeleteMandalart,
 } from '@/lib/api/mandalarts'
-import { CONFIRM_AUTO_RESET_MS } from '@/constants/timing'
+import { useTwoClickConfirm, useTwoClickConfirmKey } from '@/hooks/useTwoClickConfirm'
 import type { Mandalart } from '@/types'
 
 type Props = {
@@ -19,11 +19,10 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
   const [loading, setLoading] = useState(false)
   // busy: 'all' = 全削除中、string (id) = 個別操作中
   const [busy, setBusy] = useState<string | null>(null)
-  // Tauri v2 の WebView は window.confirm が動作しないため、2 クリック方式で確認する。
-  // 1 回目のクリックで confirmingId / confirmingAll を立ててボタン表記を切替え、
-  // 2 回目のクリックで実削除。CONFIRM_AUTO_RESET_MS ms 放置したら自動解除。
-  const [confirmingId, setConfirmingId] = useState<string | null>(null)
-  const [confirmingAll, setConfirmingAll] = useState(false)
+  // Tauri v2 の WebView は window.confirm が動作しないため、2 クリック方式で確認する (落とし穴 #7)。
+  // 個別 / 全削除はそれぞれ独立に arm され、CONFIRM_AUTO_RESET_MS で自動解除。
+  const idConfirm = useTwoClickConfirmKey<string>()
+  const allConfirm = useTwoClickConfirm()
 
   async function load() {
     setLoading(true)
@@ -36,22 +35,12 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
 
   useEffect(() => {
     if (open) load()
-    // 閉じたら confirm 状態もリセット
+    // 閉じたら confirm 状態もリセット (idConfirm.reset / allConfirm.reset は useCallback で stable)
     if (!open) {
-      setConfirmingId(null)
-      setConfirmingAll(false)
+      idConfirm.reset()
+      allConfirm.reset()
     }
-  }, [open])
-
-  // confirm 状態は CONFIRM_AUTO_RESET_MS で自動解除
-  useEffect(() => {
-    if (!confirmingId && !confirmingAll) return
-    const t = setTimeout(() => {
-      setConfirmingId(null)
-      setConfirmingAll(false)
-    }, CONFIRM_AUTO_RESET_MS)
-    return () => clearTimeout(t)
-  }, [confirmingId, confirmingAll])
+  }, [open, idConfirm, allConfirm])
 
   async function handleRestore(m: Mandalart) {
     setBusy(m.id)
@@ -66,8 +55,8 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
 
   async function handlePermanentDelete(m: Mandalart) {
     // 1 回目: confirm 状態へ
-    if (confirmingId !== m.id) {
-      setConfirmingId(m.id)
+    if (!idConfirm.isArmed(m.id)) {
+      idConfirm.arm(m.id)
       return
     }
     // 2 回目: 実削除
@@ -78,14 +67,14 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
       onChange()
     } finally {
       setBusy(null)
-      setConfirmingId(null)
+      idConfirm.reset()
     }
   }
 
   async function handleDeleteAll() {
     // 1 回目: confirm 状態へ
-    if (!confirmingAll) {
-      setConfirmingAll(true)
+    if (!allConfirm.armed) {
+      allConfirm.arm()
       return
     }
     // 2 回目: 全件削除
@@ -105,7 +94,7 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
       onChange()
     } finally {
       setBusy(null)
-      setConfirmingAll(false)
+      allConfirm.reset()
     }
   }
 
@@ -124,9 +113,9 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
               size="sm"
               onClick={handleDeleteAll}
               disabled={busy !== null}
-              title={confirmingAll ? 'もう一度押すとすべて完全削除されます' : 'ゴミ箱のすべてのアイテムを完全削除'}
+              title={allConfirm.armed ? 'もう一度押すとすべて完全削除されます' : 'ゴミ箱のすべてのアイテムを完全削除'}
             >
-              {confirmingAll
+              {allConfirm.armed
                 ? `本当に全削除? (${items.length}件)`
                 : `すべて削除 (${items.length}件)`}
             </Button>
@@ -158,9 +147,9 @@ export default function TrashDialog({ open, onClose, onChange }: Props) {
                   size="sm"
                   onClick={() => handlePermanentDelete(m)}
                   disabled={busy !== null}
-                  title={confirmingId === m.id ? 'もう一度押すと完全削除されます' : '完全削除 (取り消せません)'}
+                  title={idConfirm.isArmed(m.id) ? 'もう一度押すと完全削除されます' : '完全削除 (取り消せません)'}
                 >
-                  {confirmingId === m.id ? '本当に削除?' : '完全削除'}
+                  {idConfirm.isArmed(m.id) ? '本当に削除?' : '完全削除'}
                 </Button>
               </div>
             ))}

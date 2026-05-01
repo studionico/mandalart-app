@@ -1,10 +1,11 @@
 
 import { useEffect, useState } from 'react'
 import { getStockItems, deleteStockItem } from '@/lib/api/stock'
-import { CONFIRM_AUTO_RESET_MS, CONVERGE_DURATION_MS } from '@/constants/timing'
+import { CONVERGE_DURATION_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
+import { useTwoClickConfirm } from '@/hooks/useTwoClickConfirm'
 import { useConvergeStore } from '@/store/convergeStore'
 import type { StockItem } from '@/types'
 
@@ -26,9 +27,8 @@ export default function StockTab({
   // morph 期間中 opacity 0 で隠し、終端の 1ms snap で可視化する (open / home と同じ pattern)。
   const convergeDirection = useConvergeStore((s) => s.direction)
   const convergeTargetId = useConvergeStore((s) => s.targetId)
-  // Tauri v2 の WebView は window.confirm が動作しないため、一括削除は 2 クリック方式。
-  // 1 回目でボタン表記を切替え、2 回目で実行。CONFIRM_AUTO_RESET_MS 放置で自動解除。
-  const [confirmingAll, setConfirmingAll] = useState(false)
+  // Tauri v2 の WebView は window.confirm が動作しないため、一括削除は 2 クリック方式 (落とし穴 #7)。
+  const allConfirm = useTwoClickConfirm()
   const [busy, setBusy] = useState(false)
 
   async function load() {
@@ -40,13 +40,6 @@ export default function StockTab({
 
   useEffect(() => { load() }, [reloadKey])
 
-  // confirm 状態は CONFIRM_AUTO_RESET_MS で自動解除
-  useEffect(() => {
-    if (!confirmingAll) return
-    const t = setTimeout(() => setConfirmingAll(false), CONFIRM_AUTO_RESET_MS)
-    return () => clearTimeout(t)
-  }, [confirmingAll])
-
   async function handleDelete(id: string) {
     await deleteStockItem(id)
     setItems((prev) => prev.filter((i) => i.id !== id))
@@ -54,8 +47,8 @@ export default function StockTab({
 
   async function handleDeleteAll() {
     // 1 回目: confirm 状態へ
-    if (!confirmingAll) {
-      setConfirmingAll(true)
+    if (!allConfirm.armed) {
+      allConfirm.arm()
       return
     }
     // 2 回目: 全件削除
@@ -73,7 +66,7 @@ export default function StockTab({
       }
     } finally {
       setBusy(false)
-      setConfirmingAll(false)
+      allConfirm.reset()
     }
   }
 
@@ -115,9 +108,9 @@ export default function StockTab({
             size="sm"
             onClick={handleDeleteAll}
             disabled={busy}
-            title={confirmingAll ? 'もう一度押すとすべて削除されます' : 'ストックをすべて削除'}
+            title={allConfirm.armed ? 'もう一度押すとすべて削除されます' : 'ストックをすべて削除'}
           >
-            {confirmingAll
+            {allConfirm.armed
               ? `本当に全削除? (${items.length}件)`
               : `すべて削除 (${items.length}件)`}
           </Button>

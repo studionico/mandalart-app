@@ -114,7 +114,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 4. **Realtime の table フィルタが混線する** — `postgres_changes` の `{ table: 'X' }` が効かないことがある。各ハンドラで `if (payload.table !== 'X') return` を必ず入れる
 5. **Realtime DELETE は子行を連鎖しない** — cloud FK CASCADE で消えた子行の DELETE イベントは来ない + 未 push の local 子行は孤立する。各 DELETE ハンドラで `DELETE FROM cells WHERE grid_id IN (...)` のように明示カスケード
 6. **完全削除は local + cloud 両方消す** — `permanentDeleteMandalart` は local DELETE 後に Supabase も消す。cloud を残すと pull で復活する
-7. **`window.confirm` が Tauri WebView で動かない** — state ベースの 2 クリック確認 UI で代替 ([`TrashDialog.tsx`](desktop/src/components/dashboard/TrashDialog.tsx))
+7. **`window.confirm` が Tauri WebView で動かない** — [`useTwoClickConfirm`](desktop/src/hooks/useTwoClickConfirm.ts) hook で 2 クリック確認 UI を組む (boolean / keyed の 2 形式、`TrashDialog.tsx` / `StockTab.tsx` で使用)
 8. **CSS keyframes の `transform: var(--x)` は WebKit で補間されない** — 固定 keyframes 8 方向で対応。詳細は [`animations.md`](desktop/docs/animations.md)
 9. **環境変数が欠損するとクラッシュ** — `lib/supabase/client.ts` がダミー URL でフォールバックし `isSupabaseConfigured` で gate
 10. **中心セル行の有無は grid 種別で 3 パターン** (migration 006 以降):
