@@ -391,7 +391,16 @@ export default function Cell({
 
       {imageUrl && (
         <div className="absolute inset-0 overflow-hidden">
-          <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+          {/* draggable={false} で <img> の HTML5 native drag (画像保存ダイアログ) を無効化。
+              これがないと mousedown 時に native drag が triggering して useDragAndDrop の
+              mousemove ベース実装が乗っ取られ、画像セルがドラッグできなくなる (落とし穴 #1)。
+              dashboard / StockTab の <img> と同じパターン。 */}
+          <img
+            src={imageUrl}
+            alt=""
+            draggable={false}
+            className="w-full h-full object-cover select-none"
+          />
         </div>
       )}
 
