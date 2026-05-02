@@ -36,7 +36,7 @@ CREATE TABLE mandalarts (
 
 > **`last_grid_id` は前回開いていた sub-grid の id**。ダッシュボードからマンダラートを再オープンしたときに drill 階層を復元するため、EditorLayout の `currentGridId` 変化監視 useEffect で都度更新。null は「未設定 → root にフォールバック」を意味する。stale (grid 削除済み) の場合は復元時に root に戻す + null にクリーンアップ。push/pull/realtime で同期される。
 
-> **`sort_order` / `pinned` はダッシュボード整理 UI のため (migration 009 以降)**。`getMandalarts` の ORDER BY は `pinned DESC, sort_order ASC NULLS LAST, updated_at DESC`。card-to-card D&D で `reorderMandalarts(orderedIds)` が一括 0..N で振り直し、★ ボタンで `pinned` を切替える。push/pull/realtime で同期される。
+> **`sort_order` / `pinned` はダッシュボード整理 UI のため (migration 009 以降)**。`getMandalarts` の ORDER BY は `pinned DESC, sort_order ASC NULLS LAST, created_at DESC`。card-to-card D&D で `reorderMandalarts(orderedIds)` が一括 0..N で振り直し、★ ボタンで `pinned` を切替える。push/pull/realtime で同期される。fallback に `updated_at` ではなく `created_at` を使うのは、編集 (タイトル変更 / セル入力) で `updated_at` が bumped されてもダッシュボード上のカード位置を動かさないため。
 
 > **`folder_id` はダッシュボードのフォルダタブ機能 (migration 010 以降)**。すべてのマンダラートは必ず 1 つのフォルダに所属する。Inbox は `folders.is_system=1` の system folder として `ensureInboxFolder()` の冪等 bootstrap で自動生成され、削除不可。タブ間 D&D で `updateMandalartFolderId(id, folderId)` を呼ぶと `sort_order` は NULL リセットされ移動先末尾に並ぶ。push/pull/realtime で同期される。
 

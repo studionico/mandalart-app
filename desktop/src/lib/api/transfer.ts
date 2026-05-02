@@ -4,6 +4,7 @@ import { parseTextToSnapshot } from '@/lib/import-parser'
 import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
 import { TAB_ORDER } from '@/constants/tabOrder'
 import { ensureInboxFolder } from './folders'
+import { nextTopSortOrder } from './mandalarts'
 
 export { parseTextToSnapshot }
 
@@ -224,16 +225,18 @@ export async function importFromJSON(snapshot: GridSnapshot): Promise<Mandalart>
   // 全マンダラートは必ず folder に所属する (Phase B、migration 010)。インポートは Inbox 直下に集約。
   // ensureInboxFolder() は冪等 + singleton promise なので毎回呼び出しても OK。
   const folderId = await ensureInboxFolder()
+  // 新規カードと同じく、Inbox の defined-sort_order バケットの先頭に並ぶよう MIN-1 を割当てる
+  const sortOrder = await nextTopSortOrder(folderId)
 
   // root 中心セルの id を先に決めて mandalart を作る
   const rootCenterCellId = generateId()
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [mandalartId, centerText, rootCenterCellId, folderId, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, folder_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [mandalartId, centerText, rootCenterCellId, folderId, sortOrder, ts, ts],
   )
   // root grid を作成 (parent_cell_id=null, 自身が center cell を INSERT)
   await importIntoGrid(snapshot, mandalartId, rootCenterCellId, null, 0, /* ownsCenter */ true)
-  return { id: mandalartId, title: centerText, root_cell_id: rootCenterCellId, show_checkbox: false, pinned: false, sort_order: null, folder_id: folderId, created_at: ts, updated_at: ts, user_id: '' }
+  return { id: mandalartId, title: centerText, root_cell_id: rootCenterCellId, show_checkbox: false, pinned: false, sort_order: sortOrder, folder_id: folderId, created_at: ts, updated_at: ts, user_id: '' }
 }
 
 /**

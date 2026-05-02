@@ -19,16 +19,20 @@ const ROOT_IMAGE_PATH_SUBQUERY = `(
  * - `folderId` 指定 (Phase B 以降): その folder に所属するマンダラートのみ返す
  * - 未指定: 全 folder のマンダラートを返す (検索 / バックアップ用途)
  *
- * 並び順 (Phase A 以降):
+ * 並び順:
  *   1. pinned カードを最上位固定 (pinned DESC で 1 → 0)
  *   2. ユーザー定義 sort_order が小さい順 (NULL は最後にフォールバック)
- *   3. 同 sort_order / 未指定どうしは updated_at で新しい順
+ *   3. 同 sort_order / 未指定どうしは **created_at で新しい順**
+ *
+ * 3 つ目を `updated_at` ではなく `created_at` にしているのは、編集 (タイトル変更 / セル
+ * 入力) で `updated_at` が bumped されてもダッシュボード上のカード位置が動かないように
+ * するため。新規作成は created_at が最新なので自動的に NULL バケットの先頭に並ぶ。
  */
 export async function getMandalarts(folderId?: string): Promise<Mandalart[]> {
   const orderBy = `ORDER BY m.pinned DESC,
                             CASE WHEN m.sort_order IS NULL THEN 1 ELSE 0 END,
                             m.sort_order ASC,
-                            m.updated_at DESC`
+                            m.created_at DESC`
   if (folderId) {
     return query<Mandalart>(
       `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
@@ -60,6 +64,19 @@ export async function getMandalart(id: string): Promise<Mandalart | null> {
 }
 
 /**
+ * 指定 folder 内で「先頭に並ぶ」sort_order 値を返す。
+ * 既存 cards の `MIN(sort_order) - 1` (全 NULL の場合は -1)。新規 card / インポート / stock paste
+ * 等の作成経路でこれを sort_order に入れると、reorder 済みの既存 card より前に並ぶ。
+ */
+export async function nextTopSortOrder(folderId: string): Promise<number> {
+  const rows = await query<{ min_sort: number | null }>(
+    'SELECT MIN(sort_order) AS min_sort FROM mandalarts WHERE folder_id = ? AND deleted_at IS NULL',
+    [folderId],
+  )
+  return (rows[0]?.min_sort ?? 0) - 1
+}
+
+/**
  * マンダラートを新規作成する。
  *
  * lazy cell creation 設計 (commit 7668c5c〜) では peripheral cell は user が書込んだ瞬間に
@@ -75,9 +92,14 @@ export async function createMandalart(title = '', folderId?: string | null): Pro
   const rootCenterCellId = generateId()
   const ts = now()
 
+  // 新規カードは folder 内の `MIN(sort_order) - 1` を割当てて defined-sort_order バケットの
+  // 先頭に来るようにする。folder に既存 reorder 済みカード (sort_order=0..N) があっても新規が
+  // 必ず top に並ぶ。folderId 未指定 (legacy 経路) は NULL のまま。
+  const sortOrder = folderId ? await nextTopSortOrder(folderId) : null
+
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [mandalartId, title, rootCenterCellId, folderId ?? null, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, folder_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [mandalartId, title, rootCenterCellId, folderId ?? null, sortOrder, ts, ts],
   )
   await execute(
     'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -94,7 +116,7 @@ export async function createMandalart(title = '', folderId?: string | null): Pro
     root_cell_id: rootCenterCellId,
     show_checkbox: false,
     last_grid_id: null,
-    sort_order: null,
+    sort_order: sortOrder,
     pinned: false,
     folder_id: folderId ?? null,
     created_at: ts,
@@ -359,10 +381,13 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
 
   // show_checkbox / folder_id はコピー元の設定を継承する (テンプレ複製の自然な挙動)。
   // last_grid_id は継承しない (新規コピーは root から始まるのが自然) → 列省略で NULL になる。
-  // sort_order / pinned はリセット (複製は末尾に未ピンで追加されるのが自然)。
+  // pinned は継承しない (複製は未ピンで開始)。
+  // sort_order は他の作成経路 (createMandalart / importFromJSON) と統一して `nextTopSortOrder`
+  // で「folder の先頭」に配置 (Inbox / Archive 共通: reorder 済みでも必ず top に並ぶ)。
+  const sortOrder = src.folder_id ? await nextTopSortOrder(src.folder_id) : null
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, src.folder_id ?? null, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, folder_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, src.folder_id ?? null, sortOrder, ts, ts],
   )
 
   for (const g of allGrids) {
@@ -400,7 +425,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     root_cell_id: newRootCellId,
     show_checkbox: src.show_checkbox,
     last_grid_id: null,
-    sort_order: null,
+    sort_order: sortOrder,
     pinned: false,
     folder_id: src.folder_id ?? null,
     created_at: ts,

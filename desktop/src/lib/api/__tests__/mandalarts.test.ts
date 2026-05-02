@@ -9,6 +9,7 @@ import {
   deleteMandalart, restoreMandalart, getDeletedMandalarts,
   permanentDeleteMandalart, updateMandalartTitle,
   updateMandalartPinned, updateMandalartSortOrder, reorderMandalarts,
+  duplicateMandalart,
 } from '@/lib/api/mandalarts'
 
 let db: Database.Database
@@ -170,7 +171,7 @@ describe('Phase A: 並び替え + ピン留め (migration 009)', () => {
     expect(list[1].id).toBe(a.id)
   })
 
-  it('getMandalarts: 同 pinned 状態内は sort_order 昇順、NULL は最後 (updated_at fallback)', async () => {
+  it('getMandalarts: 同 pinned 状態内は sort_order 昇順、NULL は最後 (created_at fallback)', async () => {
     const a = await createMandalart('a')  // sort_order = NULL
     const b = await createMandalart('b')
     const c = await createMandalart('c')
@@ -181,8 +182,59 @@ describe('Phase A: 並び替え + ピン留め (migration 009)', () => {
     expect(list.map((m) => m.id)).toEqual([b.id, c.id, a.id])
   })
 
-  it('getMandalarts: pinned > sort_order > updated_at の優先順位', async () => {
-    const old = await createMandalart('old')          // sort_order=NULL, oldest updated_at
+  it('duplicateMandalart: reorder 済 folder で複製しても先頭に並ぶ (createMandalart と同じ semantics)', async () => {
+    // 統一性の回帰テスト: createMandalart / duplicateMandalart / importFromJSON すべての
+    // 作成経路が `nextTopSortOrder` を経由して同じ「先頭に並ぶ」結果になるべき。
+    const a = await createMandalart('A', 'archive-folder')
+    const b = await createMandalart('B', 'archive-folder')
+    const c = await createMandalart('C', 'archive-folder')
+    await reorderMandalarts([a.id, b.id, c.id])  // sort_order = 0, 1, 2
+    // a を複製 → 新規カードは先頭 (sort_order = -1)
+    const dup = await duplicateMandalart(a.id)
+    expect(dup.sort_order).toBe(-1)
+    expect(dup.folder_id).toBe('archive-folder')  // folder_id は継承
+    const list = await getMandalarts('archive-folder')
+    expect(list.map((m) => m.id)).toEqual([dup.id, a.id, b.id, c.id])
+  })
+
+  it('createMandalart with folderId: 既存 reorder 済 (sort_order=0..N) folder でも先頭に並ぶ', async () => {
+    // 回帰テスト: フォルダ内で reorder 済みのカード群がある状態で新規作成すると、
+    // 新規カードが defined-sort_order バケットの先頭 (MIN(sort_order) - 1) に並ぶ。
+    // フォルダ移動後 (updateMandalartFolderId は sort_order を NULL リセット) のシナリオで
+    // 「Archive で新規作成しても末尾に行く」回帰を防ぐ。
+    const a = await createMandalart('A', 'archive-folder')
+    const b = await createMandalart('B', 'archive-folder')
+    const c = await createMandalart('C', 'archive-folder')
+    // 3 件を [A, B, C] に reorder (sort_order=0, 1, 2)
+    await reorderMandalarts([a.id, b.id, c.id])
+    // この時点の folder 内 sort_order: a=0, b=1, c=2
+    // 新規 D を archive-folder に作成 → MIN-1 = -1 が割当てられる
+    const d = await createMandalart('D', 'archive-folder')
+    expect(d.sort_order).toBe(-1)
+    // getMandalarts(archive) で D が先頭に来る (defined sort_order ASC で D(-1) → a(0) → b(1) → c(2))
+    const list = await getMandalarts('archive-folder')
+    expect(list.map((m) => m.id)).toEqual([d.id, a.id, b.id, c.id])
+  })
+
+  it('getMandalarts: 編集 (updateMandalartTitle で updated_at 更新) してもカード位置が動かない', async () => {
+    // 回帰テスト: 編集で updated_at が bump されてもダッシュボード上の位置は変わらない
+    // (created_at fallback により、編集してもカード位置不変)。
+    const a = await createMandalart('A')
+    await new Promise((r) => setTimeout(r, 5))
+    const b = await createMandalart('B')
+    await new Promise((r) => setTimeout(r, 5))
+    const c = await createMandalart('C')
+    // 初期順序: created_at DESC で [C, B, A]
+    expect((await getMandalarts()).map((m) => m.id)).toEqual([c.id, b.id, a.id])
+    // a を編集 → updated_at 更新されるが created_at 不変
+    await new Promise((r) => setTimeout(r, 5))
+    await updateMandalartTitle(a.id, 'A-edited')
+    // 期待: 順序は [C, B, A] のまま (a が先頭に来ない)
+    expect((await getMandalarts()).map((m) => m.id)).toEqual([c.id, b.id, a.id])
+  })
+
+  it('getMandalarts: pinned > sort_order > created_at の優先順位', async () => {
+    const old = await createMandalart('old')          // sort_order=NULL, oldest created_at
     await new Promise((r) => setTimeout(r, 5))
     const newer = await createMandalart('newer')      // sort_order=NULL, newer
     await new Promise((r) => setTimeout(r, 5))
@@ -191,7 +243,7 @@ describe('Phase A: 並び替え + ピン留め (migration 009)', () => {
     const pinned = await createMandalart('pinned')    // pinned=1, sort_order=NULL
     await updateMandalartPinned(pinned.id, true)
     const list = await getMandalarts()
-    // 期待: pinned 先頭、次に sort_order=0 の ordered、その後 sort_order=NULL を updated_at 新→旧
+    // 期待: pinned 先頭、次に sort_order=0 の ordered、その後 sort_order=NULL を created_at 新→旧
     expect(list.map((m) => m.id)).toEqual([pinned.id, ordered.id, newer.id, old.id])
   })
 })
