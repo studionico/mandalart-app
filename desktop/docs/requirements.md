@@ -297,6 +297,38 @@ Shift+Tab は逆順
 
 ---
 
+## ヘルプ / Welcome モーダル
+
+新規ユーザー導入用に、操作説明を Carousel 形式のモーダルで提供する。
+
+### 表示経路
+
+| 経路 | autoAdvance | 「次回以降表示しない」 |
+|---|---|---|
+| 初回起動時 (welcome) | ON (各スライド 5 秒、コンセプトのみ ~12 秒) | **表示** |
+| OS メニューバー「ヘルプ」→「使い方を見る」(再訪) | OFF (手動操作のみ) | 非表示 |
+
+### コンテンツ (時系列順 7 スライド)
+
+1. **コンセプト** — マンダラート手法 (中心に目標 → 8 マスに展開 → 階層的に掘り下げ) を CSS keyframe アニメで表現する専用スライド ([`ConceptSlide.tsx`](../src/components/help/ConceptSlide.tsx))
+2. マンダラートを新規作成 (ホーム)
+3. セルを編集 (エディタ)
+4. 階層の移動 (ドリルダウン / 親階層へ戻る)
+5. 9×9 表示
+6. ホームへ戻る (エディタ → ダッシュボード)
+7. マンダラートを開く (ホーム → エディタ、再訪)
+
+### 実装ポイント
+
+- 自動進行中は dialog 内に mouse hover で一時停止 / 離れたら再開
+- 手動操作: ← / → ボタン、dots indicator、キーボード ← → / Esc
+- 最終スライドで自動進行は停止 (ループしない)
+- 初回起動判定: `localStorage.welcomeSeenVersion` と [`WELCOME_VERSION`](../src/constants/welcome.ts) を比較。「次回以降表示しない」を check して close すると現行 version が保存される
+- WELCOME_VERSION を bump すると全 user で 1 回だけ再表示 (新機能告知も兼ねる)
+- スクリーンショットは `desktop/public/help/<slug>.png` に置いて `/help/<slug>.png` で参照
+
+---
+
 ## デスクトップ固有機能
 
 | 機能 | 内容 | 状態 |

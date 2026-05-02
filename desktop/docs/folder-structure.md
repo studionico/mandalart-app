@@ -97,6 +97,12 @@ src/
 │   ├── dashboard/
 │   │   └── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
 │   │
+│   ├── help/                 # 操作説明 / Welcome
+│   │   ├── HelpDialog.tsx       # Carousel 式モーダル (7 スライド、自動進行 / dots / キーボード)
+│   │   ├── ConceptSlide.tsx     # スライド 1: マンダラート手法のコンセプトを CSS keyframe アニメで表現
+│   │   ├── FeatureSlide.tsx     # スライド 2-7: title + description + screenshot 枠の共通 component
+│   │   └── helpContent.ts       # 7 スライドのデータ (時系列順、screenshot URL は雛形では未指定)
+│   │
 │   ├── editor/               # エディタ関連
 │   │   ├── EditorLayout.tsx      # エディタ全体レイアウト・状態管理のハブ
 │   │   ├── GridView3x3.tsx       # 3×3 グリッド表示
@@ -134,7 +140,10 @@ src/
 │   ├── useAuthBootstrap.ts   # 起動時のセッション復元 + deep link ハンドラ登録
 │   ├── useTheme.ts           # themeStore → <html>.dark クラスの適用 + prefers-color-scheme 追従
 │   ├── useGlobalShortcut.ts  # Cmd+Shift+M でウィンドウ表示/非表示
-│   └── useAppUpdate.ts       # tauri-plugin-updater の check / download / install
+│   ├── useAppUpdate.ts       # tauri-plugin-updater の check / download / install
+│   ├── useCloudEmptyCellsCleanup.ts # cloud 空 cell を「アプリ更新時に一度だけ」掃除する版管理 hook
+│   ├── useCloudFoldersCleanup.ts    # 旧 syncAwareDelete が残した cloud の deleted_at 付き folder 行を 1 回だけ掃除
+│   └── useWelcomeOnFirstRun.ts      # 初回起動 / WELCOME_VERSION bump 時に welcome モーダルを出すべきか判定 (App.tsx で 1 回呼出)
 │
 ├── store/                    # Zustand グローバルストア
 │   ├── editorStore.ts        # currentGridId / viewMode / breadcrumb / fontLevel
@@ -180,7 +189,8 @@ src/
 │   ├── layout.ts             # OUTER_GRID_GAP_PX / CELL_BASE_FONT_PX / DASHBOARD_CARD_* 等の寸法定数
 │   ├── storage.ts            # STORAGE_KEYS (localStorage キー一元化)
 │   ├── colors.ts             # プリセットカラー定義
-│   └── tabOrder.ts           # Tab 移動順 [4, 7, 6, 3, 0, 1, 2, 5, 8]
+│   ├── tabOrder.ts           # Tab 移動順 [4, 7, 6, 3, 0, 1, 2, 5, 8]
+│   └── welcome.ts            # WELCOME_VERSION (welcome モーダルのコンテンツ世代、bump で全 user 再表示)
 │
 ├── types/
 │   └── index.ts              # Mandalart / Grid / Cell / StockItem / CellSnapshot / GridSnapshot 型定義

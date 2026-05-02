@@ -49,6 +49,35 @@ img {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* Welcome モーダルのコンセプトスライド (フルスクリーン演出) 用 keyframes。
+   Phase 1-2 (3×3) → Phase 3a (3×3 shrink) → Phase 3b (周辺 block 展開) → Phase 4 (catchphrase)
+   の演出を ConceptSlide.tsx で組み立てる。各 cell / block / line の fade-in は既存
+   orbit-fade-in を再利用。 */
+
+/* Phase 3a: 3×3 grid を中央へ scale 1 → 1/3 に縮小。transform-origin は呼出側で center に設定。
+   内部の cells と Phase 2 lines (svg) も同時に scale するので、shrink 後は中央 1/9 領域に
+   小さい 3×3 が収まる = 9×9 layout の中央ブロックと一致する。 */
+@keyframes concept-3x3-shrink-to-center {
+  from { transform: scale(1); }
+  to   { transform: scale(0.3333); }
+}
+
+/* Phase 4 で全体 (中央 3×3 + 周辺 8 block + lines) を縮小しつつ fade-out する。
+   catchphrase の登場と並行。outer container に当てるので内側の transform と
+   合成される (= 中央 3×3 はさらに縮む / 周辺 block は 1 → 0.6)。 */
+@keyframes concept-grid-shrink-fadeout {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.6); }
+}
+
+/* Phase 4 で catchphrase を fade-in する。前半 1 秒は opacity 0 に張り付き、
+   後半 1 秒で 1 に到達する curve (= 9×9 が消えてから現れる印象) */
+@keyframes concept-catchphrase-fadein {
+  0%   { opacity: 0; }
+  50%  { opacity: 0; }
+  100% { opacity: 1; }
+}
 @keyframes orbit-from-nw {
   from { transform: translate(calc(-100% - var(--outer-grid-gap)), calc(-100% - var(--outer-grid-gap))); }
   to   { transform: translate(0, 0); }

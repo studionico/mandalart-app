@@ -353,6 +353,80 @@ direction='stock' は route 切替を伴わない。トリガー側 (`handleDndA
 
 ---
 
+## 6. Help モーダル — コンセプトスライド (フルスクリーン演出)
+
+[`ConceptSlide.tsx`](../src/components/help/ConceptSlide.tsx) は Welcome モーダル 1 番目のスライドで、マンダラート手法のコンセプトを **真紅 (rgb(221, 58, 63)) 背景 + セル枠 + 白フチ円 + 中心からの放射状直線**のフルスクリーンアニメで 4 phase 構成 (~12 秒) で表現する。Phase 4 完了と同時に親 ([`HelpDialog`](../src/components/help/HelpDialog.tsx)) が currentIndex を 1 へ自動進行 → ConceptSlide が unmount → フルスクリーン解除。
+
+### Phase 構成
+
+| Phase | 時間 | 演出 | キャプション |
+|---|---|---|---|
+| 1 | 0〜3s | 中央 1 マス (セル枠 + 白フチ円、円はセルいっぱい) が `orbit-fade-in` で出現 | なし |
+| 2 | 3〜6s | 周辺 8 マスが `ORBIT_ORDER_PERIPHERAL` 順 (`[7,6,3,0,1,2,5,8]`) stagger で fade-in。**同時に中心セル → 周辺セルへの直線 (SVG `<line>`)** もそれぞれ fade-in | なし |
+| 3a | 6〜7.5s | 3×3 grid 全体 (cells + Phase 2 lines) が `concept-3x3-shrink-to-center` で `scale(1) → scale(1/3)` に縮小。視覚的に「中央のマンダラートが 9×9 layout の中央ブロック位置へ集約」 | なし |
+| 3b | 7.5〜10s | 周囲 8 ブロック (各 3×3 = 9 cells with circles) が `ORBIT_ORDER_PERIPHERAL` 順 (時計回り) で stagger fade-in。**同時に container 中心 → 各周辺ブロック中心への直線** もペアで fade-in | なし |
+| 4 | 10〜12s | 全体 (outer container) を `concept-grid-shrink-fadeout` (scale 1 → 0.6 + opacity 1 → 0)、catchphrase を `concept-catchphrase-fadein` で fade-in | 「思考を、階層で広げる ─ Mandalart」(暫定) |
+
+### 描画スタイル
+
+- **セル枠の階層** (実マンダラート慣習: 中央 6px > サブグリッド有 2px > プレーン 1px に倣う):
+  - `main` (Phase 1-2 中央 = grand center): `border-[12px]` → shrink 後 4px (絶対中心、最太)
+  - `sub`  (Phase 1-2 周辺 = サブテーマ): `border-[6px]` → shrink 後 2px
+  - `sub`  (Phase 3 周辺ブロックの中心、scale なし): `border-2` (2px)
+  - `regular` (Phase 3 周辺ブロックの leaf 8 セル、scale なし): `border` (1px) + `border-white/50` で薄め
+  - shrink 後の階層: 4px > 2px > 1px ← 実マンダラートの 6px > 2px > 1px と相似
+- **円**: `border-2 border-white rounded-full` の白フチ (塗りなし)、セルいっぱいの大きさ。`backgroundColor: rgb(221, 58, 63)` (= 全体背景色) で円の内部を塗り、後ろを通る放射状直線が円の内側に貫通しないようにする
+- **直線**: SVG `<line>` で `stroke="white"`、`strokeWidth="0.4"` (Phase 2) / `0.3` (Phase 3)、`vectorEffect="non-scaling-stroke"` で scale 変化中も線幅を維持
+- 円の bg が背景色なので、直線は cells の隙間 (gap-3 = 12px) と各円の間にだけ視認される。重なっている部分は円の bg で隠れる
+
+### 新規 / 変更 keyframes (index.css)
+
+```css
+/* Phase 3a: 3×3 全体を中央 1/3 領域へ縮小 (内部の cells / lines / 子 SVG が同時 scale) */
+@keyframes concept-3x3-shrink-to-center {
+  from { transform: scale(1); }
+  to   { transform: scale(0.3333); }
+}
+
+/* Phase 4: outer container を scale + fade out (内側の縮小 3×3 はさらに小さくなり、周辺 block は 1 → 0.6) */
+@keyframes concept-grid-shrink-fadeout {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.6); }
+}
+
+/* Phase 4: catchphrase fade-in (前半 1s は opacity 0 維持、後半 1s で 1 へ) */
+@keyframes concept-catchphrase-fadein {
+  0%   { opacity: 0; }
+  50%  { opacity: 0; }
+  100% { opacity: 1; }
+}
+```
+
+各 cell / block / line の fade-in は既存 `orbit-fade-in` を再利用。旧 `concept-3x3-fadeout` / `concept-9x9-fadein` (cross-fade approach 用) は v4 で不要になったため削除済。
+
+### Phase 3 の "shrink-then-expand" approach
+
+旧 v3 (cross-fade) では 3×3 が opacity フェードアウトして 9×9 が cross-fade で出現していたが、新 v4 では:
+
+1. **Phase 3a (1.5s)**: 3×3 grid 全体を `transform: scale(1) → scale(1/3)` で中央へ縮小。内部 cells + Phase 2 lines (SVG) が同 transform に乗って一緒に縮む。視覚的に「中央のマンダラートが 9×9 layout の中央ブロック位置へまとまる」
+2. **Phase 3b (2.5s)**: 縮小完了後、周囲 8 ブロックが `ORBIT_ORDER_PERIPHERAL` 順 (時計回り) で stagger fade-in (250ms 間隔)。中央ブロックは縮小済みの 3×3 が常駐するので 9×9 grid 側では block 4 を skip
+3. ブロック展開と同時に **中央 → 周辺ブロック中心への放射状直線** もペアで fade-in
+
+中央ブロックの内部 (Phase 2 lines) と外側 (Phase 3 lines) で「中央から放射状に広がる」パターンを再帰的に描き、マンダラート手法の階層構造を視覚化する。
+
+block 内の 9 cells は個別 stagger なしで同時表示 (block 単位の fade-in)。厳密な「セルが分裂する」ような split アニメーションは実装コストが大きいため将来タスク。
+
+### HelpDialog 側との連携
+
+- ConceptSlide は `fixed inset-0 z-50 bg-[rgb(221,58,63)]` のフルスクリーン overlay として render される。Modal 自身は z-40 なので背後に隠れる。Modal の title bar (× ボタン) / nav / footer は Concept active 中は invisible / 非 render
+- ホバー pause は無効化 (Concept は時間ベースの guided animation なので止めない)
+- 自動進行は autoAdvance フラグに**関わらず**必ず働く (= メニュー経由でも 12 秒で次のスライドへ抜ける)。Carousel の自動進行が OFF でも Concept の特例として時間で flow する
+- 再訪時 (slide 2 → 1 へ戻る等): ConceptSlide が条件 render なので unmount → mount で CSS animation がリセットされ、最初から再生される
+- ESC は Modal が listen しているので生きており、Concept 中でも閉じられる
+- キーボード ← → も生きているので、Concept をスキップしたい場合は → でスライド 2 へジャンプ可能 (full-screen overlay 中でも document-level listener なので発火する)
+
+---
+
 ## 定数と調整
 
 ### アニメーション速度

@@ -1,0 +1,18 @@
+# desktop/public/help/
+
+Welcome モーダル / 将来のヘルプリファレンスで参照するスクリーンショット画像の格納先。
+
+## 命名規則
+- `<scope>-<slug>.png` 形式
+- 例: `home-create.png` / `editor-edit.png` / `editor-drill.png` / `editor-9x9.png` / `editor-home-back.png` / `home-open.png`
+
+## 参照方法
+Vite が build 時に `public/` の中身を root にコピーするので、コード側からは URL `/help/<filename>.png` で参照する (import 不要)。
+
+```ts
+// helpContent.ts
+{ kind: 'feature', title: '...', screenshot: '/help/home-create.png', ... }
+```
+
+## 注意
+- このファイル (`.gitkeep`) は空ディレクトリを git に commit するためのプレースホルダ。スクリーンショットを追加したらこのファイルは残しても消しても良い。

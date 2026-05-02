@@ -1,4 +1,5 @@
 use tauri::{Emitter, WindowEvent};
+use tauri::menu::{Menu, MenuItem, SubmenuBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -83,6 +84,26 @@ pub fn run() {
         // ~/Library/Application Support/jp.mandalart.app/window-state.json)。
         // 初回起動時はこの state が無いので tauri.conf.json の width/height が使われる。
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // メニューバーに「ヘルプ」 submenu を追加 (使い方モーダルの手動再表示エントリ)。
+        // macOS は system menu bar、Windows / Linux はウィンドウメニューに自動配置される。
+        // OS 標準の App / Edit / Window 等は `Menu::default(handle)` をベースに保持する。
+        .setup(|app| {
+            let handle = app.handle();
+            let help_show = MenuItem::with_id(handle, "help.show", "使い方を見る", true, None::<&str>)?;
+            let help_menu = SubmenuBuilder::new(handle, "ヘルプ")
+                .item(&help_show)
+                .build()?;
+            let menu = Menu::default(handle)?;
+            menu.append(&help_menu)?;
+            app.set_menu(menu)?;
+            Ok(())
+        })
+        // 「使い方を見る」クリックで JS 側に通知 (App.tsx が listen して HelpDialog を開く)。
+        .on_menu_event(|app, event| {
+            if event.id() == "help.show" {
+                let _ = app.emit("menu:help.show", ());
+            }
+        })
         // ⌘Q / ウィンドウ close 時にフロントエンドへ "before-quit" を発火する。
         // フロント側の useBeforeQuit が Supabase realtime channel を proactively 解除する。
         // React の unmount cleanup が間に合わずに webview が落ちるケースに対する保険。
