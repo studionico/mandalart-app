@@ -192,7 +192,9 @@ export default function Cell({
   }
 
   function handleDragStart(e: React.DragEvent) {
-    if (isDisabled || isInlineEditing || !onDragStart) {
+    // 空セル (text 空 + image_path null) は drag source にしない (誤操作防止)。
+    // UI 側で `draggable=false` にしているため通常 dragstart は発火しないが、defensive ガードで二重抑止する。
+    if (isDisabled || isInlineEditing || !onDragStart || isCellEmpty(cell)) {
       e.preventDefault()
       return
     }
@@ -340,7 +342,7 @@ export default function Cell({
         ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         group
       `}
-      draggable={!isDisabled && !isInlineEditing && !!onDragStart}
+      draggable={!isDisabled && !isInlineEditing && !!onDragStart && !isCellEmpty(cell)}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragEnter={dropProps?.onDragEnter}

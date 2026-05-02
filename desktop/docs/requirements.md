@@ -125,6 +125,7 @@ Shift+Tab は逆順
 | 周辺セル | 周辺セル | サブツリーごと入れ替え（`swapCellSubtree`）|
 | 中央セル | 任意のセル | ❌ 禁止 (drop ポリシー)|
 | 任意のセル | 中央セル | ❌ 禁止 (drop ポリシー)|
+| **空セル** (text 空 + image_path なし) | 任意 | ❌ **drag source 不可** ([`Cell.tsx`](../src/components/editor/Cell.tsx) で `draggable=false`)。空セルは drop **target** にはなれる (= 内容を空マスへ移動できる) |
 
 中央セル絡みの cell-to-cell drop は全面廃止。中心セルからの操作は **D&D 中の 4 アクションアイコン** に集約 (シュレッダー / 移動 / コピー / エクスポート)。
 
