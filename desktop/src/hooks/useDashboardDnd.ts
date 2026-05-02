@@ -94,8 +94,7 @@ export function useDashboardDnd({ onDrop }: Opts) {
     }
 
     function isOverDropZone(e: MouseEvent): boolean {
-      // stock 起源のみ空エリア drop を受ける
-      if (source.kind !== 'stock') return false
+      // stock / card 両起源で空エリア drop を受ける (card 源は末尾 reorder の fallback)
       const el = document.elementFromPoint(e.clientX, e.clientY)
       return !!el?.closest('[data-dashboard-drop-zone]')
     }
@@ -148,6 +147,14 @@ export function useDashboardDnd({ onDrop }: Opts) {
             if (idx != null) {
               // 他カードの上で drop → sort_order を入れ替えて reorder
               action = { kind: 'card-reorder', sourceMandalartId: source.id, targetIndex: idx }
+            } else if (isOverDropZone(e)) {
+              // 空エリア (最後尾より下) への drop は「末尾へ移動」。targetIndex に現在の card 数を
+              // 渡すと reorderArray の splice が自然に append する。
+              action = {
+                kind: 'card-reorder',
+                sourceMandalartId: source.id,
+                targetIndex: cardRectsRef.current.length,
+              }
             }
           }
         }

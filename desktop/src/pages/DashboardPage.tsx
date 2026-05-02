@@ -26,6 +26,7 @@ import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
+import { reorderArray } from '@/lib/utils/reorderArray'
 import { useAuthStore } from '@/store/authStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
@@ -373,15 +374,12 @@ export default function DashboardPage() {
       return
     }
     if (action.kind === 'card-reorder') {
-      // mandalarts 配列内で source カードを target index に挿入し、reorderMandalarts で
-      // sort_order を 0..N に振り直す。pinned は ORDER BY 側で先頭固定されるので、
-      // ここでは見た目の順序だけを反映すれば自動的に「pinned ↑ + sort_order」が成立する。
+      // 共通 utility `reorderArray` で「source を target 位置に挿入する」semantics の新配列を計算。
+      // pinned は API ORDER BY 側で先頭固定されるので、ここでは見た目の順序だけを反映すれば
+      // 「pin ↑ + sort_order」が成立する (load() 後の DB 順序とも整合)。
       const srcIdx = mandalarts.findIndex((m) => m.id === action.sourceMandalartId)
       if (srcIdx < 0 || srcIdx === action.targetIndex) return
-      const next = [...mandalarts]
-      const [moved] = next.splice(srcIdx, 1)
-      const insertAt = srcIdx < action.targetIndex ? action.targetIndex - 1 : action.targetIndex
-      next.splice(insertAt, 0, moved)
+      const next = reorderArray(mandalarts, srcIdx, action.targetIndex)
       setMandalarts(next)  // 楽観的更新
       try {
         await reorderMandalarts(next.map((m) => m.id))
@@ -498,16 +496,18 @@ export default function DashboardPage() {
     }
   }, [cardExportPicker])
 
-  // 絞り込みはサーバ側 (searchMandalarts) で行うので、ここではソートのみ
+  // 通常画面 (検索なし): API の ORDER BY (pinned > sort_order > updated_at) をそのまま尊重。
+  // ピン留め / 手動並び替えはここで再ソートしないことが必須。
+  // 検索結果: ユーザー選択の sortKey で再ソート (タイトル順 / 更新日順を切替えたい場合のみ意味あり)。
   const visible = useMemo(() => {
-    const sorted = [...mandalarts].sort((a, b) => {
-      if (sortKey === 'title') {
-        return (a.title || '無題').localeCompare(b.title || '無題', 'ja')
-      }
-      return b.updated_at.localeCompare(a.updated_at)
-    })
-    return sorted
-  }, [mandalarts, sortKey])
+    if (!query.trim()) return mandalarts
+    if (sortKey === 'title') {
+      return [...mandalarts].sort((a, b) =>
+        (a.title || '無題').localeCompare(b.title || '無題', 'ja'),
+      )
+    }
+    return [...mandalarts].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  }, [mandalarts, sortKey, query])
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
@@ -522,14 +522,18 @@ export default function DashboardPage() {
             placeholder="タイトル・セル本文で検索..."
             className="flex-1 text-sm border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg px-2 py-1.5 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
-          >
-            <option value="updated">更新日順</option>
-            <option value="title">タイトル順</option>
-          </select>
+          {/* 並び順セレクターは検索中のみ表示。通常画面は API ORDER BY (pinned > 手動 sort_order >
+              updated_at) で十分なので選択肢を出さない (= ピン留め / D&D 並び替えがそのまま反映)。 */}
+          {query.trim() && (
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg px-2 py-1.5 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+            >
+              <option value="updated">更新日順</option>
+              <option value="title">タイトル順</option>
+            </select>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -736,18 +740,32 @@ export default function DashboardPage() {
               {/* 検索中以外は先頭に「+」card を表示 (新規作成導線、card と同サイズの dashed 枠) */}
               {!query.trim() && <NewMandalartCard onClick={handleCreate} />}
               {visible.map((m, index) => {
-                // drag 中、hover 中のカード以降を右に slide してドロップスペースを開ける。
-                // 自分自身 (card source の場合) は固定。
-                const shouldShiftRight =
-                  dnd.dragOverCardIndex !== null &&
-                  index >= dnd.dragOverCardIndex &&
-                  dnd.dragSourceId !== m.id
+                // drag 中の slide 方向計算。
+                // - stock 源: 新規挿入なので target 以降が右にスライド (空間を作る)
+                // - card 源: 並び替え。slid card の最終位置を pre-place するため、
+                //   src と target の位置関係で方向決定:
+                //   * src < target (左→右ドラッグ): (src, target] 範囲が **左**にスライド (source の slot を埋める)
+                //   * src > target (右→左ドラッグ): [target, src) 範囲が **右**にスライド (target に空間を作る)
+                //   結果として drop 後の natural レイアウトと slid 位置が一致し、snap-back が発生しない。
+                let shift: 'left' | 'right' | null = null
+                if (dnd.dragOverCardIndex !== null && dnd.dragSourceId !== m.id) {
+                  const target = dnd.dragOverCardIndex
+                  if (dnd.dragSourceKind === 'stock') {
+                    if (index >= target) shift = 'right'
+                  } else {
+                    const srcIdx = visible.findIndex((mm) => mm.id === dnd.dragSourceId)
+                    if (srcIdx >= 0) {
+                      if (srcIdx < target && index > srcIdx && index <= target) shift = 'left'
+                      else if (srcIdx > target && index >= target && index < srcIdx) shift = 'right'
+                    }
+                  }
+                }
                 return (
                   <MandalartCard
                     key={m.id}
                     mandalart={m}
                     index={index}
-                    shouldShiftRight={shouldShiftRight}
+                    shift={shift}
                     isDragSource={dnd.dragSourceKind === 'card' && dnd.dragSourceId === m.id}
                     onOpen={() => openMandalart(m.id)}
                     onDuplicate={() => handleDuplicate(m)}
@@ -822,12 +840,18 @@ export default function DashboardPage() {
 }
 
 function MandalartCard({
-  mandalart: m, index, shouldShiftRight, isDragSource, onOpen, onDuplicate, onDelete, onTogglePin,
+  mandalart: m, index, shift, isDragSource, onOpen, onDuplicate, onDelete, onTogglePin,
   onMouseDown, wasRecentlyDragged,
 }: {
   mandalart: Mandalart
   index: number
-  shouldShiftRight: boolean
+  /**
+   * drag 中の slide 方向 (DashboardPage 側で計算)。
+   * - 'right': 右にスライド (stock 新規挿入 / card 源右→左ドラッグの target..src-1)
+   * - 'left':  左にスライド (card 源左→右ドラッグの src+1..target)
+   * - null:    スライドなし (drag 不在 / 自分が source / 範囲外)
+   */
+  shift: 'left' | 'right' | null
   isDragSource: boolean
   onOpen: () => void
   onDuplicate: () => void
@@ -897,8 +921,11 @@ function MandalartCard({
       style={{
         width: DASHBOARD_CARD_SIZE_PX,
         height: DASHBOARD_CARD_SIZE_PX,
-        // 他カード drag 中、drag が hover している card 以降は右に slide してドロップスペースを開ける
-        transform: shouldShiftRight ? 'translateX(calc(100% + 12px))' : undefined,
+        // drag 中の slide。方向は呼出側 (DashboardPage) が src vs target の位置関係で決定する。
+        transform:
+          shift === 'right' ? 'translateX(calc(100% + 12px))'
+          : shift === 'left' ? 'translateX(calc(-100% - 12px))'
+          : undefined,
         transition: 'transform 200ms ease-out',
         // 自身が card-source として drag 中なら半透明 (見た目で source 識別)
         opacity: isDragSource ? 0.4 : undefined,
