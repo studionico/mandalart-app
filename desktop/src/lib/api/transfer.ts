@@ -218,14 +218,22 @@ export async function exportToIndentText(gridId: string): Promise<string> {
   return snapshotToIndentText(snapshot)
 }
 
-export async function importFromJSON(snapshot: GridSnapshot): Promise<Mandalart> {
+export async function importFromJSON(
+  snapshot: GridSnapshot,
+  /**
+   * 作成先 folder。指定しない場合は Inbox にフォールバック (旧 default 挙動)。
+   * 通常は呼び出し側 (ImportDialog) で「インポートボタンを押した時点でユーザーが開いていた
+   * フォルダタブの id」を渡し、収束 (home) アニメーションのターゲットタブと一致させる。
+   */
+  targetFolderId?: string,
+): Promise<Mandalart> {
   const mandalartId = generateId()
   const ts = now()
   const centerText = snapshot.cells.find((c) => c.position === CENTER_POSITION)?.text ?? ''
-  // 全マンダラートは必ず folder に所属する (Phase B、migration 010)。インポートは Inbox 直下に集約。
+  // 全マンダラートは必ず folder に所属する (Phase B、migration 010)。
   // ensureInboxFolder() は冪等 + singleton promise なので毎回呼び出しても OK。
-  const folderId = await ensureInboxFolder()
-  // 新規カードと同じく、Inbox の defined-sort_order バケットの先頭に並ぶよう MIN-1 を割当てる
+  const folderId = targetFolderId ?? await ensureInboxFolder()
+  // 新規カードと同じく、defined-sort_order バケットの先頭に並ぶよう MIN-1 を割当てる
   const sortOrder = await nextTopSortOrder(folderId)
 
   // root 中心セルの id を先に決めて mandalart を作る

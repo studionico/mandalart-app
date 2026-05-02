@@ -359,7 +359,10 @@ snapshotToIndentText(snapshot: GridSnapshot): string
 
 // GridSnapshot を新規マンダラートとしてインポート
 // 中心セルのテキストがタイトルになる。parentPosition は `undefined` / `null` どちらでも並列扱い
-importFromJSON(snapshot: GridSnapshot): Promise<Mandalart>
+// targetFolderId 指定時はそのフォルダに所属。未指定 (undefined) なら Inbox にフォールバック。
+// home 収束アニメ後のフォルダタブが import 元のフォルダと一致するよう、通常は呼び出し側 (ImportDialog)
+// で「インポート押下時の選択中フォルダ id」を渡す。
+importFromJSON(snapshot: GridSnapshot, targetFolderId?: string): Promise<Mandalart>
 
 // GridSnapshot を既存セルの配下に挿入
 // ターゲットセルの内容はスナップショットのルート中心セルで上書きされる

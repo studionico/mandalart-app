@@ -12,6 +12,12 @@ type Mode =
 type Props = {
   open: boolean
   mode: Mode
+  /**
+   * `mode.kind === 'new'` のときのインポート先 folder id。指定しない場合は Inbox にフォールバック。
+   * dashboard からの起動時は「インポートボタンを押した時点で開いていたフォルダタブ」を渡し、
+   * home 収束アニメ後のフォルダタブが import 元と一致するようにする。
+   */
+  targetFolderId?: string | null
   onClose: () => void
   onComplete: (result: { mandalartId?: string }) => void
 }
@@ -27,7 +33,7 @@ type ParseResult =
  * ③ パース結果をツリープレビュー
  * ④ 実行（新規マンダラート / 既存セル配下）
  */
-export default function ImportDialog({ open, mode, onClose, onComplete }: Props) {
+export default function ImportDialog({ open, mode, targetFolderId, onClose, onComplete }: Props) {
   const [rawText, setRawText] = useState('')
   const [parsed, setParsed] = useState<ParseResult | null>(null)
   const [running, setRunning] = useState(false)
@@ -99,7 +105,7 @@ export default function ImportDialog({ open, mode, onClose, onComplete }: Props)
     setRunning(true)
     try {
       if (mode.kind === 'new') {
-        const m = await importFromJSON(parsed.snapshot)
+        const m = await importFromJSON(parsed.snapshot, targetFolderId ?? undefined)
         onComplete({ mandalartId: m.id })
       } else {
         await importIntoCell(mode.cellId, parsed.snapshot)

@@ -741,6 +741,9 @@ export default function DashboardPage() {
       <ImportDialog
         open={importOpen}
         mode={{ kind: 'new' }}
+        // インポートボタンを押した時点で開いていたタブにマンダラートを所属させる
+        // (home 収束アニメ後にそのタブが表示される = ユーザー認知と一致)
+        targetFolderId={selectedFolderId}
         onClose={() => setImportOpen(false)}
         onComplete={(result) => {
           setImportOpen(false)

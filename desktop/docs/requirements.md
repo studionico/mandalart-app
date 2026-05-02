@@ -290,6 +290,11 @@ Shift+Tab は逆順
 | Markdown 見出し | `#` / `##` / `###` のレベルで階層を表現 |
 | クリップボード | 上記形式をクリップボードから直接貼り付け |
 
+> **所属フォルダ**: 新規マンダラート (`mode.kind === 'new'`) は **インポート押下時に開いていたフォルダタブ** に
+> 所属する (`DashboardPage` から `selectedFolderId` を `<ImportDialog targetFolderId>` 経由で
+> `importFromJSON` に渡す)。home 収束アニメ後のダッシュボードでも同じタブが表示されるため、ユーザー
+> 認知と一致する。タブ非選択時 / `targetFolderId` 未指定時は Inbox にフォールバック。
+
 ---
 
 ## デスクトップ固有機能
