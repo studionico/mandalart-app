@@ -2917,13 +2917,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       inlineEditingCellId={null}
                       userId={userId}
                       mandalartId={mandalartId}
-                      // 編集系は全て no-op に
+                      // 編集 / D&D は全て無効化 (requirements.md: 9×9 は読み取り専用)。
+                      // onDragStart は **未指定** にして Cell の `draggable={!!onDragStart}`
+                      // 判定を false にし、ブラウザ native drag そのものを起動させない
+                      // (NOOP_EDIT を渡すと truthy で draggable=true になり、ロジックは
+                      //  no-op でも視覚的に cell が cursor 追従してしまう罠)。
                       onCellSave={NOOP_EDIT_ASYNC}
                       onStartInlineEdit={NOOP_EDIT}
                       onCommitInlineEdit={NOOP_EDIT_ASYNC}
                       onInlineNavigate={NOOP_EDIT}
                       onDrill={handleCellDrill}
-                      onDragStart={NOOP_EDIT}
                       onContextMenu={PREVENT_CONTEXT_MENU}
                     />
                   )}
