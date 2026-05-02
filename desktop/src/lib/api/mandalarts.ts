@@ -184,8 +184,11 @@ export async function updateMandalartFolderId(id: string, folderId: string): Pro
  * 用途: ダッシュボードの D&D で stock entry を空エリア / 既存カードに drop した際の新規マンダラート
  * 作成 (破壊的な「stock → 既存カード置換」は別途禁止しているため本 API は新規作成のみ提供)。
  */
-export async function createMandalartFromStockItem(stockItemId: string): Promise<Mandalart> {
-  const m = await createMandalart()
+export async function createMandalartFromStockItem(
+  stockItemId: string,
+  folderId?: string | null,
+): Promise<Mandalart> {
+  const m = await createMandalart('', folderId)
   await pasteFromStock(stockItemId, m.root_cell_id)
   // root cell text が paste で更新されたので title を refetch
   return (await getMandalart(m.id)) ?? m

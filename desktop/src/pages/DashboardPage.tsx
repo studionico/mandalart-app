@@ -312,16 +312,17 @@ export default function DashboardPage() {
     }
   }
 
-  // stock entry からの paste = 新規マンダラート作成
+  // stock entry からの paste = 新規マンダラート作成 (現在選択中のフォルダに追加)
+  // selectedFolderId への依存があるので useCallback 依存配列に含める
   const handleStockPaste = useCallback(async (item: StockItem) => {
     try {
-      const m = await createMandalartFromStockItem(item.id)
+      const m = await createMandalartFromStockItem(item.id, selectedFolderId)
       setMandalarts((prev) => [m, ...prev])
       setToast({ message: '新規マンダラートを作成しました', type: 'success' })
     } catch (e) {
       setToast({ message: `作成失敗: ${(e as Error).message}`, type: 'error' })
     }
-  }, [])
+  }, [selectedFolderId])
 
   /**
    * card DOM から ConvergeOverlay の direction='stock' source 値を計測する。
@@ -392,9 +393,9 @@ export default function DashboardPage() {
     }
     if (action.kind === 'stock-to-new') {
       // 既存 handleStockPaste と同じ経路だが stockItemId しか持たないので fetch なしで
-      // 直接 API 呼出。エラー処理は同形式。
+      // 直接 API 呼出。エラー処理は同形式。現在選択中のフォルダに追加。
       try {
-        const m = await createMandalartFromStockItem(action.stockItemId)
+        const m = await createMandalartFromStockItem(action.stockItemId, selectedFolderId)
         setMandalarts((prev) => [m, ...prev])
         setToast({ message: '新規マンダラートを作成しました', type: 'success' })
       } catch (e) {
