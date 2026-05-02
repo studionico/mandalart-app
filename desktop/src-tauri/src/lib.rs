@@ -57,6 +57,12 @@ pub fn run() {
                             sql: include_str!("../migrations/008_mandalart_last_grid_id.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 9,
+                            description: "add mandalarts.sort_order + pinned (Phase A: manual reorder + pin)",
+                            sql: include_str!("../migrations/009_mandalart_sort_pin.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

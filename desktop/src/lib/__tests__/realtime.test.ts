@@ -74,6 +74,32 @@ describe('applyMandalartChange — UPDATE (local row あり)', () => {
     expect(row.title).toBe('new-title')
   })
 
+  it('pinned 変化 → true (Phase A: ピン留めの伝播)', async () => {
+    const m = await createMandalart('pintest')
+    db.prepare('UPDATE mandalarts SET synced_at = ?, updated_at = ?, pinned = 0 WHERE id = ?').run(T1, T1, m.id)
+    const result = await applyMandalartChange({
+      eventType: 'UPDATE',
+      new: { id: m.id, title: m.title, root_cell_id: m.root_cell_id, show_checkbox: false, last_grid_id: null, sort_order: null, pinned: true, created_at: m.created_at, updated_at: T2, deleted_at: null },
+      old: {},
+    })
+    expect(result).toBe(true)
+    const row = db.prepare('SELECT pinned FROM mandalarts WHERE id = ?').get(m.id) as { pinned: number }
+    expect(row.pinned).toBe(1)
+  })
+
+  it('sort_order 変化 → true (Phase A: 並び替えの伝播)', async () => {
+    const m = await createMandalart('sorttest')
+    db.prepare('UPDATE mandalarts SET synced_at = ?, updated_at = ?, sort_order = NULL WHERE id = ?').run(T1, T1, m.id)
+    const result = await applyMandalartChange({
+      eventType: 'UPDATE',
+      new: { id: m.id, title: m.title, root_cell_id: m.root_cell_id, show_checkbox: false, last_grid_id: null, sort_order: 3, pinned: false, created_at: m.created_at, updated_at: T2, deleted_at: null },
+      old: {},
+    })
+    expect(result).toBe(true)
+    const row = db.prepare('SELECT sort_order FROM mandalarts WHERE id = ?').get(m.id) as { sort_order: number }
+    expect(row.sort_order).toBe(3)
+  })
+
   it('cloud の updated_at が古い (stale) なら false を返し、何もしない', async () => {
     const m = await createMandalart('local-newer')
     db.prepare('UPDATE mandalarts SET synced_at = ?, updated_at = ? WHERE id = ?').run(T2, T2, m.id)

@@ -140,6 +140,19 @@ ALTER TABLE mandalarts ADD COLUMN last_grid_id text;
 TEXT なので push/pull 時の型変換は不要、null は「未設定 = root を開く」を意味します。
 RLS ポリシーへの影響はなし。EditorLayout の `currentGridId` 変化監視 useEffect で都度書込・push 同期で他デバイスに伝播。stale (削除済み grid) の場合は復元時に root にフォールバック + DB 値を null に戻すクリーンアップが走ります。
 
+### 必須スキーマ変更: ダッシュボード整理 (`sort_order` / `pinned`)
+
+migration 009 で「ダッシュボードカードの手動並び替え + ピン留め」を追加しました。Supabase 側では以下を実行してください:
+
+```sql
+ALTER TABLE mandalarts ADD COLUMN sort_order integer;
+ALTER TABLE mandalarts ADD COLUMN pinned boolean NOT NULL DEFAULT false;
+```
+
+ローカル側は migration 009 で自動的に適用されます (SQLite では INTEGER nullable / INTEGER NOT NULL DEFAULT 0)。
+SQLite INTEGER 0/1 ↔ Supabase BOOLEAN は自動 boolean 正規化で互換 (`done` / `show_checkbox` と同パターン)。
+RLS ポリシーへの影響はなし。card-to-card D&D で `reorderMandalarts` が一括 0..N で振り直し、★ ボタンで `pinned` を切替えて push 同期。
+
 ---
 
 ## ステップ 4: Auth 設定

@@ -60,6 +60,17 @@ updateMandalartShowCheckbox(id: string, show: boolean): Promise<void>
 // drill 階層復元に使われる。null で「未設定 = root にフォールバック」へ戻せる (stale クリア用)。
 updateMandalartLastGridId(id: string, lastGridId: string | null): Promise<void>
 
+// ピン留めフラグを切替える (migration 009 以降)。pinned=1 で getMandalarts の ORDER BY で最上位固定。
+updateMandalartPinned(id: string, pinned: boolean): Promise<void>
+
+// 単体のマンダラートに sort_order を直接設定する (migration 009 以降)。一覧全体を一括振り直す
+// 用途には reorderMandalarts を使う方が整合的。
+updateMandalartSortOrder(id: string, sortOrder: number): Promise<void>
+
+// ダッシュボードで card-to-card D&D した結果の順序を、先頭から 0,1,2... で sort_order に
+// 振り直す (migration 009 以降)。orderedIds は現在ダッシュボードに見えている順 (= ピン留めを含む全カード)。
+reorderMandalarts(orderedIds: string[]): Promise<void>
+
 // stock item を起点に新しいマンダラートを作成する。
 // 空 mandalart を `createMandalart()` で生成し、root_cell_id (空の root center cell) に
 // `pasteFromStock` で stock snapshot を貼付け、root grid 全体を populate する。

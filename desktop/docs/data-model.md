@@ -21,6 +21,8 @@ CREATE TABLE mandalarts (
   root_cell_id    TEXT NOT NULL,              -- プライマリ root グリッドの中心セル id (dashboard のサムネ等に使用)
   show_checkbox   INTEGER NOT NULL DEFAULT 0, -- セル左上 done チェックボックス UI の表示 ON/OFF (migration 007 以降)
   last_grid_id    TEXT,                       -- 前回開いていた sub-grid の id (migration 008 以降、nullable)
+  sort_order      INTEGER,                    -- ダッシュボードでのユーザー定義並び順 (migration 009 以降、nullable / 低い方が先頭)
+  pinned          INTEGER NOT NULL DEFAULT 0, -- 1 = 最上位固定 (migration 009 以降)
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at       TEXT,                       -- 最終クラウド同期日時
@@ -32,6 +34,8 @@ CREATE TABLE mandalarts (
 > **`show_checkbox` はマンダラート単位の UI プリファレンス**。push/pull/realtime で全カラムが伝播するためデバイス間で同期される。旧 `mandalart.showCheckbox` localStorage キーは廃止 (新規 / 既存ともに DEFAULT 0 = OFF で開始)。
 
 > **`last_grid_id` は前回開いていた sub-grid の id**。ダッシュボードからマンダラートを再オープンしたときに drill 階層を復元するため、EditorLayout の `currentGridId` 変化監視 useEffect で都度更新。null は「未設定 → root にフォールバック」を意味する。stale (grid 削除済み) の場合は復元時に root に戻す + null にクリーンアップ。push/pull/realtime で同期される。
+
+> **`sort_order` / `pinned` はダッシュボード整理 UI のため (migration 009 以降)**。`getMandalarts` の ORDER BY は `pinned DESC, sort_order ASC NULLS LAST, updated_at DESC`。card-to-card D&D で `reorderMandalarts(orderedIds)` が一括 0..N で振り直し、★ ボタンで `pinned` を切替える。push/pull/realtime で同期される。
 
 > **title は独立した値ではなく、ルートグリッドの中心セル (position = 4) のテキストをキャッシュしたもの。**`lib/api/cells.ts` の `updateCell` がルート中心セルの更新を検知して自動的に同期する。別途「ファイル名を付けて保存」するフローは無い。
 >

@@ -8,6 +8,7 @@ import {
   createMandalart, getMandalart, getMandalarts,
   deleteMandalart, restoreMandalart, getDeletedMandalarts,
   permanentDeleteMandalart, updateMandalartTitle,
+  updateMandalartPinned, updateMandalartSortOrder, reorderMandalarts,
 } from '@/lib/api/mandalarts'
 
 let db: Database.Database
@@ -129,6 +130,69 @@ describe('permanentDeleteMandalart', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM mandalarts').get()).toEqual({ n: 0 })
     expect(db.prepare('SELECT COUNT(*) AS n FROM grids').get()).toEqual({ n: 0 })
     expect(db.prepare('SELECT COUNT(*) AS n FROM cells').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('Phase A: 並び替え + ピン留め (migration 009)', () => {
+  it('updateMandalartPinned は pinned カラムを 1/0 に切替える', async () => {
+    const m = await createMandalart('pin-test')
+    await updateMandalartPinned(m.id, true)
+    expect(db.prepare('SELECT pinned FROM mandalarts WHERE id = ?').get(m.id)).toEqual({ pinned: 1 })
+    await updateMandalartPinned(m.id, false)
+    expect(db.prepare('SELECT pinned FROM mandalarts WHERE id = ?').get(m.id)).toEqual({ pinned: 0 })
+  })
+
+  it('updateMandalartSortOrder は sort_order を直接設定する', async () => {
+    const m = await createMandalart('order-test')
+    await updateMandalartSortOrder(m.id, 5)
+    expect(db.prepare('SELECT sort_order FROM mandalarts WHERE id = ?').get(m.id)).toEqual({ sort_order: 5 })
+  })
+
+  it('reorderMandalarts は orderedIds の先頭から 0,1,2... を振る', async () => {
+    const m1 = await createMandalart('a')
+    const m2 = await createMandalart('b')
+    const m3 = await createMandalart('c')
+    await reorderMandalarts([m3.id, m1.id, m2.id])
+    const rows = db.prepare('SELECT id, sort_order FROM mandalarts ORDER BY sort_order').all() as Array<{ id: string; sort_order: number }>
+    expect(rows).toEqual([
+      { id: m3.id, sort_order: 0 },
+      { id: m1.id, sort_order: 1 },
+      { id: m2.id, sort_order: 2 },
+    ])
+  })
+
+  it('getMandalarts: pinned が unpinned より先頭に来る', async () => {
+    const a = await createMandalart('a')
+    const b = await createMandalart('b')
+    await updateMandalartPinned(b.id, true)  // b だけ pinned
+    const list = await getMandalarts()
+    expect(list[0].id).toBe(b.id)
+    expect(list[1].id).toBe(a.id)
+  })
+
+  it('getMandalarts: 同 pinned 状態内は sort_order 昇順、NULL は最後 (updated_at fallback)', async () => {
+    const a = await createMandalart('a')  // sort_order = NULL
+    const b = await createMandalart('b')
+    const c = await createMandalart('c')
+    await updateMandalartSortOrder(b.id, 0)  // b 先頭
+    await updateMandalartSortOrder(c.id, 1)  // c 二番目
+    // a は sort_order NULL → 最後
+    const list = await getMandalarts()
+    expect(list.map((m) => m.id)).toEqual([b.id, c.id, a.id])
+  })
+
+  it('getMandalarts: pinned > sort_order > updated_at の優先順位', async () => {
+    const old = await createMandalart('old')          // sort_order=NULL, oldest updated_at
+    await new Promise((r) => setTimeout(r, 5))
+    const newer = await createMandalart('newer')      // sort_order=NULL, newer
+    await new Promise((r) => setTimeout(r, 5))
+    const ordered = await createMandalart('ordered')  // sort_order=0
+    await updateMandalartSortOrder(ordered.id, 0)
+    const pinned = await createMandalart('pinned')    // pinned=1, sort_order=NULL
+    await updateMandalartPinned(pinned.id, true)
+    const list = await getMandalarts()
+    // 期待: pinned 先頭、次に sort_order=0 の ordered、その後 sort_order=NULL を updated_at 新→旧
+    expect(list.map((m) => m.id)).toEqual([pinned.id, ordered.id, newer.id, old.id])
   })
 })
 

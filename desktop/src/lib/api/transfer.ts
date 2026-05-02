@@ -229,7 +229,7 @@ export async function importFromJSON(snapshot: GridSnapshot): Promise<Mandalart>
   )
   // root grid を作成 (parent_cell_id=null, 自身が center cell を INSERT)
   await importIntoGrid(snapshot, mandalartId, rootCenterCellId, null, 0, /* ownsCenter */ true)
-  return { id: mandalartId, title: centerText, root_cell_id: rootCenterCellId, show_checkbox: false, created_at: ts, updated_at: ts, user_id: '' }
+  return { id: mandalartId, title: centerText, root_cell_id: rootCenterCellId, show_checkbox: false, pinned: false, sort_order: null, created_at: ts, updated_at: ts, user_id: '' }
 }
 
 /**

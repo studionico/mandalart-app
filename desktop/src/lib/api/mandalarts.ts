@@ -14,11 +14,18 @@ const ROOT_IMAGE_PATH_SUBQUERY = `(
 )`
 
 export async function getMandalarts(): Promise<Mandalart[]> {
+  // 並び順 (Phase A 以降):
+  //   1. pinned カードを最上位固定 (pinned DESC で 1 → 0)
+  //   2. ユーザー定義 sort_order が小さい順 (NULL は最後にフォールバック)
+  //   3. 同 sort_order / 未指定どうしは updated_at で新しい順
   return query<Mandalart>(
     `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
      FROM mandalarts m
      WHERE m.deleted_at IS NULL
-     ORDER BY m.updated_at DESC`,
+     ORDER BY m.pinned DESC,
+              CASE WHEN m.sort_order IS NULL THEN 1 ELSE 0 END,
+              m.sort_order ASC,
+              m.updated_at DESC`,
   )
 }
 
@@ -70,6 +77,8 @@ export async function createMandalart(title = ''): Promise<Mandalart> {
     root_cell_id: rootCenterCellId,
     show_checkbox: false,
     last_grid_id: null,
+    sort_order: null,
+    pinned: false,
     created_at: ts,
     updated_at: ts,
     user_id: '',
@@ -92,6 +101,46 @@ export async function updateMandalartShowCheckbox(id: string, show: boolean): Pr
     'UPDATE mandalarts SET show_checkbox = ?, updated_at = ? WHERE id = ?',
     [show ? 1 : 0, now(), id],
   )
+}
+
+/**
+ * マンダラートのピン留め状態を更新する (migration 009 以降)。
+ * pinned=1 で `getMandalarts` の ORDER BY で最上位固定される。
+ */
+export async function updateMandalartPinned(id: string, pinned: boolean): Promise<void> {
+  await execute(
+    'UPDATE mandalarts SET pinned = ?, updated_at = ? WHERE id = ?',
+    [pinned ? 1 : 0, now(), id],
+  )
+}
+
+/**
+ * 単体のマンダラートに sort_order を設定する (migration 009 以降)。
+ * 任意の値を直接指定したいケース (例: ピン留め解除後の位置調整) で使う。
+ * 一覧全体を一括振り直す用途には `reorderMandalarts` を使う方が整合性が取りやすい。
+ */
+export async function updateMandalartSortOrder(id: string, sortOrder: number): Promise<void> {
+  await execute(
+    'UPDATE mandalarts SET sort_order = ?, updated_at = ? WHERE id = ?',
+    [sortOrder, now(), id],
+  )
+}
+
+/**
+ * D&D で順序を入れ替えた後のマンダラート一覧を、先頭から 0, 1, 2… の整数で sort_order を
+ * 振り直す (migration 009 以降)。`orderedIds` には現在ダッシュボードに見えている順 (= ピン留め
+ * を含む全カード) を渡す。
+ *
+ * 同一 timestamp で全件 UPDATE するため push 時に一括 dirty 化する。少数 (< 100 個) を想定。
+ */
+export async function reorderMandalarts(orderedIds: string[]): Promise<void> {
+  const ts = now()
+  for (let i = 0; i < orderedIds.length; i++) {
+    await execute(
+      'UPDATE mandalarts SET sort_order = ?, updated_at = ? WHERE id = ?',
+      [i, ts, orderedIds[i]],
+    )
+  }
 }
 
 /**
@@ -317,6 +366,8 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     root_cell_id: newRootCellId,
     show_checkbox: src.show_checkbox,
     last_grid_id: null,
+    sort_order: null,
+    pinned: false,
     created_at: ts,
     updated_at: ts,
     user_id: '',

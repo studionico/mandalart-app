@@ -26,6 +26,18 @@ export type Mandalart = {
    * 復元時に対象 grid が削除済み (stale) の場合は呼出側で root にフォールバック + DB 側を null に戻す。
    */
   last_grid_id?: string | null
+  /**
+   * ユーザー定義並び順 (低い方が先頭、migration 009 以降)。NULL = 未指定で、
+   * `getMandalarts` の ORDER BY は `pinned DESC, sort_order ASC NULLS LAST,
+   * updated_at DESC`。card-to-card D&D で reorder したときに 0..N で振り直す。
+   */
+  sort_order?: number | null
+  /**
+   * ピン留めフラグ (migration 009 以降)。1 = 最上位固定。SQLite INTEGER 0/1、
+   * Supabase BOOLEAN。pinned 同士・unpinned 同士でそれぞれ sort_order →
+   * updated_at で並ぶ。
+   */
+  pinned: boolean
   created_at: string
   updated_at: string
   deleted_at?: string | null

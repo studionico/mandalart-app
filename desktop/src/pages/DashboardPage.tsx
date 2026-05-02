@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   getMandalarts, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts, permanentDeleteMandalart, createMandalartFromStockItem,
+  updateMandalartPinned, reorderMandalarts,
 } from '@/lib/api/mandalarts'
 import { findOrphanGrids, cleanupOrphanGrids, getRootGrids } from '@/lib/api/grids'
 import { addToStock } from '@/lib/api/stock'
@@ -129,6 +130,19 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleTogglePin(m: Mandalart) {
+    const next = !m.pinned
+    setMandalarts((prev) => prev.map((x) => (x.id === m.id ? { ...x, pinned: next } : x)))  // 楽観的
+    try {
+      await updateMandalartPinned(m.id, next)
+      // ピン状態変更で並び順が変わるので reload
+      load()
+    } catch (e) {
+      setToast({ message: `ピン留め失敗: ${(e as Error).message}`, type: 'error' })
+      load()
+    }
+  }
+
   async function handleDelete(id: string) {
     try {
       await deleteMandalart(id)
@@ -233,9 +247,28 @@ export default function DashboardPage() {
     }
   }
 
-  // card → 4 アクションアイコン / stock → ダッシュボード の drop dispatcher
+  // card → 4 アクションアイコン / stock → ダッシュボード / card → 別 card 位置 (reorder) の drop dispatcher
   const handleDashboardDrop = useCallback(async (action: DashboardDropAction) => {
     if (!action) return
+    if (action.kind === 'card-reorder') {
+      // mandalarts 配列内で source カードを target index に挿入し、reorderMandalarts で
+      // sort_order を 0..N に振り直す。pinned は ORDER BY 側で先頭固定されるので、
+      // ここでは見た目の順序だけを反映すれば自動的に「pinned ↑ + sort_order」が成立する。
+      const srcIdx = mandalarts.findIndex((m) => m.id === action.sourceMandalartId)
+      if (srcIdx < 0 || srcIdx === action.targetIndex) return
+      const next = [...mandalarts]
+      const [moved] = next.splice(srcIdx, 1)
+      const insertAt = srcIdx < action.targetIndex ? action.targetIndex - 1 : action.targetIndex
+      next.splice(insertAt, 0, moved)
+      setMandalarts(next)  // 楽観的更新
+      try {
+        await reorderMandalarts(next.map((m) => m.id))
+      } catch (e) {
+        setToast({ message: `並び替え失敗: ${(e as Error).message}`, type: 'error' })
+        load()  // 失敗時はサーバ値で復元
+      }
+      return
+    }
     if (action.kind === 'stock-to-new') {
       // 既存 handleStockPaste と同じ経路だが stockItemId しか持たないので fetch なしで
       // 直接 API 呼出。エラー処理は同形式。
@@ -293,7 +326,7 @@ export default function DashboardPage() {
         setCardExportPicker({ mandalartId: target.id, title: titleLabel })
         return
     }
-  }, [mandalarts])
+  }, [mandalarts, load])
 
   // useDashboardDnd は handleDashboardDrop を購読
   const dnd = useDashboardDnd({ onDrop: handleDashboardDrop })
@@ -433,12 +466,7 @@ export default function DashboardPage() {
           >
             インポート
           </button>
-          <button
-            onClick={handleCreate}
-            className="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            + 新規作成
-          </button>
+          {/* 「+ 新規作成」は card grid 先頭の「+」card に移行 (Phase A 以降) */}
         </div>
       </header>
 
@@ -469,12 +497,7 @@ export default function DashboardPage() {
           <div className="max-w-5xl mx-auto">
           {!initialLoaded ? (
             <p className="text-neutral-400 dark:text-neutral-500">読み込み中...</p>
-          ) : !query.trim() && mandalarts.length === 0 ? (
-            <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
-              <p className="text-lg mb-2">まだマンダラートがありません</p>
-              <p className="text-sm">「+ 新規作成」から始めましょう</p>
-            </div>
-          ) : visible.length === 0 ? (
+          ) : query.trim() && visible.length === 0 ? (
             <div className="text-center py-20 text-neutral-400 dark:text-neutral-500">
               <p className="text-sm">「{query}」に一致するマンダラートはありません</p>
             </div>
@@ -485,21 +508,26 @@ export default function DashboardPage() {
                 gridTemplateColumns: `repeat(auto-fill, ${DASHBOARD_CARD_SIZE_PX}px)`,
               }}
             >
+              {/* 検索中以外は先頭に「+」card を表示 (新規作成導線、card と同サイズの dashed 枠) */}
+              {!query.trim() && <NewMandalartCard onClick={handleCreate} />}
               {visible.map((m, index) => {
-                // stock 起源 drag 中、hover 中のカード以降を右に slide してドロップスペースを開ける
+                // drag 中、hover 中のカード以降を右に slide してドロップスペースを開ける。
+                // 自分自身 (card source の場合) は固定。
                 const shouldShiftRight =
-                  dnd.dragSourceKind === 'stock' &&
                   dnd.dragOverCardIndex !== null &&
-                  index >= dnd.dragOverCardIndex
+                  index >= dnd.dragOverCardIndex &&
+                  dnd.dragSourceId !== m.id
                 return (
                   <MandalartCard
                     key={m.id}
                     mandalart={m}
                     index={index}
                     shouldShiftRight={shouldShiftRight}
+                    isDragSource={dnd.dragSourceKind === 'card' && dnd.dragSourceId === m.id}
                     onOpen={() => openMandalart(m.id)}
                     onDuplicate={() => handleDuplicate(m)}
                     onDelete={() => handleDelete(m.id)}
+                    onTogglePin={() => handleTogglePin(m)}
                     onMouseDown={dnd.onCardMouseDown}
                     wasRecentlyDragged={dnd.wasRecentlyDragged}
                   />
@@ -569,15 +597,17 @@ export default function DashboardPage() {
 }
 
 function MandalartCard({
-  mandalart: m, index, shouldShiftRight, onOpen, onDuplicate, onDelete,
+  mandalart: m, index, shouldShiftRight, isDragSource, onOpen, onDuplicate, onDelete, onTogglePin,
   onMouseDown, wasRecentlyDragged,
 }: {
   mandalart: Mandalart
   index: number
   shouldShiftRight: boolean
+  isDragSource: boolean
   onOpen: () => void
   onDuplicate: () => void
   onDelete: () => void
+  onTogglePin: () => void
   onMouseDown: (mandalartId: string, e: React.MouseEvent) => void
   wasRecentlyDragged: () => boolean
 }) {
@@ -642,9 +672,11 @@ function MandalartCard({
       style={{
         width: DASHBOARD_CARD_SIZE_PX,
         height: DASHBOARD_CARD_SIZE_PX,
-        // stock 起源 drag 中、drag が hover している card 以降は右に slide してドロップスペースを開ける
+        // 他カード drag 中、drag が hover している card 以降は右に slide してドロップスペースを開ける
         transform: shouldShiftRight ? 'translateX(calc(100% + 12px))' : undefined,
         transition: 'transform 200ms ease-out',
+        // 自身が card-source として drag 中なら半透明 (見た目で source 識別)
+        opacity: isDragSource ? 0.4 : undefined,
         ...(isConvergeTarget
           ? {
               animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
@@ -674,11 +706,39 @@ function MandalartCard({
       <HoverActionButtons
         size="md"
         actions={[
+          {
+            icon: m.pinned ? '★' : '☆',
+            variant: m.pinned ? 'blue' : 'neutral',
+            onClick: onTogglePin,
+            title: m.pinned ? 'ピン留めを外す' : 'ピン留め',
+          },
           { icon: '⧉', variant: 'neutral', onClick: onDuplicate, title: '複製' },
           { icon: '×', variant: 'red', onClick: onDelete, title: '削除' },
         ]}
       />
     </div>
+  )
+}
+
+/**
+ * 新規マンダラート作成用の「+」card。
+ * 通常の MandalartCard と同サイズの dashed-border 枠 + 中央「+」アイコン。card grid の
+ * 先頭に常時表示され、現フォルダ (Phase B 以降) に新しいカードを追加するエントリポイント。
+ */
+function NewMandalartCard({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="新規マンダラートを作成"
+      className="relative bg-transparent border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded shadow-none hover:border-neutral-400 dark:hover:border-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors flex items-center justify-center select-none"
+      style={{
+        width: DASHBOARD_CARD_SIZE_PX,
+        height: DASHBOARD_CARD_SIZE_PX,
+      }}
+    >
+      <span className="text-3xl text-neutral-400 dark:text-neutral-500 font-light leading-none">+</span>
+    </button>
   )
 }
 

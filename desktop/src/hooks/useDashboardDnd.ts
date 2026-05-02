@@ -25,6 +25,7 @@ type DragSourceKind = 'card' | 'stock'
 export type DashboardDropAction =
   | { kind: 'card-action'; mandalartId: string; action: ActionDropType }
   | { kind: 'stock-to-new'; stockItemId: string }
+  | { kind: 'card-reorder'; sourceMandalartId: string; targetIndex: number }
   | null
 
 type Opts = {
@@ -58,17 +59,15 @@ export function useDashboardDnd({ onDrop }: Opts) {
     setDragSourceId(source.id)
     document.body.style.cursor = 'grabbing'
 
-    // stock 起源 drag 時のみ、drag 開始時点での全カード矩形をスナップショット。
+    // 全 drag (stock / card 両方) で、drag 開始時点での全カード矩形をスナップショット。
     // mousemove で transform 後の現 DOM ではなくこの natural 位置 rect 配列に対して hit-test し、
     // slide 演出による DOM 位置変動が hit 判定にフィードバックして振動するのを防ぐ。
     // (drag start 時は transform 未適用なので getBoundingClientRect は natural 位置を返す)
-    if (source.kind === 'stock') {
-      const cards = document.querySelectorAll<HTMLElement>('[data-dashboard-card-index]')
-      cardRectsRef.current = Array.from(cards).map((el) => ({
-        idx: Number(el.dataset.dashboardCardIndex),
-        rect: el.getBoundingClientRect(),
-      }))
-    }
+    const cards = document.querySelectorAll<HTMLElement>('[data-dashboard-card-index]')
+    cardRectsRef.current = Array.from(cards).map((el) => ({
+      idx: Number(el.dataset.dashboardCardIndex),
+      rect: el.getBoundingClientRect(),
+    }))
 
     function resolveActionTarget(e: MouseEvent): ActionDropType | null {
       // card 起源のみ DragActionPanel が右側に表示されている
@@ -81,10 +80,9 @@ export function useDashboardDnd({ onDrop }: Opts) {
     }
 
     function resolveCardIndex(e: MouseEvent): number | null {
-      // stock 起源のみ既存カードの index を解決 (slide 演出用)。
+      // stock / card 両起源で既存カードの index を解決 (slide 演出 + reorder 判定用)。
       // elementFromPoint ではなく drag 開始時にキャッシュした natural 位置 rect で hit-test する
       // (transform で視覚的に動いたカードは無視) ことでバタバタ振動を防ぐ。
-      if (source.kind !== 'stock') return null
       for (const { idx, rect } of cardRectsRef.current) {
         if (e.clientX >= rect.left && e.clientX <= rect.right
             && e.clientY >= rect.top && e.clientY <= rect.bottom) {
@@ -103,7 +101,15 @@ export function useDashboardDnd({ onDrop }: Opts) {
 
     function onMouseMove(e: MouseEvent) {
       if (source.kind === 'card') {
-        setHoveredAction(resolveActionTarget(e))
+        // card 起源: action panel hover が最優先 (drop で 4 アクション)、それ以外は
+        // 別カード hover で reorder 候補 (slide 演出 + drop で sort_order 更新)
+        const action = resolveActionTarget(e)
+        setHoveredAction(action)
+        if (action) {
+          setDragOverCardIndex(null)
+        } else {
+          setDragOverCardIndex(resolveCardIndex(e))
+        }
       } else {
         setDragOverCardIndex(resolveCardIndex(e))
       }
@@ -127,7 +133,15 @@ export function useDashboardDnd({ onDrop }: Opts) {
       let action: DashboardDropAction = null
       if (source.kind === 'card') {
         const a = resolveActionTarget(e)
-        if (a) action = { kind: 'card-action', mandalartId: source.id, action: a }
+        if (a) {
+          action = { kind: 'card-action', mandalartId: source.id, action: a }
+        } else {
+          const idx = resolveCardIndex(e)
+          if (idx != null) {
+            // 他カードの上で drop → sort_order を入れ替えて reorder
+            action = { kind: 'card-reorder', sourceMandalartId: source.id, targetIndex: idx }
+          }
+        }
       } else {
         const idx = resolveCardIndex(e)
         const onZone = isOverDropZone(e)
