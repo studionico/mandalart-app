@@ -178,8 +178,11 @@ src/
 │   ├── colors.ts             # プリセットカラー定義
 │   └── tabOrder.ts           # Tab 移動順 [4, 7, 6, 3, 0, 1, 2, 5, 8]
 │
-└── types/
-    └── index.ts              # Mandalart / Grid / Cell / StockItem / CellSnapshot / GridSnapshot 型定義
+├── types/
+│   └── index.ts              # Mandalart / Grid / Cell / StockItem / CellSnapshot / GridSnapshot 型定義
+│
+└── test/
+    └── setupTestDb.ts        # in-memory SQLite (better-sqlite3) で migrations を流し、`@/lib/db` をモック差し替えするテスト基盤。`vi.mock('@/lib/db', () => import('@/test/setupTestDb'))` で API 層 / realtime ハンドラを単体テスト可能 (cells.ts / grids.ts / mandalarts.ts / realtime.ts のテストで使用)
 ```
 
 ---

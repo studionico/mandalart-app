@@ -90,7 +90,7 @@ export function subscribeRemoteChanges(
  * 自分の push のエコーか、他デバイスからの実更新かを content 比較で判定する。
  * @returns true なら UI reload が必要 (content が実際に変わっている)
  */
-async function applyMandalartChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
+export async function applyMandalartChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
   if (payload.eventType === 'DELETE') {
     const id = payload.old.id as string
     if (!id) return false
@@ -139,7 +139,7 @@ async function applyMandalartChange(payload: { eventType: string; new: Record<st
   return true
 }
 
-async function applyGridChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
+export async function applyGridChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
   if (payload.eventType === 'DELETE') {
     const id = payload.old.id as string
     if (!id) return false
@@ -185,7 +185,7 @@ async function applyGridChange(payload: { eventType: string; new: Record<string,
   return true
 }
 
-async function applyCellChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
+export async function applyCellChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
   if (payload.eventType === 'DELETE') {
     const id = payload.old.id as string
     if (!id) return false
