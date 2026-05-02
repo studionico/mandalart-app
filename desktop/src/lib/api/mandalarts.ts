@@ -2,6 +2,7 @@ import { query, execute, generateId, now } from '../db'
 import { supabase, isSupabaseConfigured } from '../supabase/client'
 import { CENTER_POSITION } from '@/constants/grid'
 import { pasteFromStock } from './stock'
+import { syncAwareDelete } from './_softDelete'
 import type { Mandalart, Cell } from '../../types'
 
 // ルート中心セル (= mandalarts.root_cell_id が指す cell) の image_path を取得する共通式。
@@ -137,27 +138,10 @@ export async function updateMandalartLastGridId(
  */
 export async function deleteMandalart(id: string): Promise<void> {
   const ts = now()
-  // cells: 未同期 hard / 同期済み soft
-  await execute(
-    'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?) AND synced_at IS NULL',
-    [id],
-  )
-  await execute(
-    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?) AND synced_at IS NOT NULL',
-    [ts, ts, id],
-  )
-  // grids: 同上
-  await execute('DELETE FROM grids WHERE mandalart_id = ? AND synced_at IS NULL', [id])
-  await execute(
-    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE mandalart_id = ? AND synced_at IS NOT NULL',
-    [ts, ts, id],
-  )
-  // mandalart 本体: 同上
-  await execute('DELETE FROM mandalarts WHERE id = ? AND synced_at IS NULL', [id])
-  await execute(
-    'UPDATE mandalarts SET deleted_at = ?, updated_at = ? WHERE id = ? AND synced_at IS NOT NULL',
-    [ts, ts, id],
-  )
+  // cascade 順序が critical: cells → grids → mandalart の順 (子が先、親が後)
+  await syncAwareDelete('cells', 'grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)', [id], ts)
+  await syncAwareDelete('grids', 'mandalart_id = ?', [id], ts)
+  await syncAwareDelete('mandalarts', 'id = ?', [id], ts)
 }
 
 /**

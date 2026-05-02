@@ -1,6 +1,7 @@
 import { query, execute, generateId, now } from '../db'
 import { CENTER_POSITION } from '@/constants/grid'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client'
+import { syncAwareDelete } from './_softDelete'
 import type { Grid, Cell } from '../../types'
 
 /**
@@ -212,18 +213,9 @@ export async function deleteGrid(id: string): Promise<void> {
       await deleteGrid(sg.id)
     }
   }
-  // cells: 未同期 → hard delete, 同期済み → soft delete
-  await execute('DELETE FROM cells WHERE grid_id = ? AND synced_at IS NULL', [id])
-  await execute(
-    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id = ? AND synced_at IS NOT NULL',
-    [ts, ts, id],
-  )
-  // grid 本体: 同じく分岐
-  await execute('DELETE FROM grids WHERE id = ? AND synced_at IS NULL', [id])
-  await execute(
-    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE id = ? AND synced_at IS NOT NULL',
-    [ts, ts, id],
-  )
+  // 自 grid 所属の cells → grid 本体の順で sync-aware delete (落とし穴 #12 対策)
+  await syncAwareDelete('cells', 'grid_id = ?', [id], ts)
+  await syncAwareDelete('grids', 'id = ?', [id], ts)
 }
 
 export async function updateGridSortOrder(id: string, sortOrder: number): Promise<void> {

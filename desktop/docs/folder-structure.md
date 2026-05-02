@@ -147,6 +147,7 @@ src/
 │   ├── db/
 │   │   └── index.ts          # SQLite 基盤 (getDb / query / execute / generateId / now)
 │   ├── api/                  # エンティティ別 API レイヤー
+│   │   ├── _softDelete.ts    # syncAwareDelete helper: synced_at=NULL は hard / それ以外は soft delete (落とし穴 #12 対策、deleteMandalart / deleteGrid で使用)
 │   │   ├── mandalarts.ts     # CRUD + ソフトデリート + ゴミ箱 + 全文検索 + 複製
 │   │   ├── grids.ts          # CRUD + 9 セル一括生成 + 再帰論理削除
 │   │   ├── cells.ts          # 更新 (ルート中心セル自動 title 同期) / swap / copy / paste
