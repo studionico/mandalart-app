@@ -39,7 +39,7 @@ type RealtimePayload = { eventType: string; new: Record<string, unknown>; old: R
  */
 function registerTableHandler(
   channel: RealtimeChannel,
-  table: 'mandalarts' | 'grids' | 'cells',
+  table: 'mandalarts' | 'grids' | 'cells' | 'folders',
   apply: (payload: RealtimePayload) => Promise<boolean>,
   onChange: () => void,
 ): void {
@@ -75,6 +75,7 @@ export function subscribeRemoteChanges(
 ): () => void {
   const channel = supabase.channel('mandalart-sync')
 
+  registerTableHandler(channel, 'folders',    applyFolderChange,    onChange)
   registerTableHandler(channel, 'mandalarts', applyMandalartChange, onChange)
   registerTableHandler(channel, 'grids',      applyGridChange,      onChange)
   registerTableHandler(channel, 'cells',      applyCellChange,      onChange)
@@ -102,20 +103,21 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
     await execute('DELETE FROM mandalarts WHERE id = ?', [id])
     return true
   }
-  const m = payload.new as { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; last_grid_id?: string | null; sort_order?: number | null; pinned?: boolean; created_at: string; updated_at: string; deleted_at: string | null }
+  const m = payload.new as { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; last_grid_id?: string | null; sort_order?: number | null; pinned?: boolean; folder_id?: string | null; created_at: string; updated_at: string; deleted_at: string | null }
   if (!m.id) return false
-  const local = await query<{ title: string; root_cell_id: string; show_checkbox: number; last_grid_id: string | null; sort_order: number | null; pinned: number; deleted_at: string | null; updated_at: string }>(
-    'SELECT title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, deleted_at, updated_at FROM mandalarts WHERE id = ?',
+  const local = await query<{ title: string; root_cell_id: string; show_checkbox: number; last_grid_id: string | null; sort_order: number | null; pinned: number; folder_id: string | null; deleted_at: string | null; updated_at: string }>(
+    'SELECT title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, deleted_at, updated_at FROM mandalarts WHERE id = ?',
     [m.id],
   )
   const showCheckboxInt = m.show_checkbox ? 1 : 0
   const lastGridId = m.last_grid_id ?? null
   const sortOrder = m.sort_order ?? null
   const pinnedInt = m.pinned ? 1 : 0
+  const folderId = m.folder_id ?? null
   if (local.length === 0) {
     await execute(
-      'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [m.id, m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
+      'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [m.id, m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, folderId, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
     )
     return true
   }
@@ -127,6 +129,7 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
     (local[0].last_grid_id ?? null) === lastGridId &&
     (local[0].sort_order ?? null) === sortOrder &&
     Number(local[0].pinned) === pinnedInt &&
+    (local[0].folder_id ?? null) === folderId &&
     tsEqual(local[0].deleted_at, m.deleted_at)
   if (contentSame) {
     // echo: timestamp だけ揃えて UI reload はスキップ
@@ -137,8 +140,50 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
     return false
   }
   await execute(
-    'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-    [m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, m.updated_at, m.deleted_at, m.updated_at, m.id],
+    'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+    [m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, folderId, m.updated_at, m.deleted_at, m.updated_at, m.id],
+  )
+  return true
+}
+
+/**
+ * Realtime: folders テーブルの変更を local DB に反映する (migration 010 以降)。
+ * 既存ハンドラ群と同パターン: DELETE は物理削除、INSERT は新規追加、UPDATE は echo skip / 内容差分で判定。
+ */
+export async function applyFolderChange(payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }): Promise<boolean> {
+  if (payload.eventType === 'DELETE') {
+    const id = payload.old.id as string
+    if (!id) return false
+    await execute('DELETE FROM folders WHERE id = ?', [id])
+    return true
+  }
+  const f = payload.new as { id: string; name: string; sort_order: number; is_system: boolean; created_at: string; updated_at: string; deleted_at: string | null }
+  if (!f.id) return false
+  const local = await query<{ name: string; sort_order: number; is_system: number; deleted_at: string | null; updated_at: string }>(
+    'SELECT name, sort_order, is_system, deleted_at, updated_at FROM folders WHERE id = ?',
+    [f.id],
+  )
+  const isSystemInt = f.is_system ? 1 : 0
+  if (local.length === 0) {
+    await execute(
+      'INSERT INTO folders (id, name, sort_order, is_system, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?)',
+      [f.id, f.name, f.sort_order, isSystemInt, f.created_at, f.updated_at, f.deleted_at, f.updated_at],
+    )
+    return true
+  }
+  if (!tsNewer(f.updated_at, local[0].updated_at)) return false
+  const contentSame =
+    local[0].name === f.name &&
+    local[0].sort_order === f.sort_order &&
+    Number(local[0].is_system) === isSystemInt &&
+    tsEqual(local[0].deleted_at, f.deleted_at)
+  if (contentSame) {
+    await execute('UPDATE folders SET updated_at=?, synced_at=? WHERE id=?', [f.updated_at, f.updated_at, f.id])
+    return false
+  }
+  await execute(
+    'UPDATE folders SET name=?, sort_order=?, is_system=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+    [f.name, f.sort_order, isSystemInt, f.updated_at, f.deleted_at, f.updated_at, f.id],
   )
   return true
 }

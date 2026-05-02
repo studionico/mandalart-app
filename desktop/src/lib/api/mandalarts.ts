@@ -13,19 +13,36 @@ const ROOT_IMAGE_PATH_SUBQUERY = `(
   LIMIT 1
 )`
 
-export async function getMandalarts(): Promise<Mandalart[]> {
-  // 並び順 (Phase A 以降):
-  //   1. pinned カードを最上位固定 (pinned DESC で 1 → 0)
-  //   2. ユーザー定義 sort_order が小さい順 (NULL は最後にフォールバック)
-  //   3. 同 sort_order / 未指定どうしは updated_at で新しい順
+/**
+ * マンダラート一覧を取得する。
+ *
+ * - `folderId` 指定 (Phase B 以降): その folder に所属するマンダラートのみ返す
+ * - 未指定: 全 folder のマンダラートを返す (検索 / バックアップ用途)
+ *
+ * 並び順 (Phase A 以降):
+ *   1. pinned カードを最上位固定 (pinned DESC で 1 → 0)
+ *   2. ユーザー定義 sort_order が小さい順 (NULL は最後にフォールバック)
+ *   3. 同 sort_order / 未指定どうしは updated_at で新しい順
+ */
+export async function getMandalarts(folderId?: string): Promise<Mandalart[]> {
+  const orderBy = `ORDER BY m.pinned DESC,
+                            CASE WHEN m.sort_order IS NULL THEN 1 ELSE 0 END,
+                            m.sort_order ASC,
+                            m.updated_at DESC`
+  if (folderId) {
+    return query<Mandalart>(
+      `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
+       FROM mandalarts m
+       WHERE m.deleted_at IS NULL AND m.folder_id = ?
+       ${orderBy}`,
+      [folderId],
+    )
+  }
   return query<Mandalart>(
     `SELECT m.*, ${ROOT_IMAGE_PATH_SUBQUERY} AS image_path
      FROM mandalarts m
      WHERE m.deleted_at IS NULL
-     ORDER BY m.pinned DESC,
-              CASE WHEN m.sort_order IS NULL THEN 1 ELSE 0 END,
-              m.sort_order ASC,
-              m.updated_at DESC`,
+     ${orderBy}`,
   )
 }
 
@@ -52,15 +69,15 @@ export async function getMandalart(id: string): Promise<Mandalart | null> {
  *   - root center cell 1 行 (mandalarts.root_cell_id 参照のため必須)
  * peripheral cells は作らない (旧版では 8 cells INSERT していた)。
  */
-export async function createMandalart(title = ''): Promise<Mandalart> {
+export async function createMandalart(title = '', folderId?: string | null): Promise<Mandalart> {
   const mandalartId = generateId()
   const rootGridId = generateId()
   const rootCenterCellId = generateId()
   const ts = now()
 
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [mandalartId, title, rootCenterCellId, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [mandalartId, title, rootCenterCellId, folderId ?? null, ts, ts],
   )
   await execute(
     'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -79,6 +96,7 @@ export async function createMandalart(title = ''): Promise<Mandalart> {
     last_grid_id: null,
     sort_order: null,
     pinned: false,
+    folder_id: folderId ?? null,
     created_at: ts,
     updated_at: ts,
     user_id: '',
@@ -141,6 +159,18 @@ export async function reorderMandalarts(orderedIds: string[]): Promise<void> {
       [i, ts, orderedIds[i]],
     )
   }
+}
+
+/**
+ * マンダラートのフォルダ移動 (migration 010 以降)。タブ間の D&D で呼ばれる。
+ * 移動先 folder の末尾になるよう sort_order は NULL にリセットし、`getMandalarts` の
+ * updated_at fallback で末尾に並べる (元 folder での順番を持ち込まない)。
+ */
+export async function updateMandalartFolderId(id: string, folderId: string): Promise<void> {
+  await execute(
+    'UPDATE mandalarts SET folder_id = ?, sort_order = NULL, updated_at = ? WHERE id = ?',
+    [folderId, now(), id],
+  )
 }
 
 /**
@@ -324,11 +354,12 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const newRootCellId = cellIdMap.get(src.root_cell_id)
   if (!newRootCellId) throw new Error(`root_cell_id not found in source cells: ${src.root_cell_id}`)
 
-  // show_checkbox はコピー元の設定を継承する (テンプレ複製の自然な挙動)。
+  // show_checkbox / folder_id はコピー元の設定を継承する (テンプレ複製の自然な挙動)。
   // last_grid_id は継承しない (新規コピーは root から始まるのが自然) → 列省略で NULL になる。
+  // sort_order / pinned はリセット (複製は末尾に未ピンで追加されるのが自然)。
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, src.folder_id ?? null, ts, ts],
   )
 
   for (const g of allGrids) {
@@ -368,6 +399,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     last_grid_id: null,
     sort_order: null,
     pinned: false,
+    folder_id: src.folder_id ?? null,
     created_at: ts,
     updated_at: ts,
     user_id: '',

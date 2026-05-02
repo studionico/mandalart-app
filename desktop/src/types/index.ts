@@ -38,6 +38,29 @@ export type Mandalart = {
    * updated_at で並ぶ。
    */
   pinned: boolean
+  /**
+   * 所属フォルダの id (migration 010 以降)。すべてのマンダラートは 1 つの folder に所属する。
+   * Inbox bootstrap 後は実質 NOT NULL だが、ALTER で追加された既存行が一時的に NULL を持つため
+   * 型としては nullable。ensureInboxFolder の冪等呼び出しで NULL → Inbox に揃う。
+   */
+  folder_id?: string | null
+  created_at: string
+  updated_at: string
+  deleted_at?: string | null
+}
+
+/**
+ * ダッシュボードカードの分類タブ単位 (migration 010 以降)。
+ * - is_system=1: Inbox 等の削除不可 system folder (必ず存在、bootstrap で自動生成)
+ * - is_system=0: ユーザー定義フォルダ ("+" タブから任意の名前で追加)
+ *
+ * sort_order でタブ列の順序を保持。push/pull/realtime で同期される。
+ */
+export type Folder = {
+  id: string
+  name: string
+  sort_order: number
+  is_system: boolean
   created_at: string
   updated_at: string
   deleted_at?: string | null

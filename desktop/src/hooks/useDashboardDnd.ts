@@ -26,6 +26,7 @@ export type DashboardDropAction =
   | { kind: 'card-action'; mandalartId: string; action: ActionDropType }
   | { kind: 'stock-to-new'; stockItemId: string }
   | { kind: 'card-reorder'; sourceMandalartId: string; targetIndex: number }
+  | { kind: 'card-to-folder'; sourceMandalartId: string; targetFolderId: string }
   | null
 
 type Opts = {
@@ -136,10 +137,18 @@ export function useDashboardDnd({ onDrop }: Opts) {
         if (a) {
           action = { kind: 'card-action', mandalartId: source.id, action: a }
         } else {
-          const idx = resolveCardIndex(e)
-          if (idx != null) {
-            // 他カードの上で drop → sort_order を入れ替えて reorder
-            action = { kind: 'card-reorder', sourceMandalartId: source.id, targetIndex: idx }
+          // フォルダタブ上で drop されたか確認 (folder 移動が card-reorder より優先)
+          const el = document.elementFromPoint(e.clientX, e.clientY)
+          const tabEl = el?.closest('[data-folder-tab-id]') as HTMLElement | null
+          const targetFolderId = tabEl?.dataset.folderTabId
+          if (targetFolderId) {
+            action = { kind: 'card-to-folder', sourceMandalartId: source.id, targetFolderId }
+          } else {
+            const idx = resolveCardIndex(e)
+            if (idx != null) {
+              // 他カードの上で drop → sort_order を入れ替えて reorder
+              action = { kind: 'card-reorder', sourceMandalartId: source.id, targetIndex: idx }
+            }
           }
         }
       } else {

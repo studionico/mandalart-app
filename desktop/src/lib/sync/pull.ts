@@ -27,6 +27,16 @@ type CloudMandalart = {
   last_grid_id: string | null
   sort_order: number | null
   pinned: boolean
+  folder_id: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+type CloudFolder = {
+  id: string
+  name: string
+  sort_order: number
+  is_system: boolean
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -63,17 +73,38 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
   let gCount = 0
   let cCount = 0
 
-  const [m, g, c] = await Promise.all([
-    supabase.from('mandalarts').select('id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, created_at, updated_at, deleted_at'),
+  const [f, m, g, c] = await Promise.all([
+    supabase.from('folders').select('id, name, sort_order, is_system, created_at, updated_at, deleted_at'),
+    supabase.from('mandalarts').select('id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, created_at, updated_at, deleted_at'),
     supabase.from('grids').select('id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at'),
     supabase.from('cells').select('id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at'),
   ])
+  if (f.error) throw f.error
   if (m.error) throw m.error
   if (g.error) throw g.error
   if (c.error) throw c.error
+  const cloudFolders    = (f.data ?? []) as CloudFolder[]
   const cloudMandalarts = (m.data ?? []) as CloudMandalart[]
   const cloudGrids      = (g.data ?? []) as CloudGrid[]
   const cloudCells      = (c.data ?? []) as CloudCell[]
+
+  // 0. folders (mandalarts.folder_id が参照するため最初に)
+  for (const cf of cloudFolders) {
+    const local = await query<{ updated_at: string }>(
+      'SELECT updated_at FROM folders WHERE id = ?', [cf.id],
+    )
+    if (local.length === 0) {
+      await tryInsert('folders',
+        'INSERT INTO folders (id, name, sort_order, is_system, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?)',
+        [cf.id, cf.name, cf.sort_order, cf.is_system ? 1 : 0, cf.created_at, cf.updated_at, cf.deleted_at, cf.updated_at],
+      )
+    } else if (cf.updated_at > local[0].updated_at) {
+      await tryUpdate('folders',
+        'UPDATE folders SET name=?, sort_order=?, is_system=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cf.name, cf.sort_order, cf.is_system ? 1 : 0, cf.updated_at, cf.deleted_at, cf.updated_at, cf.id],
+      )
+    }
+  }
 
   // 1. mandalarts
   for (const cm of cloudMandalarts) {
@@ -82,14 +113,14 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     )
     if (local.length === 0) {
       await tryInsert('mandalarts',
-        'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        [cm.id, cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
+        'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        [cm.id, cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
       )
       mCount++
     } else if (cm.updated_at > local[0].updated_at) {
       await tryUpdate('mandalarts',
-        'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-        [cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
+        'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
       )
       mCount++
     }

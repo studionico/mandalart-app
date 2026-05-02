@@ -63,6 +63,12 @@ pub fn run() {
                             sql: include_str!("../migrations/009_mandalart_sort_pin.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 10,
+                            description: "add folders table + mandalarts.folder_id (Phase B: folder tabs + Inbox bootstrap)",
+                            sql: include_str!("../migrations/010_folders.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

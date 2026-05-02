@@ -153,6 +153,40 @@ ALTER TABLE mandalarts ADD COLUMN pinned boolean NOT NULL DEFAULT false;
 SQLite INTEGER 0/1 ↔ Supabase BOOLEAN は自動 boolean 正規化で互換 (`done` / `show_checkbox` と同パターン)。
 RLS ポリシーへの影響はなし。card-to-card D&D で `reorderMandalarts` が一括 0..N で振り直し、★ ボタンで `pinned` を切替えて push 同期。
 
+### 必須スキーマ変更: フォルダタブ (`folders` テーブル + `mandalarts.folder_id`)
+
+migration 010 でダッシュボードのフォルダタブ機能を追加しました。Supabase 側では以下を実行してください:
+
+```sql
+-- folders テーブル
+CREATE TABLE folders (
+  id          text PRIMARY KEY,
+  user_id     uuid NOT NULL REFERENCES auth.users(id),
+  name        text NOT NULL,
+  sort_order  integer NOT NULL DEFAULT 0,
+  is_system   boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  deleted_at  timestamptz
+);
+ALTER TABLE folders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "folders own" ON folders FOR ALL USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+-- updated_at 自動更新トリガー (他テーブルと同じパターン)
+CREATE TRIGGER set_updated_at_folders BEFORE UPDATE ON folders FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+-- realtime 配信を有効化 (mandalarts/grids/cells と同じく)
+ALTER PUBLICATION supabase_realtime ADD TABLE folders;
+
+-- mandalarts.folder_id カラム
+ALTER TABLE mandalarts ADD COLUMN folder_id text;
+```
+
+ローカル側は migration 010 で自動的に適用されます。
+- `folders` テーブルは Supabase の `id text PRIMARY KEY` (mandalarts と同じく client 生成 UUID) と整合
+- `is_system` は SQLite INTEGER 0/1 ↔ Supabase BOOLEAN の自動正規化で互換
+- `mandalarts.folder_id` は client 側が `ensureInboxFolder()` bootstrap で必ず値を入れるため NOT NULL 制約は付けない (migration 順序の互換性確保)
+
+RLS は user_id ベースで他デバイスと折衝なし。タブ追加 / 名前変更 / 削除 / カードのフォルダ移動はすべて push/pull/realtime で同期されます。
+
 ---
 
 ## ステップ 4: Auth 設定
@@ -189,11 +223,13 @@ mandalart://auth/callback
 
 ## ステップ 5: Realtime の有効化
 
-1. SQL Editor で以下を実行して、`mandalarts` / `grids` / `cells` テーブルを `supabase_realtime` publication に含める:
+1. SQL Editor で以下を実行して、`folders` / `mandalarts` / `grids` / `cells` テーブルを `supabase_realtime` publication に含める:
 
 ```sql
-ALTER PUBLICATION supabase_realtime ADD TABLE mandalarts, grids, cells;
+ALTER PUBLICATION supabase_realtime ADD TABLE folders, mandalarts, grids, cells;
 ```
+
+> 既存 setup (Phase A 以前) でこのステップを実行済みのユーザーは、上記の代わりに migration 010 節に記載の `ALTER PUBLICATION supabase_realtime ADD TABLE folders;` のみを実行 (差分のみ)。新規 setup ではこのステップ 5 で 4 テーブル一括登録すれば migration 010 節の同 ALTER は不要 (idempotent エラーは出ないが冗長)。
 
 2. 確認:
 

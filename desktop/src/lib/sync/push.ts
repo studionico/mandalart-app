@@ -1,6 +1,6 @@
 import { query, execute } from '@/lib/db'
 import { supabase } from '@/lib/supabase/client'
-import type { Cell, Grid, Mandalart } from '@/types'
+import type { Cell, Grid, Mandalart, Folder } from '@/types'
 
 /**
  * 未同期 (synced_at が NULL or updated_at < synced_at) のローカル行を Supabase にアップサートする。
@@ -106,6 +106,27 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   // grid を消した結果、その grid に属していた cells も追加で orphan 化するので再度掃除
   await execute(`DELETE FROM cells WHERE grid_id NOT IN (SELECT id FROM grids)`)
 
+  // 0. folders (mandalarts.folder_id が参照するため最初に)
+  const dirtyFoldersRaw = await query<Folder & { synced_at: string | null }>(
+    'SELECT * FROM folders WHERE synced_at IS NULL OR synced_at < updated_at',
+  )
+  const dirtyFolders = await skipOrphanDirtyDelete('folders', dirtyFoldersRaw)
+  for (const f of dirtyFolders) {
+    const ok = await upsertOne('folders', f.id, {
+      id: f.id,
+      user_id: userId,
+      name: f.name,
+      sort_order: f.sort_order,
+      is_system: !!f.is_system,
+      created_at: f.created_at,
+      updated_at: f.updated_at,
+      deleted_at: f.deleted_at ?? null,
+    }, async () => {
+      await execute('UPDATE folders SET synced_at = ? WHERE id = ?', [f.updated_at, f.id])
+    }, undefined, f.updated_at)
+    if (!ok) continue
+  }
+
   // 1. mandalarts
   const dirtyMandalartsRaw = await query<Mandalart>(
     'SELECT * FROM mandalarts WHERE synced_at IS NULL OR synced_at < updated_at',
@@ -121,6 +142,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       last_grid_id: m.last_grid_id ?? null,
       sort_order: m.sort_order ?? null,
       pinned: !!m.pinned,
+      folder_id: m.folder_id ?? null,
       created_at: m.created_at,
       updated_at: m.updated_at,
       deleted_at: m.deleted_at ?? null,

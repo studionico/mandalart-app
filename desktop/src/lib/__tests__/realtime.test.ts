@@ -4,7 +4,7 @@ vi.mock('@/lib/db', () => import('@/test/setupTestDb'))
 
 import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
-import { applyMandalartChange, applyGridChange, applyCellChange } from '@/lib/realtime'
+import { applyMandalartChange, applyGridChange, applyCellChange, applyFolderChange } from '@/lib/realtime'
 import { createMandalart } from '@/lib/api/mandalarts'
 import { getRootGrids } from '@/lib/api/grids'
 import { upsertCellAt } from '@/lib/api/cells'
@@ -304,5 +304,56 @@ describe('applyCellChange — id 不在の payload はスキップ', () => {
   it('DELETE で payload.old.id が無いと false を返す', async () => {
     const result = await applyCellChange({ eventType: 'DELETE', new: {}, old: {} })
     expect(result).toBe(false)
+  })
+})
+
+// ====================================================================
+// applyFolderChange (migration 010 / Phase B)
+// ====================================================================
+
+describe('applyFolderChange — INSERT', () => {
+  it('local 不在の cloud folder を INSERT', async () => {
+    const result = await applyFolderChange({
+      eventType: 'INSERT',
+      new: { id: 'f-1', name: 'Archive', sort_order: 1, is_system: false, created_at: T1, updated_at: T1, deleted_at: null },
+      old: {},
+    })
+    expect(result).toBe(true)
+    const row = db.prepare('SELECT name, is_system FROM folders WHERE id = ?').get('f-1') as { name: string; is_system: number }
+    expect(row.name).toBe('Archive')
+    expect(row.is_system).toBe(0)
+  })
+})
+
+describe('applyFolderChange — UPDATE echo / real', () => {
+  it('content 同一 → false (timestamp のみ更新)', async () => {
+    db.prepare('INSERT INTO folders (id, name, sort_order, is_system, created_at, updated_at, synced_at) VALUES (?,?,?,?,?,?,?)').run('f-2', 'A', 0, 0, T1, T1, T1)
+    const result = await applyFolderChange({
+      eventType: 'UPDATE',
+      new: { id: 'f-2', name: 'A', sort_order: 0, is_system: false, created_at: T1, updated_at: T2, deleted_at: null },
+      old: {},
+    })
+    expect(result).toBe(false)
+  })
+
+  it('name 変化 → true (UPDATE)', async () => {
+    db.prepare('INSERT INTO folders (id, name, sort_order, is_system, created_at, updated_at, synced_at) VALUES (?,?,?,?,?,?,?)').run('f-3', 'old', 0, 0, T1, T1, T1)
+    const result = await applyFolderChange({
+      eventType: 'UPDATE',
+      new: { id: 'f-3', name: 'new', sort_order: 0, is_system: false, created_at: T1, updated_at: T2, deleted_at: null },
+      old: {},
+    })
+    expect(result).toBe(true)
+    const row = db.prepare('SELECT name FROM folders WHERE id = ?').get('f-3') as { name: string }
+    expect(row.name).toBe('new')
+  })
+})
+
+describe('applyFolderChange — DELETE', () => {
+  it('folder を物理削除する', async () => {
+    db.prepare('INSERT INTO folders (id, name, sort_order, is_system, created_at, updated_at) VALUES (?,?,?,?,?,?)').run('f-4', 'doomed', 0, 0, T1, T1)
+    const result = await applyFolderChange({ eventType: 'DELETE', new: {}, old: { id: 'f-4' } })
+    expect(result).toBe(true)
+    expect((db.prepare('SELECT COUNT(*) AS n FROM folders WHERE id = ?').get('f-4') as { n: number }).n).toBe(0)
   })
 })

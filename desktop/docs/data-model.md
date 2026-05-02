@@ -23,6 +23,7 @@ CREATE TABLE mandalarts (
   last_grid_id    TEXT,                       -- 前回開いていた sub-grid の id (migration 008 以降、nullable)
   sort_order      INTEGER,                    -- ダッシュボードでのユーザー定義並び順 (migration 009 以降、nullable / 低い方が先頭)
   pinned          INTEGER NOT NULL DEFAULT 0, -- 1 = 最上位固定 (migration 009 以降)
+  folder_id       TEXT,                       -- 所属フォルダ id (migration 010 以降、bootstrap 後は実質 NOT NULL)
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at       TEXT,                       -- 最終クラウド同期日時
@@ -36,6 +37,32 @@ CREATE TABLE mandalarts (
 > **`last_grid_id` は前回開いていた sub-grid の id**。ダッシュボードからマンダラートを再オープンしたときに drill 階層を復元するため、EditorLayout の `currentGridId` 変化監視 useEffect で都度更新。null は「未設定 → root にフォールバック」を意味する。stale (grid 削除済み) の場合は復元時に root に戻す + null にクリーンアップ。push/pull/realtime で同期される。
 
 > **`sort_order` / `pinned` はダッシュボード整理 UI のため (migration 009 以降)**。`getMandalarts` の ORDER BY は `pinned DESC, sort_order ASC NULLS LAST, updated_at DESC`。card-to-card D&D で `reorderMandalarts(orderedIds)` が一括 0..N で振り直し、★ ボタンで `pinned` を切替える。push/pull/realtime で同期される。
+
+> **`folder_id` はダッシュボードのフォルダタブ機能 (migration 010 以降)**。すべてのマンダラートは必ず 1 つのフォルダに所属する。Inbox は `folders.is_system=1` の system folder として `ensureInboxFolder()` の冪等 bootstrap で自動生成され、削除不可。タブ間 D&D で `updateMandalartFolderId(id, folderId)` を呼ぶと `sort_order` は NULL リセットされ移動先末尾に並ぶ。push/pull/realtime で同期される。
+
+### folders
+
+ダッシュボードカードの分類タブ単位 (migration 010 以降)。
+
+```sql
+CREATE TABLE folders (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  is_system   INTEGER NOT NULL DEFAULT 0,   -- 1 = Inbox 等の削除不可 system folder
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at   TEXT,
+  remote_id   TEXT,
+  deleted_at  TEXT
+);
+```
+
+> **Inbox bootstrap**: `ensureInboxFolder()` がアプリ起動時 / ダッシュボードマウント時に冪等に呼ばれ、`is_system=1` の folder が無ければ生成し、`folder_id IS NULL` のマンダラートを Inbox に振り分ける。複数デバイス同時 bootstrap で稀に Inbox が 2 個できる可能性は低リスクとして許容 (起きたら手動マージで対応)。
+>
+> **system folder の保護**: `deleteFolder` は `is_system=1` の folder を削除拒否する (Error throw)。名前変更は許可 (i18n 用途、`updateFolderName` は system folder にも適用可)。
+>
+> **ユーザー定義 folder の削除**: 所属マンダラートは Inbox に reassign された後、folder 自身が `syncAwareDelete` (落とし穴 #12 / Phase A 1で導入) で sync-aware soft/hard delete される。
 
 > **title は独立した値ではなく、ルートグリッドの中心セル (position = 4) のテキストをキャッシュしたもの。**`lib/api/cells.ts` の `updateCell` がルート中心セルの更新を検知して自動的に同期する。別途「ファイル名を付けて保存」するフローは無い。
 >

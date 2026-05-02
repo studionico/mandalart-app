@@ -20,7 +20,7 @@ import { execute } from '../db'
  * @param ts 呼出元で `now()` 済みの timestamp。cascade 全段で同じ値を使うため引数化
  */
 export async function syncAwareDelete(
-  table: 'mandalarts' | 'grids' | 'cells',
+  table: 'mandalarts' | 'grids' | 'cells' | 'folders',
   whereClause: string,
   whereParams: unknown[],
   ts: string,

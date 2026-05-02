@@ -71,6 +71,10 @@ updateMandalartSortOrder(id: string, sortOrder: number): Promise<void>
 // 振り直す (migration 009 以降)。orderedIds は現在ダッシュボードに見えている順 (= ピン留めを含む全カード)。
 reorderMandalarts(orderedIds: string[]): Promise<void>
 
+// マンダラートのフォルダ移動 (migration 010 以降)。タブ間 D&D で呼ばれる。
+// 移動先 folder の末尾に並ぶよう sort_order は NULL リセット、updated_at fallback で末尾に並ぶ。
+updateMandalartFolderId(id: string, folderId: string): Promise<void>
+
 // stock item を起点に新しいマンダラートを作成する。
 // 空 mandalart を `createMandalart()` で生成し、root_cell_id (空の root center cell) に
 // `pasteFromStock` で stock snapshot を貼付け、root grid 全体を populate する。
@@ -233,6 +237,39 @@ setGridDone(gridId: string, done: boolean): Promise<void>
 // セルの done を toggle する。子孫 propagate / 親 propagate (兄弟全 done なら親も done)
 // を伴う複雑な伝搬を含む
 toggleCellDone(cellId: string): Promise<void>
+```
+
+---
+
+## lib/api/folders.ts (migration 010 以降)
+
+ダッシュボードのフォルダタブ操作 API。すべてのマンダラートは必ず 1 つの folder に所属する。
+Inbox は `is_system=1` の system folder として `ensureInboxFolder` の冪等呼び出しで自動生成される。
+
+```typescript
+// deleted_at IS NULL の folder を sort_order 順に返す
+getFolders(): Promise<Folder[]>
+
+// ユーザー定義フォルダを新規作成 (is_system=0)。sort_order は MAX+1 で自動採番
+createFolder(name: string): Promise<Folder>
+
+// フォルダ名を更新する。Inbox など system folder にも適用可 (i18n 用途)
+updateFolderName(id: string, name: string): Promise<void>
+
+// sort_order を直接設定する (タブの並び替え用)
+updateFolderSortOrder(id: string, sortOrder: number): Promise<void>
+
+// フォルダを削除する。
+//  - is_system=1 (Inbox 等): 削除拒否 (Error throw)
+//  - それ以外: 所属マンダラートの folder_id を Inbox に reset → folder 自身を syncAwareDelete
+deleteFolder(id: string): Promise<void>
+
+// Inbox folder が存在することを保証する冪等な bootstrap。
+//  - 既に is_system=1 の folder があればその id を返す
+//  - 無ければ新規作成 (sort_order=0、name='Inbox')
+//  - その後、folder_id IS NULL の mandalarts を Inbox に振り分け
+// アプリ起動時 + ダッシュボードマウント時に呼ぶ想定
+ensureInboxFolder(): Promise<string>
 ```
 
 ---

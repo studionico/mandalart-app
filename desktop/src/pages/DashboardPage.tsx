@@ -3,8 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import {
   getMandalarts, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts, permanentDeleteMandalart, createMandalartFromStockItem,
-  updateMandalartPinned, reorderMandalarts,
+  updateMandalartPinned, reorderMandalarts, updateMandalartFolderId,
 } from '@/lib/api/mandalarts'
+import {
+  getFolders, createFolder, updateFolderName, deleteFolder, ensureInboxFolder,
+} from '@/lib/api/folders'
 import { findOrphanGrids, cleanupOrphanGrids, getRootGrids } from '@/lib/api/grids'
 import { addToStock } from '@/lib/api/stock'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
@@ -34,13 +37,22 @@ import {
   DASHBOARD_CARD_INSET_PX,
 } from '@/constants/layout'
 import { CONVERGE_DURATION_MS } from '@/constants/timing'
-import type { Mandalart, StockItem } from '@/types'
+import type { Mandalart, StockItem, Folder } from '@/types'
 
 type SortKey = 'updated' | 'title'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [mandalarts, setMandalarts] = useState<Mandalart[]>([])
+  // フォルダ機能 (Phase B、migration 010)。selectedFolderId は初回 bootstrap で Inbox に設定される。
+  const [folders, setFolders] = useState<Folder[]>([])
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
+  // 新フォルダ追加 / リネーム時の inline 入力 state (window.prompt は Tauri WebKit で動かないため)
+  const [pendingFolder, setPendingFolder] = useState<
+    | { kind: 'create'; name: string }
+    | { kind: 'rename'; folderId: string; name: string }
+    | null
+  >(null)
   // 初回ロードが完了したかどうか (初回のみ「読み込み中...」を表示するため)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [query, setQuery] = useState('')
@@ -88,22 +100,62 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     const seq = ++loadSeqRef.current
     try {
-      const data = query.trim() ? await searchMandalarts(query) : await getMandalarts()
+      // 検索中は全フォルダ横断、それ以外は選択中フォルダで絞る (Phase B)
+      const data = query.trim()
+        ? await searchMandalarts(query)
+        : await getMandalarts(selectedFolderId ?? undefined)
       // 後続のリクエストが走っていたら、古い結果は破棄する
       if (seq !== loadSeqRef.current) return
       setMandalarts(data)
     } finally {
       if (seq === loadSeqRef.current) setInitialLoaded(true)
     }
-  }, [query])
+  }, [query, selectedFolderId])
 
-  // クエリ変更 / 同期完了 / Realtime 受信時に debounce して再取得
+  /** folders を再取得する (タブの追加 / 名前変更 / 削除後に呼ぶ) */
+  const loadFolders = useCallback(async () => {
+    setFolders(await getFolders())
+  }, [])
+
+  /**
+   * Inbox bootstrap: アプリ起動時 + ダッシュボードマウント時に呼ぶ。
+   * Inbox folder が無ければ生成し、folder_id NULL のマンダラートを Inbox に振り分ける。
+   * 完了後 selectedFolderId を Inbox に設定 (初回のみ)。
+   */
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const inboxId = await ensureInboxFolder()
+      if (cancelled) return
+      await loadFolders()
+      if (cancelled) return
+      // 初回のみ Inbox を選択 (ユーザーが既に別タブを選んでいる場合は維持)
+      setSelectedFolderId((prev) => prev ?? inboxId)
+    })()
+    return () => { cancelled = true }
+  }, [loadFolders])
+
+  // クエリ変更 / フォルダ切替 / 同期完了 / Realtime 受信時に debounce して再取得
   // debounce を入れることで Realtime が連鎖発火したときのリマウント祭りを防ぐ。
   useEffect(() => {
     const delay = query.trim() ? 200 : 150
     const t = setTimeout(() => { load() }, delay)
     return () => clearTimeout(t)
   }, [query, reloadKey, load])
+
+  // 同期 / Realtime で folders が更新された可能性があるので reloadKey で再取得
+  useEffect(() => {
+    void loadFolders()
+  }, [reloadKey, loadFolders])
+
+  // 選択中フォルダが folders 一覧から消えた場合 (別デバイスでの削除等) は Inbox にフォールバック
+  useEffect(() => {
+    if (folders.length === 0) return
+    if (!selectedFolderId || !folders.some((f) => f.id === selectedFolderId)) {
+      const inbox = folders.find((f) => f.is_system) ?? folders[0]
+      setSelectedFolderId(inbox.id)
+    }
+  }, [folders, selectedFolderId])
 
   // ダッシュボードからエディタへ遷移する際は常に 3×3 モードで開く。
   // 直前に 9×9 を見ていたマンダラートを閉じて別のマンダラートを開いた場合でも、
@@ -122,11 +174,63 @@ export default function DashboardPage() {
   async function handleCreate() {
     try {
       // createMandalart は root grid + 9 cells + root_cell_id も atomic に作成する
-      const m = await createMandalart()
+      // 選択中の folder に追加 (Phase B、bootstrap 後 selectedFolderId は必ず Inbox 以上)
+      const m = await createMandalart('', selectedFolderId)
       openMandalart(m.id)
     } catch (e) {
       alert('エラー: ' + String(e))
       console.error(e)
+    }
+  }
+
+  /** 「+」タブをクリック → タブ列末尾の inline input にフォーカス */
+  function handleStartAddFolder() {
+    setPendingFolder({ kind: 'create', name: '' })
+  }
+
+  /** タブを右クリック → そのタブを inline 編集モードに */
+  function handleStartRenameFolder(folder: Folder) {
+    setPendingFolder({ kind: 'rename', folderId: folder.id, name: folder.name })
+  }
+
+  /** inline input の確定 (Enter / blur)。空文字ならキャンセル扱い。 */
+  async function commitPendingFolder() {
+    if (!pendingFolder) return
+    const name = pendingFolder.name.trim()
+    if (!name) {
+      setPendingFolder(null)
+      return
+    }
+    try {
+      if (pendingFolder.kind === 'create') {
+        const f = await createFolder(name)
+        await loadFolders()
+        setSelectedFolderId(f.id)  // 追加直後はそのタブを選択
+      } else {
+        await updateFolderName(pendingFolder.folderId, name)
+        await loadFolders()
+      }
+    } catch (e) {
+      setToast({ message: `フォルダ操作失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setPendingFolder(null)
+    }
+  }
+
+  /** ユーザー定義フォルダの削除 (Shift+右クリック)。Inbox は API 側で reject される。 */
+  async function handleDeleteFolder(folder: Folder) {
+    if (folder.is_system) return
+    try {
+      await deleteFolder(folder.id)
+      await loadFolders()
+      // 選択中フォルダを削除した場合は Inbox に戻す
+      if (selectedFolderId === folder.id) {
+        const inbox = (await getFolders()).find((f) => f.is_system)
+        setSelectedFolderId(inbox?.id ?? null)
+      }
+      setToast({ message: `「${folder.name}」を削除しました`, type: 'success' })
+    } catch (e) {
+      setToast({ message: `フォルダ削除失敗: ${(e as Error).message}`, type: 'error' })
     }
   }
 
@@ -247,9 +351,23 @@ export default function DashboardPage() {
     }
   }
 
-  // card → 4 アクションアイコン / stock → ダッシュボード / card → 別 card 位置 (reorder) の drop dispatcher
+  // card → 4 アクション / stock → ダッシュボード / card → 別 card 位置 (reorder) /
+  // card → フォルダタブ (folder 移動) の drop dispatcher
   const handleDashboardDrop = useCallback(async (action: DashboardDropAction) => {
     if (!action) return
+    if (action.kind === 'card-to-folder') {
+      // 選択中タブから別 folder にカードを移動 → 一覧から消える (移動先で fade-in 等の演出は省略)
+      if (action.targetFolderId === selectedFolderId) return  // 同 folder への移動は no-op
+      setMandalarts((prev) => prev.filter((m) => m.id !== action.sourceMandalartId))  // 楽観的
+      try {
+        await updateMandalartFolderId(action.sourceMandalartId, action.targetFolderId)
+        setToast({ message: 'フォルダを移動しました', type: 'success' })
+      } catch (e) {
+        setToast({ message: `フォルダ移動失敗: ${(e as Error).message}`, type: 'error' })
+        load()
+      }
+      return
+    }
     if (action.kind === 'card-reorder') {
       // mandalarts 配列内で source カードを target index に挿入し、reorderMandalarts で
       // sort_order を 0..N に振り直す。pinned は ORDER BY 側で先頭固定されるので、
@@ -326,7 +444,7 @@ export default function DashboardPage() {
         setCardExportPicker({ mandalartId: target.id, title: titleLabel })
         return
     }
-  }, [mandalarts, load])
+  }, [mandalarts, load, selectedFolderId])
 
   // useDashboardDnd は handleDashboardDrop を購読
   const dnd = useDashboardDnd({ onDrop: handleDashboardDrop })
@@ -469,6 +587,83 @@ export default function DashboardPage() {
           {/* 「+ 新規作成」は card grid 先頭の「+」card に移行 (Phase A 以降) */}
         </div>
       </header>
+
+      {/* フォルダタブ列 (Phase B、migration 010)。検索中は無視 (search は全 folder 横断)。 */}
+      {!query.trim() && (
+        <div className="shrink-0 border-b border-neutral-200 dark:border-neutral-800 px-6">
+          <div className="max-w-5xl mx-auto flex items-center gap-1 overflow-x-auto">
+            {folders.map((f) => {
+              const isActive = f.id === selectedFolderId
+              const isRenaming = pendingFolder?.kind === 'rename' && pendingFolder.folderId === f.id
+              if (isRenaming) {
+                return (
+                  <input
+                    key={`rename-${f.id}`}
+                    type="text"
+                    autoFocus
+                    value={pendingFolder.name}
+                    onChange={(e) => setPendingFolder({ kind: 'rename', folderId: f.id, name: e.target.value })}
+                    onBlur={commitPendingFolder}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitPendingFolder()
+                      else if (e.key === 'Escape') setPendingFolder(null)
+                    }}
+                    className="shrink-0 px-3 py-2 text-sm font-medium border-b-2 border-blue-600 bg-transparent text-neutral-900 dark:text-neutral-100 focus:outline-none whitespace-nowrap"
+                    style={{ width: '8rem' }}
+                  />
+                )
+              }
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  data-folder-tab-id={f.id}
+                  onClick={() => setSelectedFolderId(f.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    // 簡易メニュー: Shift+右クリックで削除 (system 不可)、それ以外は名前変更
+                    if (e.shiftKey && !f.is_system) handleDeleteFolder(f)
+                    else handleStartRenameFolder(f)
+                  }}
+                  title={f.is_system ? `${f.name} (system) — 右クリックで名前変更` : `${f.name} — 右クリックで名前変更 / Shift+右クリックで削除`}
+                  className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors select-none whitespace-nowrap ${
+                    isActive
+                      ? 'border-blue-600 text-neutral-900 dark:text-neutral-100'
+                      : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  {f.name}
+                </button>
+              )
+            })}
+            {pendingFolder?.kind === 'create' ? (
+              <input
+                type="text"
+                autoFocus
+                placeholder="フォルダ名"
+                value={pendingFolder.name}
+                onChange={(e) => setPendingFolder({ kind: 'create', name: e.target.value })}
+                onBlur={commitPendingFolder}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitPendingFolder()
+                  else if (e.key === 'Escape') setPendingFolder(null)
+                }}
+                className="shrink-0 px-3 py-2 text-sm font-medium border-b-2 border-blue-600 bg-transparent text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none whitespace-nowrap"
+                style={{ width: '8rem' }}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartAddFolder}
+                title="新しいフォルダを追加"
+                className="shrink-0 px-3 py-2 text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 border-b-2 border-transparent select-none"
+              >
+                +
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
       <TrashDialog
