@@ -34,7 +34,10 @@ export function CardLikeText({
   return (
     <div
       style={{ top, right: sideInsetPx, bottom: sideInsetPx, left: sideInsetPx }}
-      className="absolute z-10 flex items-start overflow-hidden"
+      // pointer-events-none: text wrapper はプレゼンテーション専用。クリックは親 card wrapper
+      // (および右上の HoverActionButtons などの兄弟インタラクティブ要素) に通す。これがないと
+      // text wrapper の z-10 が action buttons を遮ってクリック不能になる。
+      className="absolute z-10 flex items-start overflow-hidden pointer-events-none"
     >
       <span
         style={{ fontSize: fontPx, lineHeight: 1.25 }}
