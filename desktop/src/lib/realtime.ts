@@ -27,6 +27,36 @@ function tsNewer(a: string | null | undefined, b: string | null | undefined): bo
   return tsMs(a) > tsMs(b)
 }
 
+type RealtimeChannel = ReturnType<typeof supabase.channel>
+type RealtimePayload = { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }
+
+/**
+ * postgres_changes の登録 + payload.table ガード + try/catch + onChange 呼び出しを集約する内部 helper。
+ *
+ * Supabase realtime の table フィルターが実測で discriminator として効かないケースがあり、
+ * mandalarts ハンドラに cells ペイロードが届くなどの混線が発生する (落とし穴 #4)。各ハンドラ
+ * 冒頭の `payload.table !== table` ガードはそのため。helper 化後も従来通り両方を実行する。
+ */
+function registerTableHandler(
+  channel: RealtimeChannel,
+  table: 'mandalarts' | 'grids' | 'cells',
+  apply: (payload: RealtimePayload) => Promise<boolean>,
+  onChange: () => void,
+): void {
+  channel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table },
+    async (payload) => {
+      if (payload.table !== table) return
+      try {
+        if (await apply(payload as RealtimePayload)) onChange()
+      } catch (e) {
+        console.error(`[realtime] apply ${table} change failed:`, e, payload)
+      }
+    },
+  )
+}
+
 /**
  * Supabase Realtime: 別デバイスでの変更を購読する
  *
@@ -45,51 +75,9 @@ export function subscribeRemoteChanges(
 ): () => void {
   const channel = supabase.channel('mandalart-sync')
 
-  // Supabase realtime の table フィルターが実測で discriminator として
-  // 効かないケースがあり、mandalarts ハンドラに cells ペイロードが届くなどの
-  // 混線が発生する。各ハンドラの冒頭で payload.table を検証し、対象外ならスキップする。
-
-  channel.on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'mandalarts' },
-    async (payload) => {
-      if (payload.table !== 'mandalarts') return
-      try {
-        const changed = await applyMandalartChange(payload)
-        if (changed) onChange()
-      } catch (e) {
-        console.error('[realtime] applyMandalartChange failed:', e, payload)
-      }
-    },
-  )
-
-  channel.on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'grids' },
-    async (payload) => {
-      if (payload.table !== 'grids') return
-      try {
-        const changed = await applyGridChange(payload)
-        if (changed) onChange()
-      } catch (e) {
-        console.error('[realtime] applyGridChange failed:', e, payload)
-      }
-    },
-  )
-
-  channel.on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'cells' },
-    async (payload) => {
-      if (payload.table !== 'cells') return
-      try {
-        const changed = await applyCellChange(payload)
-        if (changed) onChange()
-      } catch (e) {
-        console.error('[realtime] applyCellChange failed:', e, payload)
-      }
-    },
-  )
+  registerTableHandler(channel, 'mandalarts', applyMandalartChange, onChange)
+  registerTableHandler(channel, 'grids',      applyGridChange,      onChange)
+  registerTableHandler(channel, 'cells',      applyCellChange,      onChange)
 
   channel.subscribe()
 
