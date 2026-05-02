@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActionDropType } from '@/components/editor/DragActionPanel'
-import { setDragPayload } from '@/lib/utils/dndPayload'
+import { setDragPayload, applyCleanDragImage } from '@/lib/utils/dndPayload'
 import { useDragClickSuppress } from './useDragClickSuppress'
 
 /**
@@ -85,6 +85,7 @@ export function useDashboardDnd({ onDrop }: Opts) {
     setDragSourceId(mandalartId)
     setDragPayload(e, { kind: 'dashboard-card', mandalartId })
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    applyCleanDragImage(e, e.currentTarget as HTMLElement)
     snapshotCardRects()
   }, [])
 
@@ -94,6 +95,7 @@ export function useDashboardDnd({ onDrop }: Opts) {
     setDragSourceId(stockItemId)
     setDragPayload(e, { kind: 'stock', stockItemId })
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+    applyCleanDragImage(e, e.currentTarget as HTMLElement)
     snapshotCardRects()
   }, [])
 

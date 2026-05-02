@@ -6,7 +6,7 @@ import { CENTER_POSITION, isCenterPosition } from '@/constants/grid'
 import { swapCellSubtree, upsertCellAt } from '@/lib/api/cells'
 import { query } from '@/lib/db'
 import type { UndoOperation } from '@/store/undoStore'
-import { setDragPayload } from '@/lib/utils/dndPayload'
+import { setDragPayload, applyCleanDragImage } from '@/lib/utils/dndPayload'
 
 /** D&D 中に表示する 4 アクションアイコン (DragActionPanel) の種別 */
 export type ActionDropType = 'shred' | 'move' | 'copy' | 'export'
@@ -124,6 +124,7 @@ export function useDragAndDrop(
     setDragSourceId(cell.id)
     setDragPayload(e, { kind: 'cell', cellId: cell.id })
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    applyCleanDragImage(e, e.currentTarget as HTMLElement)
   }, [])
 
   const handleStockItemDragStart = useCallback((itemId: string, e: React.DragEvent) => {
@@ -131,6 +132,7 @@ export function useDragAndDrop(
     setDragSourceId(`stock:${itemId}`)
     setDragPayload(e, { kind: 'stock', stockItemId: itemId })
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+    applyCleanDragImage(e, e.currentTarget as HTMLElement)
   }, [])
 
   const handleDragEnd = useCallback(() => {
