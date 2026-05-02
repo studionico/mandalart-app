@@ -638,7 +638,7 @@ function MandalartCard({
       // 角丸は中心セルの `rounded-lg (8px)` をスケール 0.47 した ~3.76px に対応する `rounded (4px)` を採用。
       data-converge-card={m.id}
       data-dashboard-card-index={index}
-      className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer group overflow-hidden"
+      className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer group overflow-hidden select-none"
       style={{
         width: DASHBOARD_CARD_SIZE_PX,
         height: DASHBOARD_CARD_SIZE_PX,
