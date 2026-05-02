@@ -119,9 +119,21 @@ export async function swapCellContent(cellIdA: string, cellIdB: string): Promise
 /**
  * 2 つの cell のサブツリー (drilled 子グリッド群) を入れ替える。
  *
- * 新モデル (center_cell_id ベース):
- *  - 自グリッドの center = 自セル (= root 中心) の grid は付け替え対象外 (自己参照を壊すため)
- *  - それ以外の、cell を center として指している grid の center_cell_id を入れ替える
+ * 新モデル (migration 006: parent_cell_id + center_cell_id 二軸):
+ *  - `getChildGrids(cellId)` は `parent_cell_id = cellId` で引く → drill の経路選定
+ *  - `getGrid(id)` は `center_cell_id` を merged center として描画 → drill 後の中央セル
+ *  - X=C 統一モデルでは parent_cell_id = center_cell_id (drilled 先の中心はそのセル自身)
+ *  - 独立並列モードでは parent_cell_id は親 peripheral、center_cell_id は別 cell
+ *  - レガシー並列も migration 006 の backfill で parent_cell_id = center_cell_id
+ *
+ * subtree swap の意味は「A 位置から drill したら B の旧 subtree、B 位置から drill したら A の旧
+ * subtree が見える」状態にすること。これを実現するには **parent_cell_id と center_cell_id の両方**
+ * を swap する必要がある。
+ *
+ * 旧実装は center_cell_id だけを swap していたため、drill (parent_cell_id 経由) は元のままで
+ * 中央セル (center_cell_id 経由) だけが入れ替わり、見た目は「内容だけ swap」になっていた。
+ *
+ * 自グリッド (= 自セルが center を担当している自身の grid 行) は除外する (root 中心の自己参照を壊すため)。
  */
 export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void> {
   const [aInfo, bInfo] = await Promise.all([
@@ -131,19 +143,40 @@ export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise
   const gridIdA = aInfo[0]?.grid_id ?? ''
   const gridIdB = bInfo[0]?.grid_id ?? ''
 
-  const gridsOfA = await query<{ id: string }>(
+  // parent_cell_id 付け替え対象 (drill の経路): A を親としていた grids → B を親とする、逆も。
+  // root 自身は parent_cell_id IS NULL なので影響なし。
+  const childrenOfA = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [cellIdA],
+  )
+  const childrenOfB = await query<{ id: string }>(
+    'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
+    [cellIdB],
+  )
+  // center_cell_id 付け替え対象 (drill 先の中央セル): A を center としていた grids → B を center に。
+  // 自グリッド (id = gridIdA / gridIdB) は除外。X=C モデルでは childrenOf* と重複するが、
+  // 独立並列モードで parent ≠ center のときのために独立にクエリする。
+  const centeredOnA = await query<{ id: string }>(
     'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
     [cellIdA, gridIdA],
   )
-  const gridsOfB = await query<{ id: string }>(
+  const centeredOnB = await query<{ id: string }>(
     'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
     [cellIdB, gridIdB],
   )
   const ts = now()
-  for (const g of gridsOfA) {
+  // parent_cell_id swap
+  for (const g of childrenOfA) {
+    await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdB, ts, g.id])
+  }
+  for (const g of childrenOfB) {
+    await execute('UPDATE grids SET parent_cell_id=?, updated_at=? WHERE id=?', [cellIdA, ts, g.id])
+  }
+  // center_cell_id swap
+  for (const g of centeredOnA) {
     await execute('UPDATE grids SET center_cell_id=?, updated_at=? WHERE id=?', [cellIdB, ts, g.id])
   }
-  for (const g of gridsOfB) {
+  for (const g of centeredOnB) {
     await execute('UPDATE grids SET center_cell_id=?, updated_at=? WHERE id=?', [cellIdA, ts, g.id])
   }
   await swapCellContent(cellIdA, cellIdB)
