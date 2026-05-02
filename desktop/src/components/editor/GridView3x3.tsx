@@ -28,7 +28,15 @@ type Props = {
    */
   onStartEmptySlotEdit?: (gridId: string, position: number) => void
   onDrill: (cell: Cell) => void
-  onDragStart?: (cell: Cell) => void
+  onDragStart?: (cell: Cell, e: React.DragEvent) => void
+  onDragEnd?: () => void
+  /** Cell / 空 slot wrapper にスプレッドする drop handlers */
+  dropProps?: {
+    onDragEnter: (e: React.DragEvent) => void
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: (e: React.DragEvent) => void
+    onDrop: (e: React.DragEvent) => void
+  }
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
   onToggleDone?: (cell: Cell) => void
 }
@@ -38,7 +46,7 @@ export default function GridView3x3({
   fontScale, inlineEditingCellId,
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate, onStartEmptySlotEdit,
-  onDrill, onDragStart, onContextMenu, onToggleDone,
+  onDrill, onDragStart, onDragEnd, dropProps, onContextMenu, onToggleDone,
 }: Props) {
   const center = getCenterCell(cells)
   const centerEmpty = !center || isCellEmpty(center)
@@ -74,6 +82,10 @@ export default function GridView3x3({
                 if (isDisabled) return
                 onStartEmptySlotEdit?.(gridId, i)
               }}
+              onDragEnter={dropProps?.onDragEnter}
+              onDragOver={dropProps?.onDragOver}
+              onDragLeave={dropProps?.onDragLeave}
+              onDrop={dropProps?.onDrop}
             />
           )
         }
@@ -101,6 +113,8 @@ export default function GridView3x3({
             onInlineNavigate={onInlineNavigate}
             onDrill={onDrill}
             onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            dropProps={dropProps}
             onContextMenu={onContextMenu}
             onToggleDone={onToggleDone}
           />

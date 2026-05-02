@@ -1,23 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { DRAG_CLICK_SUPPRESS_MS } from '@/constants/timing'
-import { trackDragThreshold } from '@/lib/utils/dragThreshold'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActionDropType } from '@/components/editor/DragActionPanel'
+import { setDragPayload } from '@/lib/utils/dndPayload'
+import { useDragClickSuppress } from './useDragClickSuppress'
 
 /**
- * ダッシュボード専用 D&D hook (mousedown ベース、Tauri WebKit の HTML5 DnD 不能対応)。
+ * ダッシュボード専用 D&D hook (HTML5 D&D ベース)。
  *
- * editor の `useDragAndDrop` とは drop policy / target が全く違う (cell-grid 制約なし、
- * card / stock 起源のみ) ため別実装。mousedown / mousemove / mouseup の primitive と
- * `document.elementFromPoint` の target 解決パターンは共通。
+ * editor の `useDragAndDrop` とは drop policy / target が違うため別実装。
  *
- * 2 経路:
- *  - card 起源 drag: 右パネルの DragActionPanel (`[data-action-drop]`) に drop で
- *    `card-action` action を発火 (shred / move / copy / export)
- *  - stock 起源 drag: ダッシュボード空エリア (`[data-dashboard-drop-zone]`) または既存カード
- *    (`[data-dashboard-card-index]`) に drop で `stock-to-new` action を発火
+ * Source:
+ *  - card 起源: MandalartCard の onDragStart から `onCardDragStart`
+ *  - stock 起源: StockTab の onItemDragStart から `onStockItemDragStart`
  *
- * stock 起源の drag 中は `dragOverCardIndex` が更新されるので、各 MandalartCard 側で
- * `index >= dragOverCardIndex` のとき右に slide する transform を当てる (drop space を開ける視覚演出)。
+ * Drop targets:
+ *  - DragActionPanel の各タイル (card 起源のみ): `getActionDropProps(action)`
+ *  - フォルダタブ (card 起源のみ): `getFolderTabDropProps(folderId)`
+ *  - カード一覧コンテナ ([data-dashboard-drop-zone]): `containerDropProps`
+ *    - card 起源 → card-reorder (target index は cached rect で hit-test、empty area なら末尾)
+ *    - stock 起源 → stock-to-new
+ *
+ * cached rect pattern (`cardRectsRef`): drag 開始時に全カードの natural 位置を snapshot。
+ * dragover 中は (transform で動いた現 DOM 位置ではなく) この cached rect で hit-test することで、
+ * slide 演出 (translateX で動くカード) と hit 判定がフィードバックループになるバタバタ振動を防ぐ。
  */
 
 type DragSourceKind = 'card' | 'stock'
@@ -33,186 +37,217 @@ type Opts = {
   onDrop: (action: DashboardDropAction) => Promise<void> | void
 }
 
+type DropHandlers = {
+  onDragEnter: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  onDragLeave: (e: React.DragEvent) => void
+  onDrop: (e: React.DragEvent) => void
+}
+
 export function useDashboardDnd({ onDrop }: Opts) {
   const [dragSourceKind, setDragSourceKind] = useState<DragSourceKind | null>(null)
   const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   const [hoveredAction, setHoveredAction] = useState<ActionDropType | null>(null)
   const [dragOverCardIndex, setDragOverCardIndex] = useState<number | null>(null)
 
-  // active な document リスナを cleanup できるよう ref で保持
-  const movingRef = useRef<((e: MouseEvent) => void) | null>(null)
-  const upRef = useRef<((e: MouseEvent) => void) | null>(null)
-  // 最新の onDrop を ref で保持し、beginDrag の closure 内から参照する。
-  // useEffect 経由で同期する (render 中の ref 直接更新は React 19 strict mode で warning が出るため)
+  const sourceRef = useRef<{ kind: DragSourceKind; id: string } | null>(null)
+  const cardRectsRef = useRef<Array<{ idx: number; rect: DOMRect }>>([])
   const onDropRef = useRef(onDrop)
   useEffect(() => { onDropRef.current = onDrop }, [onDrop])
-  // drag 完了直後の click を suppress するためのフラグ。drag 後に同じ card 上で mouseup された
-  // ケース (drag がキャンセル方向に戻った) で onClick が fire するのを防ぐ。
-  const recentlyDraggedRef = useRef(false)
-  // stock 起源 drag 時に「natural 位置のカード矩形」を drag 開始時スナップショット (1 回のみ)。
-  // mousemove で transform 後の DOM ではなくこの cached rect 配列に対して hit-test することで、
-  // slide 演出 (translateX で動くカード) と hit 判定がフィードバックループになる「バタバタ振動」を防ぐ。
-  // メモリ上の単純な配列で disk 永続なし、cleanup で必ず空配列にリセットされ GC 対象になる。
-  const cardRectsRef = useRef<Array<{ idx: number; rect: DOMRect }>>([])
 
-  const beginDrag = useCallback((source: { kind: DragSourceKind; id: string }) => {
-    setDragSourceKind(source.kind)
-    setDragSourceId(source.id)
-    document.body.style.cursor = 'grabbing'
+  const clickSuppress = useDragClickSuppress()
 
-    // 全 drag (stock / card 両方) で、drag 開始時点での全カード矩形をスナップショット。
-    // mousemove で transform 後の現 DOM ではなくこの natural 位置 rect 配列に対して hit-test し、
-    // slide 演出による DOM 位置変動が hit 判定にフィードバックして振動するのを防ぐ。
-    // (drag start 時は transform 未適用なので getBoundingClientRect は natural 位置を返す)
+  function snapshotCardRects() {
     const cards = document.querySelectorAll<HTMLElement>('[data-dashboard-card-index]')
     cardRectsRef.current = Array.from(cards).map((el) => ({
       idx: Number(el.dataset.dashboardCardIndex),
       rect: el.getBoundingClientRect(),
     }))
+  }
 
-    function resolveActionTarget(e: MouseEvent): ActionDropType | null {
-      // card 起源のみ DragActionPanel が右側に表示されている
-      if (source.kind !== 'card') return null
-      const el = document.elementFromPoint(e.clientX, e.clientY)
-      const actionEl = el?.closest('[data-action-drop]') as HTMLElement | null
-      const v = actionEl?.dataset.actionDrop
-      if (v === 'shred' || v === 'move' || v === 'copy' || v === 'export') return v
-      return null
-    }
-
-    function resolveCardIndex(e: MouseEvent): number | null {
-      // stock / card 両起源で既存カードの index を解決 (slide 演出 + reorder 判定用)。
-      // elementFromPoint ではなく drag 開始時にキャッシュした natural 位置 rect で hit-test する
-      // (transform で視覚的に動いたカードは無視) ことでバタバタ振動を防ぐ。
-      for (const { idx, rect } of cardRectsRef.current) {
-        if (e.clientX >= rect.left && e.clientX <= rect.right
-            && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-          return idx
-        }
-      }
-      return null
-    }
-
-    function isOverDropZone(e: MouseEvent): boolean {
-      // stock / card 両起源で空エリア drop を受ける (card 源は末尾 reorder の fallback)
-      const el = document.elementFromPoint(e.clientX, e.clientY)
-      return !!el?.closest('[data-dashboard-drop-zone]')
-    }
-
-    function onMouseMove(e: MouseEvent) {
-      if (source.kind === 'card') {
-        // card 起源: action panel hover が最優先 (drop で 4 アクション)、それ以外は
-        // 別カード hover で reorder 候補 (slide 演出 + drop で sort_order 更新)
-        const action = resolveActionTarget(e)
-        setHoveredAction(action)
-        if (action) {
-          setDragOverCardIndex(null)
-        } else {
-          setDragOverCardIndex(resolveCardIndex(e))
-        }
-      } else {
-        setDragOverCardIndex(resolveCardIndex(e))
+  function hitTestCardIndex(clientX: number, clientY: number): number | null {
+    for (const { idx, rect } of cardRectsRef.current) {
+      if (
+        clientX >= rect.left && clientX <= rect.right &&
+        clientY >= rect.top && clientY <= rect.bottom
+      ) {
+        return idx
       }
     }
+    return null
+  }
 
-    function cleanup() {
-      if (movingRef.current) document.removeEventListener('mousemove', movingRef.current)
-      if (upRef.current) document.removeEventListener('mouseup', upRef.current)
-      movingRef.current = null
-      upRef.current = null
-      // 矩形スナップショットをクリア → 次の drag で再計測 + 旧配列は GC 対象
+  // ===== Source =====
+
+  const onCardDragStart = useCallback((mandalartId: string, e: React.DragEvent) => {
+    sourceRef.current = { kind: 'card', id: mandalartId }
+    setDragSourceKind('card')
+    setDragSourceId(mandalartId)
+    setDragPayload(e, { kind: 'dashboard-card', mandalartId })
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    snapshotCardRects()
+  }, [])
+
+  const onStockItemDragStart = useCallback((stockItemId: string, e: React.DragEvent) => {
+    sourceRef.current = { kind: 'stock', id: stockItemId }
+    setDragSourceKind('stock')
+    setDragSourceId(stockItemId)
+    setDragPayload(e, { kind: 'stock', stockItemId })
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+    snapshotCardRects()
+  }, [])
+
+  const onDragEnd = useCallback(() => {
+    sourceRef.current = null
+    cardRectsRef.current = []
+    setDragSourceKind(null)
+    setDragSourceId(null)
+    setHoveredAction(null)
+    setDragOverCardIndex(null)
+    clickSuppress.markDragged()
+  }, [clickSuppress])
+
+  // ===== Drop targets =====
+
+  // カード一覧コンテナ ([data-dashboard-drop-zone]) — card-reorder / stock-to-new を dispatch
+  const containerDropProps = useMemo<DropHandlers>(() => ({
+    onDragEnter: (e) => {
+      if (!sourceRef.current) return
+      e.preventDefault()
+    },
+    onDragOver: (e) => {
+      const src = sourceRef.current
+      if (!src) return
+      e.preventDefault()
+      // 4 アクションアイコン上やフォルダタブ上にいる時は dragover bubble するだけで、
+      // それぞれの per-target handler が hoveredAction / target tab 強調を引き受ける。
+      // ここでは card hit-test して dragOverCardIndex を更新するのみ。
+      const idx = hitTestCardIndex(e.clientX, e.clientY)
+      setDragOverCardIndex(idx)
+    },
+    onDragLeave: (e) => {
+      // drop zone から完全に出た (relatedTarget が外側) 時のみ clear
+      const related = e.relatedTarget as Node | null
+      if (related && (e.currentTarget as Node).contains(related)) return
+      setDragOverCardIndex(null)
+    },
+    onDrop: (e) => {
+      e.preventDefault()
+      const src = sourceRef.current
+      // hit-test は ref クリア前に実行する。先にクリアすると hitTestCardIndex が常に null を
+      // 返し、card-reorder が targetIndex=0 (= 先頭) になるバグを起こす。
+      const idx = hitTestCardIndex(e.clientX, e.clientY)
+      const totalCards = cardRectsRef.current.length
+      sourceRef.current = null
       cardRectsRef.current = []
-      document.body.style.cursor = ''
       setDragSourceKind(null)
       setDragSourceId(null)
       setHoveredAction(null)
       setDragOverCardIndex(null)
-    }
-
-    function onMouseUp(e: MouseEvent) {
-      let action: DashboardDropAction = null
-      if (source.kind === 'card') {
-        const a = resolveActionTarget(e)
-        if (a) {
-          action = { kind: 'card-action', mandalartId: source.id, action: a }
+      clickSuppress.markDragged()
+      if (!src) return
+      if (src.kind === 'card') {
+        if (idx != null) {
+          void Promise.resolve(
+            onDropRef.current({ kind: 'card-reorder', sourceMandalartId: src.id, targetIndex: idx }),
+          )
         } else {
-          // フォルダタブ上で drop されたか確認 (folder 移動が card-reorder より優先)
-          const el = document.elementFromPoint(e.clientX, e.clientY)
-          const tabEl = el?.closest('[data-folder-tab-id]') as HTMLElement | null
-          const targetFolderId = tabEl?.dataset.folderTabId
-          if (targetFolderId) {
-            action = { kind: 'card-to-folder', sourceMandalartId: source.id, targetFolderId }
-          } else {
-            const idx = resolveCardIndex(e)
-            if (idx != null) {
-              // 他カードの上で drop → sort_order を入れ替えて reorder
-              action = { kind: 'card-reorder', sourceMandalartId: source.id, targetIndex: idx }
-            } else if (isOverDropZone(e)) {
-              // 空エリア (最後尾より下) への drop は「末尾へ移動」。targetIndex に現在の card 数を
-              // 渡すと reorderArray の splice が自然に append する。
-              action = {
-                kind: 'card-reorder',
-                sourceMandalartId: source.id,
-                targetIndex: cardRectsRef.current.length,
-              }
-            }
-          }
+          // 空エリア drop = 末尾へ移動
+          void Promise.resolve(
+            onDropRef.current({
+              kind: 'card-reorder',
+              sourceMandalartId: src.id,
+              targetIndex: totalCards,
+            }),
+          )
         }
       } else {
-        const idx = resolveCardIndex(e)
-        const onZone = isOverDropZone(e)
-        if (idx != null || onZone) {
-          action = { kind: 'stock-to-new', stockItemId: source.id }
-        }
+        // stock 起源は drop zone のどこに落としても新規 mandalart を作る
+        void Promise.resolve(
+          onDropRef.current({ kind: 'stock-to-new', stockItemId: src.id }),
+        )
       }
-      cleanup()
-      // drag 完了直後の click は suppress (cardClickGuard 経由で参照される)
-      recentlyDraggedRef.current = true
-      setTimeout(() => { recentlyDraggedRef.current = false }, DRAG_CLICK_SUPPRESS_MS)
-      // onDrop は cleanup 後に呼ぶ (state リセット後の callback 内で副作用を許容)
-      void Promise.resolve(onDropRef.current(action))
-    }
+    },
+  }), [clickSuppress])
 
-    movingRef.current = onMouseMove
-    upRef.current = onMouseUp
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [])
+  // 4 アクションアイコン (card 起源のみ受ける)
+  const getActionDropProps = useCallback(
+    (action: ActionDropType): DropHandlers => ({
+      onDragEnter: (e) => {
+        if (sourceRef.current?.kind !== 'card') return
+        e.preventDefault()
+        setHoveredAction(action)
+        setDragOverCardIndex(null)
+      },
+      onDragOver: (e) => {
+        if (sourceRef.current?.kind !== 'card') return
+        e.preventDefault()
+      },
+      onDragLeave: () => {
+        setHoveredAction((prev) => (prev === action ? null : prev))
+      },
+      onDrop: (e) => {
+        e.preventDefault()
+        const src = sourceRef.current
+        sourceRef.current = null
+        cardRectsRef.current = []
+        setDragSourceKind(null)
+        setDragSourceId(null)
+        setHoveredAction(null)
+        setDragOverCardIndex(null)
+        clickSuppress.markDragged()
+        if (src?.kind !== 'card') return
+        void Promise.resolve(
+          onDropRef.current({ kind: 'card-action', mandalartId: src.id, action }),
+        )
+      },
+    }),
+    [clickSuppress],
+  )
 
-  /**
-   * mandalart card の onMouseDown 時に閾値超過で card 起源 drag を開始する。
-   * 閾値以下で mouseup されたら通常の click として処理 (drag 起動なし)。
-   */
-  const onCardMouseDown = useCallback((mandalartId: string, e: React.MouseEvent) => {
-    if (e.button !== 0) return  // 左クリックのみ
-    // 既に drag 中なら何もしない (重複起動防止)
-    if (movingRef.current) return
-    trackDragThreshold(e, () => beginDrag({ kind: 'card', id: mandalartId }))
-  }, [beginDrag])
-
-  /**
-   * StockTab の onItemDragStart callback に繋ぐ。StockTab 内部で閾値チェック済みなので
-   * 受信した時点で drag は確定。
-   */
-  const onStockItemDragStart = useCallback((stockItemId: string) => {
-    if (movingRef.current) return  // 既に走行中
-    beginDrag({ kind: 'stock', id: stockItemId })
-  }, [beginDrag])
-
-  /**
-   * drag 直後の click suppression 判定。`<card onClick>` でこれが true ならば
-   * navigate を skip する (drag → cancel 系の操作で意図せず編集に飛ぶのを防ぐ)。
-   */
-  const wasRecentlyDragged = useCallback(() => recentlyDraggedRef.current, [])
+  // フォルダタブ (card 起源のみ受ける)
+  const getFolderTabDropProps = useCallback(
+    (folderId: string): DropHandlers => ({
+      onDragEnter: (e) => {
+        if (sourceRef.current?.kind !== 'card') return
+        e.preventDefault()
+      },
+      onDragOver: (e) => {
+        if (sourceRef.current?.kind !== 'card') return
+        e.preventDefault()
+      },
+      onDragLeave: () => {},
+      onDrop: (e) => {
+        e.preventDefault()
+        const src = sourceRef.current
+        sourceRef.current = null
+        cardRectsRef.current = []
+        setDragSourceKind(null)
+        setDragSourceId(null)
+        setHoveredAction(null)
+        setDragOverCardIndex(null)
+        clickSuppress.markDragged()
+        if (src?.kind !== 'card') return
+        void Promise.resolve(
+          onDropRef.current({ kind: 'card-to-folder', sourceMandalartId: src.id, targetFolderId: folderId }),
+        )
+      },
+    }),
+    [clickSuppress],
+  )
 
   return {
-    onCardMouseDown,
+    onCardDragStart,
     onStockItemDragStart,
-    wasRecentlyDragged,
+    onDragEnd,
+    wasRecentlyDragged: clickSuppress.wasRecentlyDragged,
     dragSourceKind,
     dragSourceId,
     hoveredAction,
     dragOverCardIndex,
     isDragging: dragSourceKind !== null,
+    containerDropProps,
+    getActionDropProps,
+    getFolderTabDropProps,
   }
 }

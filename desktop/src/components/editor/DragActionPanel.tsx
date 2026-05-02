@@ -11,27 +11,36 @@
  */
 export type ActionDropType = 'shred' | 'move' | 'copy' | 'export'
 
+type DropHandlers = {
+  onDragEnter: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  onDragLeave: (e: React.DragEvent) => void
+  onDrop: (e: React.DragEvent) => void
+}
+
 type Props = {
   /** ホバー中のアクション (`data-action-drop` の値)。`useDragAndDrop` から渡す */
   hoveredAction?: ActionDropType | null
+  /** 各タイル用 drop handlers ファクトリー。未指定なら drop targets として機能しない (テスト用) */
+  getActionDropProps?: (action: ActionDropType) => DropHandlers
 }
 
 const ICON_SIZE = 40
 const TILE_SIZE = 96
 
-export default function DragActionPanel({ hoveredAction }: Props) {
+export default function DragActionPanel({ hoveredAction, getActionDropProps }: Props) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 h-full select-none">
-      <ActionTile action="shred" label="シュレッダー" hovered={hoveredAction === 'shred'}>
+      <ActionTile action="shred" label="シュレッダー" hovered={hoveredAction === 'shred'} dropProps={getActionDropProps?.('shred')}>
         <ShredderIcon />
       </ActionTile>
-      <ActionTile action="move" label="移動" hovered={hoveredAction === 'move'}>
+      <ActionTile action="move" label="移動" hovered={hoveredAction === 'move'} dropProps={getActionDropProps?.('move')}>
         <MoveIcon />
       </ActionTile>
-      <ActionTile action="copy" label="コピー" hovered={hoveredAction === 'copy'}>
+      <ActionTile action="copy" label="コピー" hovered={hoveredAction === 'copy'} dropProps={getActionDropProps?.('copy')}>
         <CopyIcon />
       </ActionTile>
-      <ActionTile action="export" label="エクスポート" hovered={hoveredAction === 'export'}>
+      <ActionTile action="export" label="エクスポート" hovered={hoveredAction === 'export'} dropProps={getActionDropProps?.('export')}>
         <ExportIcon />
       </ActionTile>
     </div>
@@ -39,11 +48,12 @@ export default function DragActionPanel({ hoveredAction }: Props) {
 }
 
 function ActionTile({
-  action, label, hovered, children,
+  action, label, hovered, dropProps, children,
 }: {
   action: ActionDropType
   label: string
   hovered?: boolean
+  dropProps?: DropHandlers
   children: React.ReactNode
 }) {
   const baseClass = action === 'shred'
@@ -64,6 +74,10 @@ function ActionTile({
         ${baseClass} ${hoverClass}
       `}
       style={{ width: TILE_SIZE, height: TILE_SIZE }}
+      onDragEnter={dropProps?.onDragEnter}
+      onDragOver={dropProps?.onDragOver}
+      onDragLeave={dropProps?.onDragLeave}
+      onDrop={dropProps?.onDrop}
     >
       <div style={{ width: ICON_SIZE, height: ICON_SIZE }}>{children}</div>
       <span className="text-[10px] font-medium">{label}</span>

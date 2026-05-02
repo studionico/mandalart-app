@@ -15,7 +15,15 @@ type Props = {
   /** D&D 中にホバー中のアクションアイコン (DragActionPanel のハイライト用) */
   hoveredAction?: ActionDropType | null
   stockReloadKey?: number
-  onStockItemDragStart?: (itemId: string) => void
+  onStockItemDragStart?: (itemId: string, e: React.DragEvent) => void
+  onStockDragEnd?: () => void
+  /** DragActionPanel の各タイル用 drop handlers ファクトリー */
+  getActionDropProps?: (action: ActionDropType) => {
+    onDragEnter: (e: React.DragEvent) => void
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: (e: React.DragEvent) => void
+    onDrop: (e: React.DragEvent) => void
+  }
   dragSourceId?: string | null
 }
 
@@ -29,7 +37,7 @@ type Props = {
  */
 export default function SidePanel({
   gridId, gridMemo, onStockPaste, isDragging, hoveredAction, stockReloadKey,
-  onStockItemDragStart, dragSourceId,
+  onStockItemDragStart, onStockDragEnd, getActionDropProps, dragSourceId,
 }: Props) {
   const [tab, setTab] = useState<Tab>('memo')
 
@@ -71,7 +79,10 @@ export default function SidePanel({
         {/* セル → 4 アイコンへの drag 中のみオーバーレイ表示。stock drag は除外 */}
         {isDraggingCellToActions && (
           <div className="absolute inset-0 z-10 bg-white dark:bg-neutral-900 p-3">
-            <DragActionPanel hoveredAction={hoveredAction} />
+            <DragActionPanel
+              hoveredAction={hoveredAction}
+              getActionDropProps={getActionDropProps}
+            />
           </div>
         )}
         {/* memo / stock タブの DOM は state を保持するため display:none で隠すだけ */}
@@ -83,6 +94,7 @@ export default function SidePanel({
               onPaste={onStockPaste}
               reloadKey={stockReloadKey}
               onItemDragStart={onStockItemDragStart}
+              onDragEnd={onStockDragEnd}
               dragSourceId={dragSourceId}
             />
           )}

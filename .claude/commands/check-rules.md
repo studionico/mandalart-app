@@ -54,26 +54,27 @@ grep -rn 'download[\"'"'"']\s*=\|\.click()' desktop/src/ \
 WebKit がサイレントに握り潰す。`@tauri-apps/plugin-fs` の `writeFile` + `BaseDirectory.Download` で代替。
 [`desktop/src/lib/utils/export.ts`](desktop/src/lib/utils/export.ts) 参照。
 
-##### Rule D: Tauri 落とし穴 — HTML5 D&D (落とし穴 #1)
+##### Rule D: Tauri `dragDropEnabled` 設定の確認 (落とし穴 #1)
 
 ```bash
-# 「<lowercase-html-element ...onDrag*= 」のパターンに絞り込んで native HTML5 イベント属性のみ拾う。
-# 大文字始まりの React component (例: <Cell onDragStart={...}>) は custom prop なので false positive。
-grep -rEn '<[a-z][a-zA-Z0-9]*\s[^>]*\b(draggable|onDragStart|onDragOver|onDragEnd|onDrop)=' \
-  desktop/src/ --include='*.tsx'
+grep -n '"dragDropEnabled"' desktop/src-tauri/tauri.conf.json
 ```
 
-Tauri WebKit は HTML5 D&D が動かない。[`desktop/src/hooks/useDragAndDrop.ts`](desktop/src/hooks/useDragAndDrop.ts) の
-mousedown ベース実装を使う。
+期待: `"dragDropEnabled": false` が `windows[]` に存在すること。これがないと Tauri が OS 側で
+drag-drop を横取りして webview の target 側 (`dragenter` / `dragover` / `drop`) が来なくなり、
+HTML5 D&D の drop 検知が機能しない。本リポジトリは `useDragAndDrop` / `useDashboardDnd` 共に
+HTML5 D&D ベース ([`dndPayload.ts`](desktop/src/lib/utils/dndPayload.ts) で payload を詰める) なので、
+この設定は必須。
 
-**注**: 上記 grep は単一行内で `<element ... attr=` が完結している場合のみマッチ。改行を跨ぐ JSX 属性は拾えないので、🟡 補助チェックとして次のパターンも併走させる:
+🟡 補助: `getCurrentWebview().onDragDropEvent` (= Tauri native file drop API) が新規に使われていないか:
 
 ```bash
-# component prop 経由の uses も全て列挙 (false positive 多めだが見逃し防止)
-grep -rn 'onDragStart=\|onDragOver=\|onDragEnd=\|onDrop=\|draggable=' desktop/src/ --include='*.tsx'
+grep -rn 'onDragDropEvent' desktop/src/ --include='*.ts' --include='*.tsx'
 ```
 
-このセカンダリ結果は **大文字始まりタグ** や **prop 定義 (例: `onDragStart?: () => void`)** であれば false positive、**小文字 HTML element** で `<div onDragStart=...>` の形なら本物の違反。
+`dragDropEnabled: false` 配下では native file drop は機能しない。デスクトップから webview への
+file drop は HTML5 `dataTransfer.files` 経由 (window-level listener、[`EditorLayout.tsx`](desktop/src/components/editor/EditorLayout.tsx)
+の画像ファイル受付参照) で実装する。
 
 ##### Rule E: `position === <数値>` の裸比較 (CLAUDE.md コーディング規約)
 

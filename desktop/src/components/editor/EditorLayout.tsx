@@ -27,7 +27,7 @@ import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, 
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
 import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
-import { copyImageFromPath } from '@/lib/api/storage'
+import { uploadCellImage } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
 import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
@@ -739,9 +739,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }, [gridData, fontScale])
 
-  // 画像ファイルかどうかの簡易判定
-  function isImagePath(p: string): boolean {
-    return /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(p)
+  // 画像ファイルかどうかの簡易判定 (拡張子ベース、デスクトップから drop された File.name に対して使う)
+  function isImageFile(file: File): boolean {
+    return /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(file.name)
   }
 
   const reloadAll = useCallback(() => {
@@ -1019,7 +1019,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   const {
     dragSourceId, dragOverId, hoveredAction, isDragging,
-    handleDragStart, handleStockItemDragStart,
+    handleDragStart, handleStockItemDragStart, handleDragEnd,
+    cellOrSlotDropProps, getActionDropProps,
   } = useDragAndDrop(
     dndCells,
     reloadAll,
@@ -1086,38 +1087,51 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }, [])
 
-  // Tauri ネイティブのファイルドロップイベント
-  // 画像ファイルを受け付け、ドロップ位置のセルに保存 + image_path を更新
+  // デスクトップからのファイル drop (HTML5 dataTransfer.files、`dragDropEnabled: false` 前提)。
+  // 画像ファイルを受け付け、ドロップ位置のセルに保存 + image_path を更新する。
+  // 通常の cell-to-cell / stock-to-cell drag (mandalart 内 source) は dataTransfer.types に
+  // `application/x-mandalart-drag` が入っているので、それは無視して `Files` 入りのときだけ処理する。
   useEffect(() => {
-    let unlisten: (() => void) | undefined
+    function isFileDrag(e: DragEvent): boolean {
+      const types = e.dataTransfer?.types
+      if (!types) return false
+      // `Files` MIME がある = ブラウザ外からの file drag (mandalart 内 source は含まない)
+      return Array.from(types).includes('Files')
+    }
 
-    import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
-      getCurrentWebview().onDragDropEvent(async (event) => {
-        if (event.payload.type !== 'drop') return
-        const { paths, position } = event.payload
-        const imagePaths = paths.filter(isImagePath)
-        if (imagePaths.length === 0) return
-
-        const el = document.elementFromPoint(position.x, position.y)
-        const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
-        const cellId = cellEl?.dataset.cellId
-        if (!cellId) return
-        const cell = dndCellsRef.current.find((c) => c.id === cellId)
-        if (!cell) return
-
-        try {
-          const newPath = await copyImageFromPath(imagePaths[0], cellId)
-          await updateCellLocal(cellId, { image_path: newPath })
-          reloadAll()
-          setToast({ message: '画像を追加しました', type: 'success' })
-        } catch (e) {
-          console.error('image drop failed:', e)
-          setToast({ message: `画像の追加に失敗: ${(e as Error).message}`, type: 'error' })
-        }
-      }).then((u) => { unlisten = u })
-    })
-
-    return () => { unlisten?.() }
+    function onWindowDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    }
+    async function onWindowDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      const imageFile = files.find(isImageFile)
+      if (!imageFile) return
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
+      const cellId = cellEl?.dataset.cellId
+      if (!cellId) return
+      const cell = dndCellsRef.current.find((c) => c.id === cellId)
+      if (!cell) return
+      try {
+        const newPath = await uploadCellImage('', '', cellId, imageFile)
+        await updateCellLocal(cellId, { image_path: newPath })
+        reloadAll()
+        setToast({ message: '画像を追加しました', type: 'success' })
+      } catch (err) {
+        console.error('image drop failed:', err)
+        setToast({ message: `画像の追加に失敗: ${(err as Error).message}`, type: 'error' })
+      }
+    }
+    window.addEventListener('dragover', onWindowDragOver)
+    window.addEventListener('drop', onWindowDrop)
+    return () => {
+      window.removeEventListener('dragover', onWindowDragOver)
+      window.removeEventListener('drop', onWindowDrop)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ダブルクリック: ドリル / 親グリッドへ戻る / ホームへ
@@ -2882,6 +2896,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onStartEmptySlotEdit={handleStartEmptySlotEdit}
                       onDrill={handleCellDrill}
                       onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                      dropProps={cellOrSlotDropProps}
                       onContextMenu={handleContextMenu}
                       onToggleDone={showCheckbox ? handleToggleDone : undefined}
                     />
@@ -2968,6 +2984,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             hoveredAction={hoveredAction}
             stockReloadKey={stockReloadKey}
             onStockItemDragStart={handleStockItemDragStart}
+            onStockDragEnd={handleDragEnd}
+            getActionDropProps={getActionDropProps}
             dragSourceId={dragSourceId}
           />
         </div>

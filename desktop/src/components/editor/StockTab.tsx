@@ -7,19 +7,19 @@ import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { useTwoClickConfirm } from '@/hooks/useTwoClickConfirm'
-import { trackDragThreshold } from '@/lib/utils/dragThreshold'
 import { useConvergeStore } from '@/store/convergeStore'
 import type { StockItem } from '@/types'
 
 type Props = {
   onPaste: (item: StockItem) => void
   reloadKey?: number
-  onItemDragStart?: (itemId: string) => void
+  onItemDragStart?: (itemId: string, e: React.DragEvent) => void
+  onDragEnd?: () => void
   dragSourceId?: string | null
 }
 
 export default function StockTab({
-  onPaste, reloadKey, onItemDragStart, dragSourceId,
+  onPaste, reloadKey, onItemDragStart, onDragEnd, dragSourceId,
 }: Props) {
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -70,12 +70,14 @@ export default function StockTab({
     }
   }
 
-  function handleItemMouseDown(e: React.MouseEvent, itemId: string) {
-    if (e.button !== 0) return
-    // ボタン上でのクリックはドラッグ開始しない
+  function handleItemDragStart(e: React.DragEvent, itemId: string) {
+    // ボタン上での dragstart は drag 開始しない (HoverActionButtons の hover を維持)
     const targetTag = (e.target as HTMLElement).tagName
-    if (targetTag === 'BUTTON' || (e.target as HTMLElement).closest('button')) return
-    trackDragThreshold(e, () => onItemDragStart?.(itemId))
+    if (targetTag === 'BUTTON' || (e.target as HTMLElement).closest('button')) {
+      e.preventDefault()
+      return
+    }
+    onItemDragStart?.(itemId, e)
   }
 
   return (
@@ -120,7 +122,8 @@ export default function StockTab({
               item={item}
               isSourceDragging={dragSourceId === `stock:${item.id}`}
               isConvergeTarget={convergeDirection === 'stock' && convergeTargetId === item.id}
-              onMouseDown={handleItemMouseDown}
+              onDragStart={handleItemDragStart}
+              onDragEnd={onDragEnd}
               onPaste={onPaste}
               onDelete={handleDelete}
             />
@@ -137,12 +140,13 @@ export default function StockTab({
  * `useEffect` の async 解決の組合せで MandalartCard と同じ「remount 時 1 frame 目から画像表示」を担保。
  */
 function StockEntry({
-  item, isSourceDragging, isConvergeTarget, onMouseDown, onPaste, onDelete,
+  item, isSourceDragging, isConvergeTarget, onDragStart, onDragEnd, onPaste, onDelete,
 }: {
   item: StockItem
   isSourceDragging: boolean
   isConvergeTarget: boolean
-  onMouseDown: (e: React.MouseEvent, itemId: string) => void
+  onDragStart: (e: React.DragEvent, itemId: string) => void
+  onDragEnd?: () => void
   onPaste: (item: StockItem) => void
   onDelete: (id: string) => void
 }) {
@@ -161,7 +165,9 @@ function StockEntry({
       // ConvergeOverlay の polling target (direction='stock')。エディタ内セル / ダッシュボードカード →
       // ストック収束の着地点。
       data-converge-stock={item.id}
-      onMouseDown={(e) => onMouseDown(e, item.id)}
+      draggable
+      onDragStart={(e) => onDragStart(e, item.id)}
+      onDragEnd={onDragEnd}
       className={`
         relative w-full aspect-square bg-white dark:bg-neutral-900
         border-2 border-black dark:border-white rounded-xl
@@ -183,7 +189,7 @@ function StockEntry({
       title={titleAttr}
     >
       {showImage && imageUrl ? (
-        // HTML5 native drag 抑止は index.css の global `img` rule で一括対応 (落とし穴 #1)。
+        // `<img>` の native drag 抑止は index.css の global `img` rule で一括対応。
         <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
         // 共通 <CardLikeText>: ConvergeOverlay polling 互換構造を統一

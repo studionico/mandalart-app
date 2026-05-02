@@ -18,9 +18,9 @@
 export const CLICK_DELAY_MS = 400
 
 /**
- * mousedown ベース drag の終了直後に発火する click を抑止するための guard 期間 (ms)。
- * Tauri WebKit では HTML5 D&D が動かないため自前 mousedown 実装をしているが、drag 終了の
- * mouseup は通常の click event も連発する。この期間内の click は drag 余韻と見なして無視。
+ * D&D の drag end 直後に発火しうる click を抑止するための guard 期間 (ms)。
+ * HTML5 D&D の dragend event は click event の発火を必ずしも抑制しないため (ブラウザ実装依存)、
+ * 例えば dashboard card を drag 開始 → 元の位置に戻す操作で意図せず navigate されるのを防ぐ。
  */
 export const DRAG_CLICK_SUPPRESS_MS = 150
 

@@ -216,7 +216,7 @@ Shift+Tab は逆順
   - 実 sort_order は `updated_at` 降順なので drop 位置に関わらず top に出現する。slide はあくまで **アフォーダンス (intent indicator)** として機能
   - 破壊的な「stock → 既存カード置換」は実装しない (常に新規作成のみ、既存 mandalart には影響を与えない)
 - card → 4 アクションアイコン以外、stock → stock area、card → card 等の no-op なドロップは黙って無視
-- D&D 実装は `desktop/src/hooks/useDashboardDnd.ts` (mousedown ベース、editor の `useDragAndDrop` とは別実装)。drag 直後の click は 150ms suppression で誤発火 navigate を防ぐ
+- D&D 実装は `desktop/src/hooks/useDashboardDnd.ts` (HTML5 D&D ベース、editor の `useDragAndDrop` とは別実装)。drag 直後の click は `useDragClickSuppress` hook (150ms suppression) で誤発火 navigate を防ぐ
 
 ### ゴミ箱
 - ダッシュボード上部の「ゴミ箱」ボタンから `TrashDialog` を開くと、`deleted_at IS NOT NULL` のマンダラートが削除日時の新しい順に並ぶ
@@ -295,7 +295,7 @@ Shift+Tab は逆順
 | 機能 | 内容 | 状態 |
 |------|------|------|
 | グローバルショートカット | `Cmd/Ctrl+Shift+M` でウィンドウ表示/非表示 | ✅ 実装済み (`useGlobalShortcut`) |
-| 画像ファイル D&D | セルへのファイルドロップ → `$APPDATA/images/` に保存 | ✅ 実装済み (`tauri-plugin-fs` + `storage.ts`) |
+| 画像ファイル D&D | セルへのファイルドロップ → `$APPDATA/images/` に保存 | ✅ 実装済み (HTML5 `dataTransfer.files` の window-level listener + `storage.ts:uploadCellImage`) |
 | 自動アップデート | GitHub Releases の `latest.json` からチェック・適用 | ✅ 実装済み ([`updater-setup.md`](./updater-setup.md) 参照) |
 | ウィンドウ制約 | 最小サイズ 800×600、デフォルト 1200×800 | ✅ 実装済み (`tauri.conf.json`) |
 | コードサイニング | macOS / Windows の正式署名 | ⬜ 未対応 (有料証明書が必要) |

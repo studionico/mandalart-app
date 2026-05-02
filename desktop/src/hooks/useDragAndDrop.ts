@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Cell } from '@/types'
 import { resolveDndAction, type DndAction } from '@/lib/utils/dnd'
 import { isCellEmpty } from '@/lib/utils/grid'
@@ -6,6 +6,7 @@ import { CENTER_POSITION, isCenterPosition } from '@/constants/grid'
 import { swapCellSubtree, upsertCellAt } from '@/lib/api/cells'
 import { query } from '@/lib/db'
 import type { UndoOperation } from '@/store/undoStore'
+import { setDragPayload } from '@/lib/utils/dndPayload'
 
 /** D&D 中に表示する 4 アクションアイコン (DragActionPanel) の種別 */
 export type ActionDropType = 'shred' | 'move' | 'copy' | 'export'
@@ -27,11 +28,7 @@ function isDroppableSlot(
   _existingCell: Cell | undefined,
   allCells: Cell[],
 ): boolean {
-  // 中心 slot は drop 不可 (rule 2)
   if (isCenterPosition(position)) return false
-  // peripheral slot: 同 grid の center cell が populated か確認
-  // child grid の merged center は grid_id が親 grid のままなので grid_id 一致では拾えないため、
-  // fallback として「allCells 内の position=4 を center とみなす」 (3x3 view では 1 つだけ存在)
   const center =
     allCells.find((c) => c.grid_id === gridId && c.position === CENTER_POSITION) ??
     allCells.find((c) => c.position === CENTER_POSITION)
@@ -40,11 +37,6 @@ function isDroppableSlot(
 
 export type DndUndoable = UndoOperation & { description: string }
 
-/**
- * D&D アクションを実行し、Undo/Redo 用のクロージャを返す。
- *
- * Phase A 後は SWAP_SUBTREE のみが到達可能 (中心セル絡みは resolveDndAction で NOOP)。
- */
 async function executeAction(action: DndAction): Promise<DndUndoable | null> {
   switch (action.type) {
     case 'SWAP_SUBTREE': {
@@ -61,12 +53,48 @@ type DragSource =
   | { kind: 'cell'; cell: Cell }
   | { kind: 'stock'; itemId: string }
 
+type DropTargetInfo =
+  | { kind: 'cell'; cellId: string; gridId: string; position: number }
+  | { kind: 'slot'; gridId: string; position: number }
+
+/** target 要素の data-* 属性から drop target 情報を取り出す */
+function readDropTarget(el: HTMLElement, cells: Cell[]): DropTargetInfo | null {
+  const cellId = el.dataset.cellId
+  const gridId = el.dataset.gridId
+  const positionStr = el.dataset.position
+  if (cellId) {
+    const c = cells.find((cc) => cc.id === cellId)
+    if (c) return { kind: 'cell', cellId, gridId: c.grid_id, position: c.position }
+  }
+  if (gridId && positionStr != null) {
+    return { kind: 'slot', gridId, position: Number(positionStr) }
+  }
+  return null
+}
+
+/** drop 対象が現在の source に対して許容されるかを返す (中心セル禁止 / 中心空グリッド禁止) */
+function canAcceptDrop(source: DragSource, target: DropTargetInfo, cells: Cell[]): boolean {
+  if (source.kind === 'cell') {
+    if (isCenterPosition(source.cell.position)) return false
+    if (isCenterPosition(target.position)) return false
+    if (target.kind === 'cell' && target.cellId === source.cell.id) return false
+    return true
+  }
+  // stock → cell
+  const existingCell =
+    target.kind === 'cell'
+      ? cells.find((c) => c.id === target.cellId)
+      : cells.find((c) => c.grid_id === target.gridId && c.position === target.position)
+  return isDroppableSlot(target.gridId, target.position, existingCell, cells)
+}
+
 /**
- * HTML5 DnD の代わりに mousedown/mousemove/mouseup で D&D を実装。
- * Tauri の WebKit では HTML5 DnD の drop イベントが信頼できないため。
+ * HTML5 D&D ベースで cell / stock の drag & drop を扱う hook。
+ * Tauri v2 で `dragDropEnabled: false` を設定すると WKWebView 上でも target 側 event が
+ * 正しく伝搬する (旧落とし穴 #1 の "HTML5 D&D 不能" は default の `true` が原因だった)。
  *
  * サポートするソース:
- *  - セル → セル（同一 / 跨ぎ） / 4 アクションアイコン (shred / move / copy / export)
+ *  - セル → セル (同一 / 跨ぎ) / 4 アクションアイコン (shred / move / copy / export)
  *  - ストックアイテム → セル (空 → 直接ペースト / 入力あり → 置換確認フロー)
  */
 export function useDragAndDrop(
@@ -75,194 +103,169 @@ export function useDragAndDrop(
   onStockPaste?: (stockItemId: string, targetCellId: string) => void,
   pushUndo?: (op: DndUndoable) => void,
   /**
-   * D&D アクション成功直後に、DB から最新値を取り直した「影響を受けたセル群」を受け取る callback。
-   * 既存の `onComplete` (= reloadAll で全体再フェッチ) とは別に、EditorLayout 側で
-   * `refreshCell` による局所更新を行うためのフック。
-   * reloadAll の全体 re-fetch が reflect されないケース (原因未特定) でも、
-   * target セルだけは確実に UI 反映できるようになる。
+   * D&D アクション成功直後に「影響を受けたセル群」を最新値で受け取る callback。
+   * EditorLayout 側で `refreshCell` 局所更新するためのフック (落とし穴 #14)。
    */
   onCellsUpdated?: (updated: Cell[]) => void,
-  /**
-   * ストックアイテムを **入力ありの周辺セル** にドロップしたとき呼ばれる。
-   * 呼び出し側で置換確認 dialog を表示し、確認後に既存サブグリッドを破棄して新スナップショットを上書きする。
-   */
   onStockReplaceDrop?: (stockItemId: string, targetCellId: string) => void,
-  /**
-   * セルを 4 アクションアイコン (DragActionPanel) にドロップしたとき呼ばれる。
-   * action 別に EditorLayout 側で:
-   *  - shred: 確認 dialog → shredCellSubtree
-   *  - move: moveCellToStock + (中心セルなら navigate up)
-   *  - copy: addToStock
-   *  - export: 形式 picker → 各形式で書き出し
-   */
   onActionDrop?: (action: ActionDropType, cellId: string) => void,
 ) {
-  const [dragSourceId, setDragSourceId]     = useState<string | null>(null)
-  const [dragOverId, setDragOverId]         = useState<string | null>(null)
-  const [hoveredAction, setHoveredAction]   = useState<ActionDropType | null>(null)
+  const [dragSourceId, setDragSourceId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [hoveredAction, setHoveredAction] = useState<ActionDropType | null>(null)
   const sourceRef = useRef<DragSource | null>(null)
-  const cellsRef  = useRef<Cell[]>(cells)
+  const cellsRef = useRef<Cell[]>(cells)
   cellsRef.current = cells
 
-  const beginDrag = useCallback((source: DragSource) => {
-    sourceRef.current = source
-    setDragSourceId(source.kind === 'cell' ? source.cell.id : `stock:${source.itemId}`)
-    document.body.style.cursor = 'grabbing'
+  // ===== Source 側 =====
 
-    /**
-     * mouse 位置から target slot の (gridId, position) を解決する。
-     * - 既存 cell の上 (data-cell-id がある) → そこから cell.grid_id, cell.position
-     * - 空 placeholder の上 (data-grid-id + data-position) → 直接取得
-     * - 該当なし → null
-     */
-    function resolveTargetSlot(e: MouseEvent): { gridId: string; position: number; existingCell: Cell | null } | null {
-      const el = document.elementFromPoint(e.clientX, e.clientY)
-      // 既存 cell 優先
-      const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
-      if (cellEl?.dataset.cellId) {
-        const c = cellsRef.current.find((cc) => cc.id === cellEl.dataset.cellId)
-        if (c) return { gridId: c.grid_id, position: c.position, existingCell: c }
-      }
-      // 空 slot
-      const slotEl = el?.closest('[data-grid-id][data-position]') as HTMLElement | null
-      if (slotEl?.dataset.gridId && slotEl.dataset.position != null) {
-        const gridId = slotEl.dataset.gridId
-        const position = Number(slotEl.dataset.position)
-        // 念のため: 同 (gridId, position) に既存 cell があるなら拾う
-        const existing = cellsRef.current.find((c) => c.grid_id === gridId && c.position === position) ?? null
-        return { gridId, position, existingCell: existing }
-      }
-      return null
+  const handleDragStart = useCallback((cell: Cell, e: React.DragEvent) => {
+    sourceRef.current = { kind: 'cell', cell }
+    setDragSourceId(cell.id)
+    setDragPayload(e, { kind: 'cell', cellId: cell.id })
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  }, [])
+
+  const handleStockItemDragStart = useCallback((itemId: string, e: React.DragEvent) => {
+    sourceRef.current = { kind: 'stock', itemId }
+    setDragSourceId(`stock:${itemId}`)
+    setDragPayload(e, { kind: 'stock', stockItemId: itemId })
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+  }, [])
+
+  const handleDragEnd = useCallback(() => {
+    sourceRef.current = null
+    setDragSourceId(null)
+    setDragOverId(null)
+    setHoveredAction(null)
+  }, [])
+
+  // ===== Target 側 (cell / 空 slot 共通) =====
+
+  const cellOrSlotDropProps = useMemo(() => {
+    function dropTargetIdOf(target: DropTargetInfo): string {
+      return target.kind === 'cell' ? target.cellId : `slot:${target.gridId}:${target.position}`
     }
 
-    /** mouse 位置から DragActionPanel のアイコン (data-action-drop) を解決する */
-    function resolveActionTarget(e: MouseEvent): ActionDropType | null {
-      const el = document.elementFromPoint(e.clientX, e.clientY)
-      const actionEl = el?.closest('[data-action-drop]') as HTMLElement | null
-      const v = actionEl?.dataset.actionDrop
-      if (v === 'shred' || v === 'move' || v === 'copy' || v === 'export') return v
-      return null
-    }
+    return {
+      onDragEnter: (e: React.DragEvent) => {
+        const src = sourceRef.current
+        if (!src) return
+        const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
+        if (!target) return
+        if (!canAcceptDrop(src, target, cellsRef.current)) return
+        e.preventDefault()
+        setDragOverId(dropTargetIdOf(target))
+        setHoveredAction(null)
+      },
+      onDragOver: (e: React.DragEvent) => {
+        const src = sourceRef.current
+        if (!src) return
+        const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
+        if (!target) return
+        if (!canAcceptDrop(src, target, cellsRef.current)) return
+        e.preventDefault()
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
+        if (!target) return
+        // 子要素間の dragenter→dragleave は無視 (relatedTarget が currentTarget の子なら何もしない)
+        const related = e.relatedTarget as Node | null
+        if (related && (e.currentTarget as Node).contains(related)) return
+        const id = dropTargetIdOf(target)
+        setDragOverId((prev) => (prev === id ? null : prev))
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault()
+        const src = sourceRef.current
+        sourceRef.current = null
+        setDragSourceId(null)
+        setDragOverId(null)
+        setHoveredAction(null)
+        if (!src) return
+        const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
+        if (!target) return
+        if (!canAcceptDrop(src, target, cellsRef.current)) return
 
-    function onMouseMove(e: MouseEvent) {
-      const action = resolveActionTarget(e)
-      const slot = resolveTargetSlot(e)
-
-      let overCellId: string | null = null
-      if (slot) {
-        if (slot.existingCell) {
-          overCellId = slot.existingCell.id
-        } else {
-          overCellId = `slot:${slot.gridId}:${slot.position}`
-        }
-      }
-
-      // ハイライトの drop 可否ゲート
-      const src = sourceRef.current
-      if (src && slot) {
         if (src.kind === 'cell') {
-          // cell-to-cell: 中心セル絡みは無効 (Phase A drop policy)
-          if (isCenterPosition(src.cell.position) || isCenterPosition(slot.position)) {
-            overCellId = null
-          }
+          ;(async () => {
+            let targetCell: Cell | null =
+              target.kind === 'cell'
+                ? cellsRef.current.find((c) => c.id === target.cellId) ?? null
+                : null
+            if (!targetCell) {
+              targetCell = await upsertCellAt(target.gridId, target.position, {})
+            }
+            const dndAction = resolveDndAction(src.cell, targetCell)
+            if (dndAction.type === 'NOOP') return
+            const undoable = await executeAction(dndAction)
+            if (undoable && pushUndo) pushUndo(undoable)
+            if (onCellsUpdated) {
+              const affectedIds: string[] = [dndAction.cellIdA, dndAction.cellIdB]
+              const ph = affectedIds.map(() => '?').join(',')
+              const updated = await query<Cell>(
+                `SELECT * FROM cells WHERE id IN (${ph}) AND deleted_at IS NULL`,
+                affectedIds,
+              )
+              onCellsUpdated(updated)
+            } else {
+              onComplete()
+            }
+          })().catch(console.error)
         } else {
-          // stock-to-cell: isDroppableSlot で中心 / 中心が空のグリッドを除外
-          if (!isDroppableSlot(slot.gridId, slot.position, slot.existingCell ?? undefined, cellsRef.current)) {
-            overCellId = null
-          }
+          // stock → cell
+          ;(async () => {
+            const existing =
+              target.kind === 'cell'
+                ? cellsRef.current.find((c) => c.id === target.cellId) ?? null
+                : null
+            if (existing && !isCellEmpty(existing)) {
+              onStockReplaceDrop?.(src.itemId, existing.id)
+              return
+            }
+            let cell = existing
+            if (!cell) {
+              cell = await upsertCellAt(target.gridId, target.position, {})
+            }
+            onStockPaste?.(src.itemId, cell.id)
+          })().catch(console.error)
         }
-      }
-
-      // アクションアイコン上にいるときはセル側のハイライトをクリア
-      if (action) overCellId = null
-
-      setDragOverId(overCellId)
-      // アクションは cell ソース時のみ有効 (stock ソースはアイコン非対応)
-      setHoveredAction(src?.kind === 'cell' ? action : null)
+      },
     }
+  }, [onComplete, onStockPaste, pushUndo, onCellsUpdated, onStockReplaceDrop])
 
-    function onMouseUp(e: MouseEvent) {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-      document.body.style.cursor = ''
+  // ===== Target 側 (4 アクションアイコン) =====
 
-      const src = sourceRef.current
-      sourceRef.current = null
-      setDragSourceId(null)
-      setDragOverId(null)
-      setHoveredAction(null)
-
-      if (!src) return
-
-      const action = resolveActionTarget(e)
-      const slot   = resolveTargetSlot(e)
-
-      if (src.kind === 'cell') {
-        // 4 アクションアイコンへの drop が最優先
-        if (action) {
-          onActionDrop?.(action, src.cell.id)
-          return
-        }
-        // セル間 D&D
-        if (!slot) return
-        if (slot.existingCell?.id === src.cell.id) return  // 自分自身
-
-        // Phase A drop policy: 中心セル絡みの cell-to-cell は禁止
-        if (isCenterPosition(src.cell.position) || isCenterPosition(slot.position)) return
-
-        // target cell が無ければ INSERT して確保 (空 slot に drop されたケース)
-        ;(async () => {
-          let target = slot.existingCell
-          if (!target) {
-            target = await upsertCellAt(slot.gridId, slot.position, {})
-          }
-          const dndAction = resolveDndAction(src.cell, target)
-          if (dndAction.type === 'NOOP') return
-          const undoable = await executeAction(dndAction)
-          if (undoable && pushUndo) pushUndo(undoable)
-          if (onCellsUpdated) {
-            const affectedIds: string[] = [dndAction.cellIdA, dndAction.cellIdB]
-            const ph = affectedIds.map(() => '?').join(',')
-            const updated = await query<Cell>(
-              `SELECT * FROM cells WHERE id IN (${ph}) AND deleted_at IS NULL`,
-              affectedIds,
-            )
-            onCellsUpdated(updated)
-          } else {
-            onComplete()
-          }
-        })().catch(console.error)
-      } else {
-        // ストック → セル: 中心 / 中心が空のグリッドを除外。入力ありは置換確認フロー。
-        if (!slot) return
-        if (!isDroppableSlot(slot.gridId, slot.position, slot.existingCell ?? undefined, cellsRef.current)) return
-        ;(async () => {
-          const existing = slot.existingCell
-          if (existing && !isCellEmpty(existing)) {
-            // 入力ありの周辺セル: 置換確認フローを呼ぶ
-            onStockReplaceDrop?.(src.itemId, existing.id)
-            return
-          }
-          let target = existing
-          if (!target) {
-            target = await upsertCellAt(slot.gridId, slot.position, {})
-          }
-          onStockPaste?.(src.itemId, target.id)
-        })().catch(console.error)
-      }
-    }
-
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup',   onMouseUp)
-  }, [onComplete, onStockPaste, pushUndo, onCellsUpdated, onStockReplaceDrop, onActionDrop])
-
-  const handleDragStart = useCallback(
-    (cell: Cell) => beginDrag({ kind: 'cell', cell }),
-    [beginDrag],
-  )
-  const handleStockItemDragStart = useCallback(
-    (itemId: string) => beginDrag({ kind: 'stock', itemId }),
-    [beginDrag],
+  const getActionDropProps = useCallback(
+    (action: ActionDropType) => ({
+      onDragEnter: (e: React.DragEvent) => {
+        const src = sourceRef.current
+        // アクションアイコンは cell source のみ受ける (stock は対象外)
+        if (src?.kind !== 'cell') return
+        e.preventDefault()
+        setHoveredAction(action)
+        setDragOverId(null)
+      },
+      onDragOver: (e: React.DragEvent) => {
+        const src = sourceRef.current
+        if (src?.kind !== 'cell') return
+        e.preventDefault()
+      },
+      onDragLeave: () => {
+        setHoveredAction((prev) => (prev === action ? null : prev))
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault()
+        const src = sourceRef.current
+        sourceRef.current = null
+        setDragSourceId(null)
+        setDragOverId(null)
+        setHoveredAction(null)
+        if (src?.kind !== 'cell') return
+        onActionDrop?.(action, src.cell.id)
+      },
+    }),
+    [onActionDrop],
   )
 
   return {
@@ -272,5 +275,10 @@ export function useDragAndDrop(
     isDragging: dragSourceId !== null,
     handleDragStart,
     handleStockItemDragStart,
+    handleDragEnd,
+    /** Cell / 空 slot wrapper にスプレッドする drop handlers (data-cell-id / data-grid-id+data-position から自動判別) */
+    cellOrSlotDropProps,
+    /** DragActionPanel の各タイル用 (action 種別ごと) */
+    getActionDropProps,
   }
 }

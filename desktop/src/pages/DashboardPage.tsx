@@ -649,12 +649,17 @@ export default function DashboardPage() {
                 )
               }
               const isDeleteArmed = folderDeleteConfirm.isArmed(f.id)
+              const folderDropProps = dnd.getFolderTabDropProps(f.id)
               return (
                 <button
                   key={f.id}
                   type="button"
                   data-folder-tab-id={f.id}
                   onClick={() => setSelectedFolderId(f.id)}
+                  onDragEnter={folderDropProps.onDragEnter}
+                  onDragOver={folderDropProps.onDragOver}
+                  onDragLeave={folderDropProps.onDragLeave}
+                  onDrop={folderDropProps.onDrop}
                   onContextMenu={(e) => {
                     e.preventDefault()
                     // 簡易メニュー: Shift+右クリックで削除 (system 不可)、それ以外は名前変更
@@ -749,6 +754,10 @@ export default function DashboardPage() {
         <main
           data-dashboard-drop-zone
           className="flex-1 min-w-0 overflow-y-auto px-6 py-8"
+          onDragEnter={dnd.containerDropProps.onDragEnter}
+          onDragOver={dnd.containerDropProps.onDragOver}
+          onDragLeave={dnd.containerDropProps.onDragLeave}
+          onDrop={dnd.containerDropProps.onDrop}
         >
           <div className="max-w-5xl mx-auto">
           {!initialLoaded ? (
@@ -798,7 +807,8 @@ export default function DashboardPage() {
                     onDuplicate={() => handleDuplicate(m)}
                     onDelete={() => handleDelete(m.id)}
                     onTogglePin={() => handleTogglePin(m)}
-                    onMouseDown={dnd.onCardMouseDown}
+                    onCardDragStart={dnd.onCardDragStart}
+                    onCardDragEnd={dnd.onDragEnd}
                     wasRecentlyDragged={dnd.wasRecentlyDragged}
                   />
                 )
@@ -821,7 +831,10 @@ export default function DashboardPage() {
             {/* card 起源 drag 中: 4 アクションアイコンを overlay で表示 (editor SidePanel と同じパターン) */}
             {dnd.dragSourceKind === 'card' && (
               <div className="absolute inset-0 z-10 bg-white dark:bg-neutral-900 p-3">
-                <DragActionPanel hoveredAction={dnd.hoveredAction} />
+                <DragActionPanel
+                  hoveredAction={dnd.hoveredAction}
+                  getActionDropProps={dnd.getActionDropProps}
+                />
               </div>
             )}
             <div className={`h-full ${dnd.dragSourceKind === 'card' ? 'invisible' : ''}`}>
@@ -829,6 +842,7 @@ export default function DashboardPage() {
                 onPaste={handleStockPaste}
                 reloadKey={stockReloadKey}
                 onItemDragStart={dnd.onStockItemDragStart}
+                onDragEnd={dnd.onDragEnd}
                 dragSourceId={dnd.dragSourceKind === 'stock' && dnd.dragSourceId
                   ? `stock:${dnd.dragSourceId}` : null}
               />
@@ -868,7 +882,7 @@ export default function DashboardPage() {
 
 function MandalartCard({
   mandalart: m, index, shift, isDragSource, onOpen, onDuplicate, onDelete, onTogglePin,
-  onMouseDown, wasRecentlyDragged,
+  onCardDragStart, onCardDragEnd, wasRecentlyDragged,
 }: {
   mandalart: Mandalart
   index: number
@@ -884,7 +898,8 @@ function MandalartCard({
   onDuplicate: () => void
   onDelete: () => void
   onTogglePin: () => void
-  onMouseDown: (mandalartId: string, e: React.MouseEvent) => void
+  onCardDragStart: (mandalartId: string, e: React.DragEvent) => void
+  onCardDragEnd: () => void
   wasRecentlyDragged: () => boolean
 }) {
   const cardRef = useRef<HTMLDivElement>(null)
@@ -963,12 +978,14 @@ function MandalartCard({
             }
           : {}),
       }}
-      onMouseDown={(e) => onMouseDown(m.id, e)}
+      draggable
+      onDragStart={(e) => onCardDragStart(m.id, e)}
+      onDragEnd={onCardDragEnd}
       onClick={handleClick}
       title={m.title || '無題'}
     >
       {!titleFirstLine && imageUrl ? (
-        // HTML5 native drag 抑止は index.css の global `img` rule で一括対応 (落とし穴 #1)。
+        // `<img>` の native drag 抑止は index.css の global `img` rule で一括対応。
         <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
         // 共通 <CardLikeText>: ConvergeOverlay polling 互換構造を統一

@@ -44,15 +44,6 @@ export async function uploadCellImage(
 }
 
 /**
- * Tauri のネイティブ drag-drop で取得した絶対パスを AppData へコピー。
- */
-export async function copyImageFromPath(absolutePath: string, cellId: string): Promise<string> {
-  const bytes = await readFile(absolutePath)
-  const ext = pickExtension(absolutePath)
-  return copyBytesToAppData(bytes, cellId, ext)
-}
-
-/**
  * image_path に対応する blob URL がメモリキャッシュに既にあれば返す (同期)。
  * Cell.tsx の `useState` 初期化で「remount 時 1 frame だけ画像が消える」現象を避けるために使う:
  * orbit アニメ後にセル DOM が unmount → remount するとき、`getCellImageUrl` は async なので

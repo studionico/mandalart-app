@@ -25,7 +25,15 @@ type Props = {
   onCommitInlineEdit: (cell: Cell, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: Cell) => void
-  onDragStart?: (cell: Cell) => void
+  onDragStart?: (cell: Cell, e: React.DragEvent) => void
+  onDragEnd?: () => void
+  /** Cell wrapper にスプレッドする drop handlers */
+  dropProps?: {
+    onDragEnter: (e: React.DragEvent) => void
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: (e: React.DragEvent) => void
+    onDrop: (e: React.DragEvent) => void
+  }
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
 }
 
@@ -34,7 +42,7 @@ export default function GridView9x9({
   fontScale, inlineEditingCellId,
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
-  onDrill, onDragStart, onContextMenu,
+  onDrill, onDragStart, onDragEnd, dropProps, onContextMenu,
 }: Props) {
   const rootCellMap = new Map(rootCells.map((c) => [c.position, c]))
   const rootCenter = getCenterCell(rootCells)
@@ -84,6 +92,8 @@ export default function GridView9x9({
                     onInlineNavigate={onInlineNavigate}
                     onDrill={onDrill}
                     onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    dropProps={dropProps}
                     onContextMenu={onContextMenu}
                     size="small"
                   />
@@ -137,6 +147,8 @@ export default function GridView9x9({
                     onInlineNavigate={onInlineNavigate}
                     onDrill={onDrill}
                     onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    dropProps={dropProps}
                     onContextMenu={onContextMenu}
                     size="small"
                   />
@@ -165,6 +177,8 @@ export default function GridView9x9({
                     onInlineNavigate={onInlineNavigate}
                     onDrill={onDrill}
                     onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    dropProps={dropProps}
                     onContextMenu={onContextMenu}
                     size="small"
                   />

@@ -122,8 +122,9 @@ src/
 ├── hooks/                    # React カスタムフック
 │   ├── useGrid.ts            # グリッド + セルデータの取得・更新
 │   ├── useSubGrids.ts        # 9×9 表示用のサブグリッド一括取得
-│   ├── useDragAndDrop.ts     # エディタの D&D 実装 (cell source / stock source 両対応、mousedown ベース)
-│   ├── useDashboardDnd.ts    # ダッシュボードの D&D 実装 (card / stock source、editor とは別 policy)
+│   ├── useDragAndDrop.ts     # エディタの D&D 実装 (cell source / stock source 両対応、HTML5 D&D ベース、tauri.conf.json の dragDropEnabled: false 前提)
+│   ├── useDashboardDnd.ts    # ダッシュボードの D&D 実装 (card / stock source、editor とは別 policy、HTML5 D&D ベース)
+│   ├── useDragClickSuppress.ts # HTML5 D&D の dragend 直後に発火する click を 150ms 抑止する hook (DRAG_CLICK_SUPPRESS_MS、card 等の navigate 誤発火対策)
 │   ├── useCellImageUrl.ts    # セル / カード相当の image_path → blob URL 解決 (sync cache + async fallback、remount まばたき抑止)
 │   ├── useTwoClickConfirm.ts # window.confirm 不能 (落とし穴 #7) の代替 2 クリック確認 hook (boolean / keyed の 2 形式)
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
@@ -165,7 +166,7 @@ src/
 │   ├── utils/
 │   │   ├── grid.ts                   # isCellEmpty / hasPeripheralContent / getCenterCell
 │   │   ├── dnd.ts                    # resolveDndAction (D&D ルール判定)
-│   │   ├── dragThreshold.ts          # mousedown ベース自前 D&D の閾値判定 listener 共通化 (落とし穴 #1 対策、Cell / StockTab / useDashboardDnd で使用)
+│   │   ├── dndPayload.ts             # HTML5 D&D の dataTransfer payload helper (`application/x-mandalart-drag` MIME に `{ kind, id }` JSON を詰める / 取り出す、useDragAndDrop / useDashboardDnd で使用)
 │   │   ├── reorderArray.ts           # drag-and-drop 用 pure 関数: src → target に要素移動した新配列を返す (DashboardPage の card-reorder で使用)
 │   │   ├── export.ts                 # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
 │   │   └── captureCardLikeSource.ts  # カード相当 DOM (中心セル / dashboard カード / ストックエントリ) から ConvergeOverlay morph source 値 (rect / border / radius / inset / font) を共通計測

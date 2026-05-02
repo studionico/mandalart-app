@@ -13,7 +13,6 @@ import { getCellImageUrl, uploadCellImage, deleteCellImage } from '@/lib/api/sto
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { CardLikeText } from '@/components/CardLikeText'
 import { isCellEmpty } from '@/lib/utils/grid'
-import { trackDragThreshold } from '@/lib/utils/dragThreshold'
 
 type Props = {
   cell: CellType
@@ -32,7 +31,15 @@ type Props = {
   onCommitInlineEdit: (cell: CellType, text: string) => void
   onInlineNavigate: (currentPosition: number, currentText: string, reverse: boolean) => void
   onDrill: (cell: CellType) => void
-  onDragStart?: (cell: CellType) => void
+  onDragStart?: (cell: CellType, e: React.DragEvent) => void
+  onDragEnd?: () => void
+  /** 既存 cell にスプレッドする drop handlers (data-cell-id を読んで dispatch) */
+  dropProps?: {
+    onDragEnter: (e: React.DragEvent) => void
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: (e: React.DragEvent) => void
+    onDrop: (e: React.DragEvent) => void
+  }
   onContextMenu?: (e: React.MouseEvent, cell: CellType) => void
   /** 指定すると左上にチェックボックスを表示。指定なしなら非表示 (= 機能 OFF / size='small' / アニメ中)。 */
   onToggleDone?: (cell: CellType) => void
@@ -48,7 +55,7 @@ export default function Cell({
   isInlineEditing, userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
   onDrill,
-  onDragStart, onContextMenu, onToggleDone,
+  onDragStart, onDragEnd, dropProps, onContextMenu, onToggleDone,
   size = 'normal',
   wrapperStyle,
 }: Props) {
@@ -184,16 +191,19 @@ export default function Cell({
     setTimeout(() => textareaRef.current?.focus(), 0)
   }
 
-  function handleMouseDown(e: React.MouseEvent) {
-    if (isDisabled || e.button !== 0) return
-    // 既に編集中ならテキスト選択を阻害しない
-    if (isInlineEditing) return
+  function handleDragStart(e: React.DragEvent) {
+    if (isDisabled || isInlineEditing || !onDragStart) {
+      e.preventDefault()
+      return
+    }
+    didDrag.current = true
+    onDragStart(cell, e)
+  }
 
-    didDrag.current = false
-    trackDragThreshold(e, () => {
-      didDrag.current = true
-      onDragStart?.(cell)
-    })
+  function handleDragEnd() {
+    onDragEnd?.()
+    // 直後に発火する click を抑制するため、しばらく didDrag を立てたままにする
+    setTimeout(() => { didDrag.current = false }, 50)
   }
 
   // セルが空かどうか (text も image も無い)
@@ -330,7 +340,13 @@ export default function Cell({
         ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         group
       `}
-      onMouseDown={handleMouseDown}
+      draggable={!isDisabled && !isInlineEditing && !!onDragStart}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragEnter={dropProps?.onDragEnter}
+      onDragOver={dropProps?.onDragOver}
+      onDragLeave={dropProps?.onDragLeave}
+      onDrop={dropProps?.onDrop}
       onClick={handleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, cell) } : undefined}
     >
@@ -362,7 +378,7 @@ export default function Cell({
 
       {imageUrl && (
         <div className="absolute inset-0 overflow-hidden">
-          {/* HTML5 native drag 抑止は index.css の global `img` rule で一括対応 (落とし穴 #1)。 */}
+          {/* `<img>` の native drag 抑止は index.css の global `img` rule で一括対応 (親要素の D&D を奪わせない)。 */}
           <img src={imageUrl} alt="" className="w-full h-full object-cover" />
         </div>
       )}

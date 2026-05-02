@@ -311,16 +311,14 @@ pasteFromStockReplacing(stockItemId: string, targetCellId: string): Promise<void
 
 ```typescript
 // ブラウザ File を $APPDATA/images/{cellId}-{ts}.{ext} にコピー
-// CellEditModal のファイル選択経由で呼ばれる
+// CellEditModal のファイル選択 / デスクトップから webview への HTML5 file drop
+// (EditorLayout の window-level dataTransfer.files listener) 共通の入口
 uploadCellImage(
   userId: string,
   mandalartId: string,
   cellId: string,
   file: File
 ): Promise<string>   // 相対パス (AppData/images/...) を返す
-
-// Tauri のネイティブ drag-drop で得られた絶対パスを AppData/images/ にコピー
-copyImageFromPath(absolutePath: string, cellId: string): Promise<string>
 
 // 相対パスを blob URL に変換 (cache 付き)
 // Cell コンポーネントが <img src={blobUrl}> で表示するために使う
