@@ -31,6 +31,7 @@ import { useEditorStore } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
 import { useSync } from '@/hooks/useSync'
 import { useDashboardDnd, type DashboardDropAction } from '@/hooks/useDashboardDnd'
+import { useTwoClickConfirmKey } from '@/hooks/useTwoClickConfirm'
 import {
   DASHBOARD_CARD_SIZE_PX,
   DASHBOARD_CARD_FONT_PX,
@@ -53,6 +54,8 @@ export default function DashboardPage() {
     | { kind: 'rename'; folderId: string; name: string }
     | null
   >(null)
+  // タブ ✕ ボタンの 2 クリック確認 (落とし穴 #7、既存の TrashDialog / StockTab と同パターン)
+  const folderDeleteConfirm = useTwoClickConfirmKey<string>()
   // 初回ロードが完了したかどうか (初回のみ「読み込み中...」を表示するため)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [query, setQuery] = useState('')
@@ -613,6 +616,7 @@ export default function DashboardPage() {
                   />
                 )
               }
+              const isDeleteArmed = folderDeleteConfirm.isArmed(f.id)
               return (
                 <button
                   key={f.id}
@@ -625,14 +629,39 @@ export default function DashboardPage() {
                     if (e.shiftKey && !f.is_system) handleDeleteFolder(f)
                     else handleStartRenameFolder(f)
                   }}
-                  title={f.is_system ? `${f.name} (system) — 右クリックで名前変更` : `${f.name} — 右クリックで名前変更 / Shift+右クリックで削除`}
-                  className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors select-none whitespace-nowrap ${
+                  title={f.is_system ? `${f.name} (system) — 右クリックで名前変更` : `${f.name} — 右クリックで名前変更 / hover の ✕ で削除`}
+                  className={`group shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors select-none whitespace-nowrap inline-flex items-center ${
                     isActive
                       ? 'border-blue-600 text-neutral-900 dark:text-neutral-100'
                       : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
                   }`}
                 >
-                  {f.name}
+                  <span>{f.name}</span>
+                  {!f.is_system && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      // 1 回目: armed 状態へ / 2 回目: 削除実行。タブ選択 click への伝播は止める
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (isDeleteArmed) {
+                          folderDeleteConfirm.reset()
+                          handleDeleteFolder(f)
+                        } else {
+                          folderDeleteConfirm.arm(f.id)
+                        }
+                      }}
+                      title={isDeleteArmed ? 'もう一度クリックで削除' : 'フォルダを削除 (中のカードは Inbox に戻る)'}
+                      className={`ml-1.5 px-1 text-xs rounded transition-opacity ${
+                        isDeleteArmed
+                          ? 'opacity-100 text-red-600 dark:text-red-400 font-bold'
+                          : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400'
+                      }`}
+                    >
+                      {isDeleteArmed ? '削除?' : '×'}
+                    </span>
+                  )}
                 </button>
               )
             })}
