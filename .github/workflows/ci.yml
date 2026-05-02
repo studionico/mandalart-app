@@ -30,6 +30,12 @@ jobs:
         # husky の prepare script が git 未検出時に失敗するのを回避
         run: npm ci --ignore-scripts
 
+      - name: Rebuild native modules (better-sqlite3 の prebuilt binary 取得)
+        # `--ignore-scripts` で skip された install scripts を better-sqlite3 についてだけ
+        # 個別実行する。prebuilt binary が GitHub Releases から DL されるので 5-10 秒で完了。
+        # husky 等の他の prepare script は走らない (npm rebuild は対象パッケージ限定なので安全)。
+        run: npm rebuild better-sqlite3
+
       - name: Typecheck
         run: npm run typecheck
 
