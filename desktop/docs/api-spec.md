@@ -162,23 +162,10 @@ deleteGrid(id: string): Promise<void>
 // 並列グリッドの表示順を更新
 updateGridSortOrder(id: string, sortOrder: number): Promise<void>
 
-// グリッドとその配下を local + cloud で物理削除する。シュレッダー / orphan 整理 /
+// グリッドとその配下を local + cloud で物理削除する。シュレッダー / 自動掃除 (cleanupGridIfEmpty) /
 // 並列削除 など「復元意図なし」の経路で使用 (deleteGrid だと cloud に
 // deleted_at 付きゴミが永続化するため)
 permanentDeleteGrid(id: string): Promise<void>
-
-// 「root から辿れるが内容なし」な空グリッド (orphan) を検出する。
-// - 全 grids / cells / mandalarts を 3 query で一括取得 → in-memory で判定
-// - 周辺セル全空 + drilled children も全 orphan な grid を畳み込みで列挙
-findOrphanGrids(): Promise<{
-  orphanGridIds: string[]
-  orphanCellIds: string[]
-  totalGrids: number
-  totalCells: number
-}>
-
-// 上記 orphan を local + cloud で物理削除する。整理ボタンから呼ばれる
-cleanupOrphanGrids(): Promise<{ gridsDeleted: number; cellsDeleted: number }>
 
 // cloud (Supabase) 側に滞留する空 cell 行を物理削除する。
 // 「アプリ更新時に一度だけ」走らせる useCloudEmptyCellsCleanup hook から呼ばれる

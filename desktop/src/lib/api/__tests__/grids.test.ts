@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
 import { createMandalart } from '@/lib/api/mandalarts'
 import {
-  getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid, cleanupOrphanGrids,
+  getRootGrids, getChildGrids, getGrid, createGrid, deleteGrid,
 } from '@/lib/api/grids'
 import { upsertCellAt } from '@/lib/api/cells'
 import { CENTER_POSITION } from '@/constants/grid'
@@ -162,28 +162,5 @@ describe('deleteGrid (cascade & sync-aware)', () => {
     })
     await deleteGrid(child.id)
     expect(db.prepare('SELECT COUNT(*) AS n FROM grids WHERE id = ?').get(grandchild.id)).toEqual({ n: 0 })
-  })
-})
-
-describe('cleanupOrphanGrids', () => {
-  it('drilled grid で peripheral 全部空 + 非 orphan な子孫なし → orphan として削除', async () => {
-    const m = await createMandalart('test')
-    const root = (await getRootGrids(m.id))[0]
-    const peripheral = await upsertCellAt(root.id, 8, { text: 'p8' })
-    const empty = await createGrid({
-      mandalartId: m.id, parentCellId: peripheral.id, centerCellId: peripheral.id, sortOrder: 0,
-    })
-    // empty grid には peripheral cells を作っていないので「中身なし」= orphan 候補
-    const result = await cleanupOrphanGrids()
-    expect(result.gridsDeleted).toBeGreaterThanOrEqual(1)
-    expect(db.prepare('SELECT COUNT(*) AS n FROM grids WHERE id = ?').get(empty.id)).toEqual({ n: 0 })
-  })
-
-  it('root grid (parent_cell_id IS NULL) は中身がなくても orphan 扱いしない', async () => {
-    const m = await createMandalart('test')
-    const root = (await getRootGrids(m.id))[0]
-    // root はそのまま (peripheral 未入力) → orphan として消されてはいけない
-    await cleanupOrphanGrids()
-    expect(db.prepare('SELECT COUNT(*) AS n FROM grids WHERE id = ?').get(root.id)).toEqual({ n: 1 })
   })
 })

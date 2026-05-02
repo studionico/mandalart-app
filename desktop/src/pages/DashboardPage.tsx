@@ -8,7 +8,7 @@ import {
 import {
   getFolders, createFolder, updateFolderName, deleteFolder, ensureInboxFolder,
 } from '@/lib/api/folders'
-import { findOrphanGrids, cleanupOrphanGrids, getRootGrids } from '@/lib/api/grids'
+import { getRootGrids } from '@/lib/api/grids'
 import { addToStock } from '@/lib/api/stock'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
 import { downloadJSON, downloadText } from '@/lib/utils/export'
@@ -70,21 +70,6 @@ export default function DashboardPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
-  // 過去の無限再帰バグ残骸 (orphan grids) の整理ボタン用 state。
-  // Tauri v2 WebView は window.alert / confirm が動作しないので、全ての feedback を
-  // ボタン内テキストに集約する。2 クリック確認方式。
-  //  - null: 初期 ("データ整理")
-  //  - 'busy': 実行中 ("処理中...")
-  //  - number: 1 クリック後 ("N 件を削除 (もう一度)")
-  //  - { type: 'done', ... }: 完了 ("完了: N 個削除")
-  //  - { type: 'none' }: 対象なし ("整理対象なし")
-  //  - { type: 'error', message }: 失敗 ("失敗: msg")
-  type CleanupResult =
-    | { type: 'done'; gridsDeleted: number; cellsDeleted: number }
-    | { type: 'none' }
-    | { type: 'error'; message: string }
-  type CleanupState = null | 'busy' | number | CleanupResult
-  const [cleanupState, setCleanupState] = useState<CleanupState>(null)
 
   // ダッシュボード D&D 関連 state
   const [stockReloadKey, setStockReloadKey] = useState(0)
@@ -285,49 +270,6 @@ export default function DashboardPage() {
     } catch (e) {
       alert('削除に失敗しました: ' + String(e))
       console.error('deleteMandalart failed:', e)
-    }
-  }
-
-  // pending (number) は 60 秒、done/none/error は 10 秒で自動解除
-  useEffect(() => {
-    if (cleanupState === null || cleanupState === 'busy') return
-    const timeout = typeof cleanupState === 'number' ? 60_000 : 10_000
-    const t = setTimeout(() => setCleanupState(null), timeout)
-    return () => clearTimeout(t)
-  }, [cleanupState])
-
-  async function handleCleanupOrphans() {
-    if (cleanupState === 'busy') return
-    // result 表示中 (done/none/error) にクリックされたら一旦 null に戻して普通に処理
-    const isInitial = cleanupState === null ||
-      (typeof cleanupState === 'object' && cleanupState !== null)
-    if (isInitial) {
-      // 1 クリック目: 件数調査
-      setCleanupState('busy')
-      try {
-        const stats = await findOrphanGrids()
-        if (stats.orphanGridIds.length === 0) {
-          setCleanupState({ type: 'none' })
-          return
-        }
-        setCleanupState(stats.orphanGridIds.length)
-      } catch (e) {
-        setCleanupState({ type: 'error', message: String(e) })
-      }
-      return
-    }
-    // 2 クリック目 (number): 実行
-    setCleanupState('busy')
-    try {
-      const result = await cleanupOrphanGrids()
-      setCleanupState({
-        type: 'done',
-        gridsDeleted: result.gridsDeleted,
-        cellsDeleted: result.cellsDeleted,
-      })
-      await load()
-    } catch (e) {
-      setCleanupState({ type: 'error', message: String(e) })
     }
   }
 
@@ -595,23 +537,6 @@ export default function DashboardPage() {
             title="削除済みの復元 / 完全削除"
           >
             ゴミ箱
-          </button>
-          <button
-            onClick={handleCleanupOrphans}
-            disabled={cleanupState === 'busy'}
-            className="text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 px-3 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="過去バグ由来の孤立グリッド (root から辿れないバグチェーン) を整理"
-          >
-            {(() => {
-              if (cleanupState === 'busy') return '処理中...'
-              if (typeof cleanupState === 'number') return `${cleanupState} 件を削除 (もう一度)`
-              if (cleanupState === null) return 'データ整理'
-              if (cleanupState.type === 'done') {
-                return `完了: ${cleanupState.gridsDeleted} グリッド削除`
-              }
-              if (cleanupState.type === 'none') return '整理対象なし'
-              return `失敗: ${cleanupState.message.slice(0, 30)}`
-            })()}
           </button>
           <button
             onClick={() => setImportOpen(true)}
