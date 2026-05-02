@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  getMandalarts, createMandalart, deleteMandalart, duplicateMandalart,
+  getMandalarts, getMandalart, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts, permanentDeleteMandalart, createMandalartFromStockItem,
   updateMandalartPinned, reorderMandalarts, updateMandalartFolderId,
 } from '@/lib/api/mandalarts'
@@ -124,7 +124,10 @@ export default function DashboardPage() {
   /**
    * Inbox bootstrap: アプリ起動時 + ダッシュボードマウント時に呼ぶ。
    * Inbox folder が無ければ生成し、folder_id NULL のマンダラートを Inbox に振り分ける。
-   * 完了後 selectedFolderId を Inbox に設定 (初回のみ)。
+   * 完了後 selectedFolderId は:
+   *   1. エディタから戻ってきた (convergeStore.direction='home') なら、そのマンダラートが
+   *      属する folder を表示 (Phase B 以降の自然な UX: 開いていたタブに戻る)
+   *   2. それ以外 (新規起動など) は Inbox にフォールバック
    */
   useEffect(() => {
     let cancelled = false
@@ -133,7 +136,17 @@ export default function DashboardPage() {
       if (cancelled) return
       await loadFolders()
       if (cancelled) return
-      // 初回のみ Inbox を選択 (ユーザーが既に別タブを選んでいる場合は維持)
+      // 1. エディタからの home 復帰: そのマンダラートの folder_id を選択
+      const converge = useConvergeStore.getState()
+      if (converge.direction === 'home' && converge.targetId) {
+        const m = await getMandalart(converge.targetId)
+        if (cancelled) return
+        if (m && m.folder_id) {
+          setSelectedFolderId(m.folder_id)
+          return
+        }
+      }
+      // 2. それ以外は Inbox (ユーザーが既に別タブを選んでいる場合は維持)
       setSelectedFolderId((prev) => prev ?? inboxId)
     })()
     return () => { cancelled = true }
