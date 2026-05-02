@@ -10,6 +10,7 @@ import { useAuthBootstrap } from './hooks/useAuthBootstrap'
 import { useTheme } from './hooks/useTheme'
 import { useBeforeQuit } from './hooks/useBeforeQuit'
 import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
+import { useCloudFoldersCleanup } from './hooks/useCloudFoldersCleanup'
 
 export default function App() {
   useGlobalShortcut()
@@ -17,6 +18,7 @@ export default function App() {
   useTheme()
   useBeforeQuit()
   useCloudEmptyCellsCleanup()
+  useCloudFoldersCleanup()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   return (

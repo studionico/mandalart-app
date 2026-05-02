@@ -15,6 +15,10 @@ export const STORAGE_KEYS = {
    *  useCloudEmptyCellsCleanup hook が「アプリ更新時に一度だけ」走らせるための gate。
    *  cleanup ロジック改修時に CLOUD_CLEANUP_VERSION を bump すれば全 user で 1 回ずつ再実行される。 */
   cloudEmptyCleanupVersion: `${PREFIX}cloudEmptyCleanupVersion`,
+  /** soft-delete された folder を local + cloud から物理削除した最新 version (整数)。
+   *  useCloudFoldersCleanup hook が「アプリ更新時に一度だけ」走らせるための gate。
+   *  旧 deleteFolder が syncAwareDelete 経由で残した cloud の deleted_at 付き folder 行を掃除する。 */
+  foldersCleanupVersion: `${PREFIX}foldersCleanupVersion`,
   // 旧 `showCheckbox` キーは migration 007 でマンダラート DB カラムに移行 (廃止済)。
   // localStorage に残ったエントリは未読み出しの orphan として残るが実害なし。
 } as const

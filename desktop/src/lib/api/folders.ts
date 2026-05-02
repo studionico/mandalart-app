@@ -1,5 +1,5 @@
 import { query, execute, generateId, now } from '../db'
-import { syncAwareDelete } from './_softDelete'
+import { supabase, isSupabaseConfigured } from '../supabase/client'
 import type { Folder } from '../../types'
 
 /**
@@ -74,10 +74,18 @@ export async function updateFolderSortOrder(id: string, sortOrder: number): Prom
 }
 
 /**
- * フォルダを削除する。
+ * フォルダを削除する (local + cloud 両方から物理削除)。
+ *
  * - **is_system=1 (Inbox 等)**: 削除不可 (Error throw)
- * - それ以外: 所属マンダラートの `folder_id` を Inbox に reset した上で folder を soft-delete
- *   (synced_at 分岐は `syncAwareDelete` helper を使う)
+ * - それ以外: 所属マンダラートの `folder_id` を Inbox に reset した上で
+ *   folder 自身を **両側で hard delete** する。
+ *
+ * フォルダにはゴミ箱 / 復元 UI が無いので soft delete (deleted_at セット) する意義が
+ * 無く、`syncAwareDelete` 経由だと cloud 側に deleted_at 付きの行が滞留してしまう。
+ * `permanentDeleteMandalart` と同じ「local hard delete → cloud hard delete」パターンに統一。
+ *
+ * オフライン / 未サインインで cloud delete できなかった場合は warn のみ
+ * (local の削除は成功しているので、次回 cleanup hook が cloud 側をクリーンアップする)。
  */
 export async function deleteFolder(id: string): Promise<void> {
   const target = await query<{ is_system: number }>(
@@ -88,15 +96,68 @@ export async function deleteFolder(id: string): Promise<void> {
   if (target[0].is_system === 1) {
     throw new Error('Inbox など system folder は削除できません')
   }
-  // 所属マンダラートを Inbox に reassign
+  // 1. 所属マンダラートを Inbox に reassign
   const inboxId = await ensureInboxFolder()
   const ts = now()
   await execute(
     'UPDATE mandalarts SET folder_id = ?, updated_at = ? WHERE folder_id = ?',
     [inboxId, ts, id],
   )
-  // folder 自身を sync-aware delete
-  await syncAwareDelete('folders', 'id = ?', [id], ts)
+  // 2. local hard delete
+  await execute('DELETE FROM folders WHERE id = ?', [id])
+  // 3. cloud hard delete (任意。失敗しても local 削除は確定しているので warn のみ)
+  if (!isSupabaseConfigured) return
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return
+  try {
+    await supabase.from('folders').delete().eq('id', id)
+  } catch (e) {
+    console.warn('[deleteFolder] cloud delete failed (local delete already succeeded):', e)
+  }
+}
+
+/**
+ * 既に soft-delete (deleted_at セット) されてしまった folder を local + cloud 両側から
+ * 物理削除する一発掃除関数。
+ *
+ * 経緯: 旧 `deleteFolder` が `syncAwareDelete` 経由 (synced 済みなら soft delete) で
+ * 削除していたため、cloud 側に deleted_at 付き folder 行が滞留した。`useCloudFoldersCleanup`
+ * hook がアプリのバージョンアップ時に 1 回だけ呼び出してこれを掃除する。
+ *
+ * 失敗時は warn のみ。次回起動で再試行されるので過剰な retry は不要。
+ */
+export async function cleanupSoftDeletedFolders(): Promise<{
+  localDeleted: number
+  cloudDeleted: number
+}> {
+  // 1. local: deleted_at が立っている folder を物理削除
+  const localRows = await query<{ id: string }>(
+    'SELECT id FROM folders WHERE deleted_at IS NOT NULL',
+  )
+  const localIds = localRows.map((r) => r.id)
+  if (localIds.length > 0) {
+    const placeholders = localIds.map(() => '?').join(',')
+    await execute(`DELETE FROM folders WHERE id IN (${placeholders})`, localIds)
+  }
+  // 2. cloud: deleted_at IS NOT NULL の行を batch DELETE
+  if (!isSupabaseConfigured) return { localDeleted: localIds.length, cloudDeleted: 0 }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return { localDeleted: localIds.length, cloudDeleted: 0 }
+  try {
+    const { data, error } = await supabase
+      .from('folders')
+      .select('id')
+      .not('deleted_at', 'is', null)
+    if (error) throw error
+    const cloudIds = ((data ?? []) as { id: string }[]).map((r) => r.id)
+    if (cloudIds.length === 0) return { localDeleted: localIds.length, cloudDeleted: 0 }
+    const { error: delErr } = await supabase.from('folders').delete().in('id', cloudIds)
+    if (delErr) throw delErr
+    return { localDeleted: localIds.length, cloudDeleted: cloudIds.length }
+  } catch (e) {
+    console.warn('[cleanupSoftDeletedFolders] cloud cleanup failed:', e)
+    return { localDeleted: localIds.length, cloudDeleted: 0 }
+  }
 }
 
 /**

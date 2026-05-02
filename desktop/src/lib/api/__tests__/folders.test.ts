@@ -140,13 +140,17 @@ describe('deleteFolder', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM folders WHERE id = ?').get(archive.id) as { n: number }).n).toBe(0)
   })
 
-  it('同期済み folder は soft delete (deleted_at セット)', async () => {
+  it('同期済み folder も local からは hard delete (cloud は別途 hard delete を試みる)', async () => {
+    // フォルダにはゴミ箱 / 復元 UI が無いので soft delete (deleted_at セット) せずに
+    // 物理削除する設計 (permanentDeleteMandalart と同じパターン)。テストでは
+    // Supabase 未設定なので cloud delete は no-op、local の物理削除のみ検証する。
     await ensureInboxFolder()
     const archive = await createFolder('Archive')
     db.prepare('UPDATE folders SET synced_at = ? WHERE id = ?').run(new Date().toISOString(), archive.id)
     await deleteFolder(archive.id)
-    const row = db.prepare('SELECT deleted_at FROM folders WHERE id = ?').get(archive.id) as { deleted_at: string | null }
-    expect(row?.deleted_at).toBeTruthy()
+    // 物理削除されているので row 自体が無い
+    const count = (db.prepare('SELECT COUNT(*) AS n FROM folders WHERE id = ?').get(archive.id) as { n: number }).n
+    expect(count).toBe(0)
   })
 })
 
