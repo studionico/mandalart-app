@@ -218,6 +218,8 @@ Shift+Tab は逆順
 - card → 4 アクションアイコン以外、stock → stock area、card → card 等の no-op なドロップは黙って無視
 - D&D 実装は `desktop/src/hooks/useDashboardDnd.ts` (HTML5 D&D ベース、editor の `useDragAndDrop` とは別実装)。drag 直後の click は `useDragClickSuppress` hook (150ms suppression) で誤発火 navigate を防ぐ
 
+> **設計分離方針**: editor の cell/stock D&D (`useDragAndDrop`) と dashboard の card/stock D&D (`useDashboardDnd`) は drop policy / target が根本的に違うため、**意図的に別 hook で実装している**。共通化を検討した経緯もあるが、drop 種別 (cell-to-cell SWAP_SUBTREE / stock-to-cell paste / 4 アクション / card-reorder / card-to-folder / stock-to-new) の分岐が爆発的に増えて hook 内部が読めなくなるため、**将来も統合しない方針**。共通項 (HTML5 dataTransfer payload helper / drag-end click suppression) は [`dndPayload.ts`](../src/lib/utils/dndPayload.ts) / [`useDragClickSuppress.ts`](../src/hooks/useDragClickSuppress.ts) に切り出して両者で共有する。
+
 ### ゴミ箱
 - ダッシュボード上部の「ゴミ箱」ボタンから `TrashDialog` を開くと、`deleted_at IS NOT NULL` のマンダラートが削除日時の新しい順に並ぶ
 - 各行で「復元」「完全削除」が選べる
