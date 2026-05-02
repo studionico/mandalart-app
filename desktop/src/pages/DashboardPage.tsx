@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   getMandalarts, getMandalart, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts, permanentDeleteMandalart, createMandalartFromStockItem,
@@ -45,6 +45,12 @@ type SortKey = 'updated' | 'title'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  // home 復帰時に editor 側が `navigate('/dashboard', { state: { fromMandalartId } })` で
+  // 渡してくれる。convergeStore は morph アニメ用で lifecycle が短い (~400ms で clear) ため、
+  // bootstrap の DB await 中に消えうる race を避けるため navigation state を使う。
+  const fromMandalartId =
+    (location.state as { fromMandalartId?: string } | null)?.fromMandalartId ?? null
   const [mandalarts, setMandalarts] = useState<Mandalart[]>([])
   // フォルダ機能 (Phase B、migration 010)。selectedFolderId は初回 bootstrap で Inbox に設定される。
   const [folders, setFolders] = useState<Folder[]>([])
@@ -125,9 +131,13 @@ export default function DashboardPage() {
    * Inbox bootstrap: アプリ起動時 + ダッシュボードマウント時に呼ぶ。
    * Inbox folder が無ければ生成し、folder_id NULL のマンダラートを Inbox に振り分ける。
    * 完了後 selectedFolderId は:
-   *   1. エディタから戻ってきた (convergeStore.direction='home') なら、そのマンダラートが
+   *   1. エディタから戻ってきた (location.state.fromMandalartId あり) なら、そのマンダラートが
    *      属する folder を表示 (Phase B 以降の自然な UX: 開いていたタブに戻る)
    *   2. それ以外 (新規起動など) は Inbox にフォールバック
+   *
+   * **設計メモ**: 当初 convergeStore.direction === 'home' を読んでいたが、ConvergeOverlay が
+   * morph 終了時 (CONVERGE_DURATION_MS=400ms) に clear() する race があり信頼できなかった。
+   * react-router の navigation state なら convergeStore lifecycle に依存せず確実。
    */
   useEffect(() => {
     let cancelled = false
@@ -137,9 +147,8 @@ export default function DashboardPage() {
       await loadFolders()
       if (cancelled) return
       // 1. エディタからの home 復帰: そのマンダラートの folder_id を選択
-      const converge = useConvergeStore.getState()
-      if (converge.direction === 'home' && converge.targetId) {
-        const m = await getMandalart(converge.targetId)
+      if (fromMandalartId) {
+        const m = await getMandalart(fromMandalartId)
         if (cancelled) return
         if (m && m.folder_id) {
           setSelectedFolderId(m.folder_id)
@@ -150,7 +159,7 @@ export default function DashboardPage() {
       setSelectedFolderId((prev) => prev ?? inboxId)
     })()
     return () => { cancelled = true }
-  }, [loadFolders])
+  }, [loadFolders, fromMandalartId])
 
   // クエリ変更 / フォルダ切替 / 同期完了 / Realtime 受信時に debounce して再取得
   // debounce を入れることで Realtime が連鎖発火したときのリマウント祭りを防ぐ。
@@ -165,10 +174,15 @@ export default function DashboardPage() {
     void loadFolders()
   }, [reloadKey, loadFolders])
 
-  // 選択中フォルダが folders 一覧から消えた場合 (別デバイスでの削除等) は Inbox にフォールバック
+  // 選択中フォルダが folders 一覧から消えた場合 (別デバイスでの削除等) は Inbox にフォールバック。
+  // null (= 未初期化) は **bootstrap useEffect の責務** なのでここでは触らない:
+  // 過去に `!selectedFolderId` も条件に入れていたら bootstrap が setSelectedFolderId(archive_id)
+  // を queue した直後の同 render cycle で fallback の closure が selectedFolderId=null を見て
+  // 発火 → Inbox で上書きする race が起きた (home 復帰で必ず Inbox になる原因)。
   useEffect(() => {
     if (folders.length === 0) return
-    if (!selectedFolderId || !folders.some((f) => f.id === selectedFolderId)) {
+    if (!selectedFolderId) return  // 未初期化は bootstrap が処理する、ここでは触らない
+    if (!folders.some((f) => f.id === selectedFolderId)) {
       const inbox = folders.find((f) => f.is_system) ?? folders[0]
       setSelectedFolderId(inbox.id)
     }

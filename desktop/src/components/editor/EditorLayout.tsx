@@ -1698,7 +1698,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         )
       }
     }
-    navigate('/dashboard')
+    // navigation state で mandalart id を渡す。Dashboard 側が `useLocation().state.fromMandalartId`
+    // から受取り、属する folder_id のタブを開く (削除済みなら Inbox にフォールバック)。
+    // convergeStore は morph アニメ用で lifecycle が短いため、folder 復帰用には使わない。
+    navigate('/dashboard', {
+      state: willDelete ? undefined : { fromMandalartId: mandalartId },
+    })
   }
 
   // パンくず項目クリックで階層を戻す際、現在地グリッドが空なら削除する
