@@ -112,7 +112,7 @@ export default function CellEditModal({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={3}
-          className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
           placeholder="テキストを入力..."
         />
       </div>
@@ -124,7 +124,7 @@ export default function CellEditModal({
             <img src={imageUrl} alt="" className="h-24 w-24 object-cover rounded-lg border border-neutral-200" />
             <button
               onClick={handleImageRemove}
-              className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
+              className="absolute -top-1.5 -right-1.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-full w-5 h-5 flex items-center justify-center text-xs"
             >
               ×
             </button>

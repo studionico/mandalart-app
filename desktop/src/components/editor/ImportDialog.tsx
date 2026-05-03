@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Modal from '@/components/ui/Modal'
 import Button from '@/components/ui/Button'
+import { WarningIcon } from '@/components/ui/icons'
 import type { GridSnapshot } from '@/types'
 import { parseTextToSnapshot, importFromJSON, importIntoCell } from '@/lib/api/transfer'
 import { CENTER_POSITION, PERIPHERAL_POSITIONS } from '@/constants/grid'
@@ -152,7 +153,7 @@ export default function ImportDialog({ open, mode, targetFolderId, onClose, onCo
             onChange={(e) => setRawText(e.target.value)}
             rows={8}
             placeholder={EXAMPLE_PLACEHOLDER}
-            className="w-full text-sm font-mono border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            className="w-full text-sm font-mono border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-y"
           />
           <div className="flex justify-end mt-2">
             <Button size="sm" variant="secondary" onClick={handlePreview} disabled={!rawText.trim()}>
@@ -172,7 +173,10 @@ export default function ImportDialog({ open, mode, targetFolderId, onClose, onCo
                 </div>
               </>
             ) : (
-              <p className="text-sm text-red-500">{parsed.error}</p>
+              <p className="text-sm text-neutral-900 dark:text-neutral-100 font-bold flex items-center gap-1">
+                <WarningIcon className="w-4 h-4 shrink-0" />
+                {parsed.error}
+              </p>
             )}
           </div>
         )}

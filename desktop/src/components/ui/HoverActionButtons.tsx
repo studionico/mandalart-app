@@ -8,11 +8,8 @@ import type { ReactNode } from 'react'
  * 外側の D&D mousedown ハンドラには伝搬しない (StockTab / Dashboard カード両方で必要)。
  */
 
-type ActionVariant = 'neutral' | 'blue' | 'red'
-
 export type HoverAction = {
   icon: ReactNode
-  variant: ActionVariant
   onClick: () => void
   title: string
 }
@@ -31,15 +28,9 @@ const SIZE_CLASSES = {
   md: { wrapper: 'top-1 right-1 gap-1', btn: 'w-5 h-5 text-[10px]' },
 } as const
 
-// neutral は「黒/白単色」運用 (ロック / ピン / 複製アイコンの基本色)。on/off は
-// アイコン形状で区別しているので color に役割を持たせない。
-// red は削除アクション専用 (hover で警告色を出して誤操作を防ぐ)。
-// blue は「目立たせる必要のある active 状態」用に残しているが、現状未使用 (将来取り除いてよい)。
-const VARIANT_CLASSES: Record<ActionVariant, string> = {
-  neutral: 'text-neutral-900 dark:text-neutral-100 hover:text-black dark:hover:text-white',
-  blue: 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200',
-  red: 'text-red-500 dark:text-red-300 hover:text-red-700',
-}
+// アプリ UI のアクセント色を黒/白/グレーに統一する方針 (Q3=A) に従い、variant 廃止。
+// 全 button が neutral で、状態 (削除 / アクティブ等) は **アイコン形状で区別** する。
+const ACTION_COLOR = 'text-neutral-900 dark:text-neutral-100 hover:text-black dark:hover:text-white'
 
 export function HoverActionButtons({ actions, size = 'md' }: Props) {
   const sz = SIZE_CLASSES[size]
@@ -51,7 +42,7 @@ export function HoverActionButtons({ actions, size = 'md' }: Props) {
           type="button"
           onClick={(e) => { e.stopPropagation(); a.onClick() }}
           onMouseDown={(e) => e.stopPropagation()}
-          className={`${sz.btn} rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 ${VARIANT_CLASSES[a.variant]} flex items-center justify-center`}
+          className={`${sz.btn} rounded bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 ${ACTION_COLOR} flex items-center justify-center`}
           title={a.title}
         >
           {a.icon}

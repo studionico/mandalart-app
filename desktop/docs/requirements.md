@@ -412,6 +412,15 @@ Shift+Tab は逆順
 - Tailwind CSS v4 によるスタイリング
 - 背景色: プリセットカラーのみ (フルカラーピッカーなし)
 
+### カラーパレット (モノクロ方針)
+
+- アプリ UI のアクセント色は **黒・白・グレー (Tailwind neutral palette) で統一**。状態区別 (error / 削除 / 警告 / 成功 / syncing) は **SVG アイコン形状** で行う (詳細は [`components/ui/icons.tsx`](../src/components/ui/icons.tsx))
+- ライトモード: 主に `bg-white` / `text-neutral-900` ベース。アクティブ要素は `bg-neutral-900 text-white`
+- ダークモード: 反転 (`bg-neutral-900` / `text-neutral-100` ベース、active は `bg-neutral-100 text-neutral-900`)
+- 例外:
+  - **ColorPicker のプリセット 10 色** (red / orange / yellow / green / teal / blue / indigo / purple / pink / gray): ユーザーがセルに着色する機能なので維持 ([`constants/colors.ts`](../src/constants/colors.ts))
+  - **ConceptSlide の真紅** (`rgb(221, 58, 63)`): welcome 冒頭のブランド演出として意図的に派手 ([`components/help/ConceptSlide.tsx`](../src/components/help/ConceptSlide.tsx))
+
 ### フォント
 
 - システムフォント (macOS: SF Pro + ヒラギノ角ゴ) をそのまま使用、独自フォントはバンドルしない

@@ -109,3 +109,47 @@ export function ArrowDownIcon({ className, ariaHidden = true }: IconProps) {
     </svg>
   )
 }
+
+/** ⚠ 警告 (error / 削除確認 / オフライン)。三角形 + 中央に縦棒 + ドット。 */
+export function WarningIcon({ className, ariaHidden = true }: IconProps) {
+  return (
+    <svg {...svgProps(className, ariaHidden)}>
+      {/* 三角形外形 */}
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      {/* 縦棒 (! の上半分) */}
+      <line x1="12" y1="9" x2="12" y2="13" />
+      {/* ドット (! の下点)。1 ポイントの線で点を表現 */}
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  )
+}
+
+/** ℹ 情報 (toast info)。円 + 中央に縦棒 + 上ドット。 */
+export function InfoIcon({ className, ariaHidden = true }: IconProps) {
+  return (
+    <svg {...svgProps(className, ariaHidden)}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  )
+}
+
+/** ✓ チェック (toast success / 完了)。Cell.tsx checkbox SVG と同形状。 */
+export function CheckIcon({ className, ariaHidden = true }: IconProps) {
+  return (
+    <svg {...svgProps(className, ariaHidden)}>
+      <polyline points="4 12 10 18 20 6" />
+    </svg>
+  )
+}
+
+/** ⟳ スピナー (syncing)。CSS の `animate-spin` クラスと組合せて回転させる想定。 */
+export function SpinnerIcon({ className, ariaHidden = true }: IconProps) {
+  return (
+    <svg {...svgProps(className, ariaHidden)}>
+      {/* 円弧 (3/4 円)。残り 1/4 が空白で、回転すると流れて見える */}
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  )
+}

@@ -146,7 +146,10 @@ export function useDragAndDrop(
     sourceRef.current = { kind: 'stock', itemId }
     setDragSourceId(`stock:${itemId}`)
     setDragPayload(e, { kind: 'stock', stockItemId: itemId })
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+    // semantically は "copy" だが、effectAllowed の値に関係なく macOS WKWebView は緑「+」を
+    // 出すことが判明している (落とし穴 #21)。値そのものは Q3=A モノクロ方針整合のため
+    // 'move' を採用しているが、+ 抑止効果はない (= 共存方針)。
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
     applyCleanDragImage(e, e.currentTarget as HTMLElement)
   }, [])
 
@@ -173,6 +176,7 @@ export function useDragAndDrop(
         if (!target) return
         if (!canAcceptDrop(src, target, cellsRef.current)) return
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'  // 緑「+」抑止 (defensive)
         setDragOverId(dropTargetIdOf(target))
         setHoveredAction(null)
       },
@@ -184,6 +188,9 @@ export function useDragAndDrop(
         if (!target) return
         if (!canAcceptDrop(src, target, cellsRef.current)) return
         e.preventDefault()
+        // dropEffect = 'move' 明示は defensive (= macOS WKWebView では緑「+」抑止効果なし、
+        // 落とし穴 #21 参照だが、他環境 / 将来の WebKit fix への備え)
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       },
       onDragLeave: (e: React.DragEvent) => {
         const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
@@ -266,6 +273,7 @@ export function useDragAndDrop(
         // copy / export は閲覧操作なのでロック中も通したいが、ロック中はそもそも drag start
         // できないのでこの分岐に来ない (defensive で全アクション一律 block)。
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
         setHoveredAction(action)
         setDragOverId(null)
       },
@@ -274,6 +282,7 @@ export function useDragAndDrop(
         const src = sourceRef.current
         if (src?.kind !== 'cell') return
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       },
       onDragLeave: () => {
         setHoveredAction((prev) => (prev === action ? null : prev))

@@ -80,7 +80,7 @@ export default function GridView3x3({
                   ? 'border-[6px] border-black dark:border-white shadow-md'
                   : 'border border-neutral-300 dark:border-neutral-700'}
                 ${isDisabled || isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
-                ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
+                ${isDragOver && !isDisabled ? 'ring-2 ring-neutral-500 dark:ring-neutral-400 ring-offset-1' : ''}
               `}
               onClick={() => {
                 if (isDisabled || isReadOnly) return

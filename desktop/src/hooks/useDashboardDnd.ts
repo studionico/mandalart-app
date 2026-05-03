@@ -94,7 +94,9 @@ export function useDashboardDnd({ onDrop }: Opts) {
     setDragSourceKind('stock')
     setDragSourceId(stockItemId)
     setDragPayload(e, { kind: 'stock', stockItemId })
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+    // semantically は "copy" だが、effectAllowed の値に関係なく macOS WKWebView では
+    // 緑「+」 indicator が出る (落とし穴 #21)。値そのものは Q3=A モノクロ整合のため 'move'。
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
     applyCleanDragImage(e, e.currentTarget as HTMLElement)
     snapshotCardRects()
   }, [])
@@ -116,11 +118,13 @@ export function useDashboardDnd({ onDrop }: Opts) {
     onDragEnter: (e) => {
       if (!sourceRef.current) return
       e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'  // 緑「+」抑止
     },
     onDragOver: (e) => {
       const src = sourceRef.current
       if (!src) return
       e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       // 4 アクションアイコン上やフォルダタブ上にいる時は dragover bubble するだけで、
       // それぞれの per-target handler が hoveredAction / target tab 強調を引き受ける。
       // ここでは card hit-test して dragOverCardIndex を更新するのみ。
@@ -178,12 +182,14 @@ export function useDashboardDnd({ onDrop }: Opts) {
       onDragEnter: (e) => {
         if (sourceRef.current?.kind !== 'card') return
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
         setHoveredAction(action)
         setDragOverCardIndex(null)
       },
       onDragOver: (e) => {
         if (sourceRef.current?.kind !== 'card') return
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       },
       onDragLeave: () => {
         setHoveredAction((prev) => (prev === action ? null : prev))
@@ -213,10 +219,12 @@ export function useDashboardDnd({ onDrop }: Opts) {
       onDragEnter: (e) => {
         if (sourceRef.current?.kind !== 'card') return
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       },
       onDragOver: (e) => {
         if (sourceRef.current?.kind !== 'card') return
         e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       },
       onDragLeave: () => {},
       onDrop: (e) => {

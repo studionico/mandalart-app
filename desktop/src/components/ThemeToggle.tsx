@@ -19,7 +19,7 @@ export default function ThemeToggle() {
           title={opt.title}
           className={`px-2 py-1.5 transition-colors ${
             preference === opt.value
-              ? 'bg-blue-600 text-white'
+              ? 'bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900'
               : 'hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300'
           }`}
         >

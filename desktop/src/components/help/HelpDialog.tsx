@@ -149,7 +149,7 @@ export default function HelpDialog({
                   onClick={() => setCurrentIndex(i)}
                   className={`w-2 h-2 rounded-full transition-colors ${
                     i === currentIndex
-                      ? 'bg-blue-600 dark:bg-blue-400'
+                      ? 'bg-neutral-900 dark:bg-neutral-100'
                       : 'bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-500'
                   }`}
                   aria-label={`スライド ${i + 1}`}
@@ -191,7 +191,7 @@ export default function HelpDialog({
               onClick={handleClose}
               className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                 isLastSlide
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600'
+                  ? 'bg-neutral-900 dark:bg-neutral-100 hover:bg-neutral-800 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 border border-neutral-900 dark:border-neutral-100'
                   : 'border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:border-neutral-300 dark:hover:border-neutral-600'
               }`}
             >

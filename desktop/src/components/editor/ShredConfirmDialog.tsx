@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from '@/components/ui/Modal'
 import Button from '@/components/ui/Button'
+import { WarningIcon } from '@/components/ui/icons'
 
 type Props = {
   open: boolean
@@ -60,8 +61,9 @@ export default function ShredConfirmDialog({
             </>
           )}
         </p>
-        <p className="text-xs text-red-600 dark:text-red-400">
-          ※ この操作は元に戻せません。
+        <p className="text-xs text-neutral-900 dark:text-neutral-100 font-bold flex items-center gap-1">
+          <WarningIcon className="w-3.5 h-3.5 shrink-0" />
+          この操作は元に戻せません。
         </p>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy}>

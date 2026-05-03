@@ -21,14 +21,11 @@ export function setDragPayload(e: React.DragEvent | DragEvent, payload: DragPayl
   const dt = e.dataTransfer
   if (!dt) return
   dt.setData(MIME, JSON.stringify(payload))
-  // text/plain fallback (debug ツール / 他 app への drag 出し時の表示用)
-  const fallbackText =
-    payload.kind === 'cell'
-      ? `cell:${payload.cellId}`
-      : payload.kind === 'stock'
-        ? `stock:${payload.stockItemId}`
-        : `card:${payload.mandalartId}`
-  dt.setData('text/plain', fallbackText)
+  // NOTE: `text/plain` 等の標準 MIME を **設定しない** こと。設定すると macOS WebKit が
+  //       「外部 app へコピー可能」と判定して **drag image 右下に緑の "+" indicator を強制
+  //       オーバーレイ** する (effectAllowed / dropEffect = 'move' でも消えない、OS レベル)。
+  //       custom MIME (application/x-mandalart-drag) のみなら "+"  は出ない。
+  //       debug 用の text/plain fallback は欲しい場面 (他 app への drag 出し) が無いため犠牲化。
 }
 
 export function getDragPayload(e: React.DragEvent | DragEvent): DragPayload | null {
@@ -86,6 +83,11 @@ export function applyCleanDragImage(e: React.DragEvent, sourceEl: HTMLElement): 
   // 元 source と同じ寸法を確定させる (cloneNode は computed style を継承しないため)
   clone.style.width = `${sourceEl.offsetWidth}px`
   clone.style.height = `${sourceEl.offsetHeight}px`
+  // clone 自体は draggable にしない (= OS が「外部 app へ drag 可能」と判定する余地を断つ)。
+  // 元 source の draggable=true 属性が cloneNode で継承されているので明示的に false に戻す。
+  clone.setAttribute('draggable', 'false')
+  // 同じ意図で webkit-user-drag を element 固定 (= 外部 export ではなく内部 element drag)
+  clone.style.setProperty('-webkit-user-drag', 'element')
   // 後で DevTools / cleanup で識別できるようにフラグを付ける
   clone.setAttribute('data-drag-image-clone', '')
   document.body.appendChild(clone)

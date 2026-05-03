@@ -366,7 +366,7 @@ export default function Cell({
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut || isDragSource ? 'opacity-40' : ''}
-        ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
+        ${isDragOver && !isDisabled ? 'ring-2 ring-neutral-500 dark:ring-neutral-400 ring-offset-1' : ''}
         group
       `}
       draggable={!isDisabled && !isInlineEditing && !!onDragStart && !isCellEmpty(cell) && !isReadOnly}
@@ -459,7 +459,7 @@ export default function Cell({
                 <button
                   type="button"
                   onClick={handleRemoveImage}
-                  className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 border border-red-300 dark:border-red-700 rounded px-2 py-1 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  className="text-xs text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   title="画像を削除"
                 >
                   画像を削除

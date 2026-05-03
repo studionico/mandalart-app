@@ -70,7 +70,7 @@ export default function SidePanel({
             key={t}
             onClick={() => setTab(t)}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${
-              tab === t ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+              tab === t ? 'text-neutral-900 dark:text-neutral-100 border-b-2 border-neutral-900 dark:border-neutral-100' : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
             }`}
           >
             {t === 'memo' ? 'メモ' : 'ストック'}

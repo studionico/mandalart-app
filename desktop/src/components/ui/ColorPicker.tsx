@@ -2,7 +2,10 @@ import { PRESET_COLORS } from '@/constants/colors'
 
 /**
  * セルの背景色プリセットピッカー。「デフォルト (null)」 + `PRESET_COLORS` の N 色を
- * 円形アイコンで横並びにし、選択中は `border-blue-500 + scale-110` でハイライトする。
+ * 円形アイコンで横並びにし、選択中は **太い neutral 枠 + scale-110** でハイライトする。
+ * (アプリ UI のアクセント色を黒・白・グレーに統一する方針 [Q3=A] により、選択ハイライトも
+ *  アクセント色 (旧 `border-blue-500`) ではなく neutral で行う。プリセット 10 色そのものは
+ *  Q1=A の方針で維持 = ユーザーがセルに着色する機能なので例外として残す)。
  *
  * 拡大エディタのツールバー (Cell.tsx) と CellEditModal の両方で使用。
  */
@@ -22,7 +25,7 @@ const SIZE_CLASSES = {
   md: { wrapper: 'gap-2', btn: 'w-7 h-7' },
 } as const
 
-const SELECTED = 'border-blue-500 scale-110'
+const SELECTED = 'border-neutral-900 dark:border-neutral-100 scale-110'
 const UNSELECTED = 'border-neutral-300 dark:border-neutral-600'
 
 export function ColorPicker({ value, onChange, size = 'sm' }: Props) {

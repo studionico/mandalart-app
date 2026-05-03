@@ -206,8 +206,9 @@ function StockEntry({
         size="sm"
         actions={[
           // size='sm' は w-4 h-4 (16px) なので SVG は w-3 h-3 (12px) に絞って中央配置。
-          { icon: <ArrowDownIcon className="w-3 h-3" />, variant: 'neutral', onClick: () => onPaste(item), title: '貼付' },
-          { icon: <XMarkIcon className="w-3 h-3" />, variant: 'red', onClick: () => onDelete(item.id), title: '削除' },
+          // 色は neutral 一本化、状態は形 (ArrowDown / XMark) で識別。
+          { icon: <ArrowDownIcon className="w-3 h-3" />, onClick: () => onPaste(item), title: '貼付' },
+          { icon: <XMarkIcon className="w-3 h-3" />, onClick: () => onDelete(item.id), title: '削除' },
         ]}
       />
     </div>

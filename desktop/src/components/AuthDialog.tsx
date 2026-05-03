@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Modal from '@/components/ui/Modal'
 import Button from '@/components/ui/Button'
+import { WarningIcon, InfoIcon } from '@/components/ui/icons'
 import {
   signInWithEmail, signUpWithEmail, signInWithOAuth,
 } from '@/lib/api/auth'
@@ -84,7 +85,7 @@ export default function AuthDialog({ open, onClose }: Props) {
             onChange={(e) => setEmail(e.target.value)}
             required
             disabled={submitting}
-            className="w-full mt-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
           />
         </div>
         <div>
@@ -96,12 +97,22 @@ export default function AuthDialog({ open, onClose }: Props) {
             required
             minLength={6}
             disabled={submitting}
-            className="w-full mt-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
           />
         </div>
 
-        {error && <p className="text-xs text-red-500">{error}</p>}
-        {info && <p className="text-xs text-blue-600">{info}</p>}
+        {error && (
+          <p className="text-xs text-neutral-900 dark:text-neutral-100 font-bold flex items-center gap-1">
+            <WarningIcon className="w-3.5 h-3.5 shrink-0" />
+            {error}
+          </p>
+        )}
+        {info && (
+          <p className="text-xs text-neutral-700 dark:text-neutral-300 flex items-center gap-1">
+            <InfoIcon className="w-3.5 h-3.5 shrink-0" />
+            {info}
+          </p>
+        )}
 
         <Button type="submit" disabled={submitting}>
           {submitting ? '処理中...' : mode === 'signin' ? 'サインイン' : '新規登録'}
@@ -110,7 +121,7 @@ export default function AuthDialog({ open, onClose }: Props) {
         <button
           type="button"
           onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(null); setInfo(null) }}
-          className="text-xs text-blue-600 hover:underline"
+          className="text-xs text-neutral-900 dark:text-neutral-100 hover:underline"
         >
           {mode === 'signin' ? 'アカウントをお持ちでない方は新規登録' : 'すでにアカウントをお持ちの方はサインイン'}
         </button>

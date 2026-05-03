@@ -25,6 +25,7 @@ import Toast from '@/components/ui/Toast'
 import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import {
   LockClosedIcon, LockOpenIcon, StarFilledIcon, StarOutlineIcon, CopyIcon, XMarkIcon,
+  WarningIcon, SpinnerIcon,
 } from '@/components/ui/icons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
@@ -507,7 +508,7 @@ export default function DashboardPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="タイトル・セル本文で検索..."
-            className="flex-1 text-sm border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 text-sm border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
           />
           {/* 並び順セレクターは検索中のみ表示。通常画面は API ORDER BY (pinned > 手動 sort_order >
               updated_at) で十分なので選択肢を出さない (= ピン留め / D&D 並び替えがそのまま反映)。 */}
@@ -586,7 +587,7 @@ export default function DashboardPage() {
                       if (e.key === 'Enter') commitPendingFolder()
                       else if (e.key === 'Escape') setPendingFolder(null)
                     }}
-                    className="shrink-0 px-3 py-2 text-sm font-medium border-b-2 border-blue-600 bg-transparent text-neutral-900 dark:text-neutral-100 focus:outline-none whitespace-nowrap"
+                    className="shrink-0 px-3 py-2 text-sm font-medium border-b-2 border-neutral-900 dark:border-neutral-100 bg-transparent text-neutral-900 dark:text-neutral-100 focus:outline-none whitespace-nowrap"
                     style={{ width: '8rem' }}
                   />
                 )
@@ -612,7 +613,7 @@ export default function DashboardPage() {
                   title={f.is_system ? `${f.name} (system) — 右クリックで名前変更` : `${f.name} — 右クリックで名前変更 / hover の ✕ で削除`}
                   className={`group shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors select-none whitespace-nowrap inline-flex items-center ${
                     isActive
-                      ? 'border-blue-600 text-neutral-900 dark:text-neutral-100'
+                      ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
                       : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
                   }`}
                 >
@@ -635,8 +636,8 @@ export default function DashboardPage() {
                       title={isDeleteArmed ? 'もう一度クリックで削除' : 'フォルダを削除 (中のカードは Inbox に戻る)'}
                       className={`ml-1.5 px-1 text-xs rounded transition-opacity ${
                         isDeleteArmed
-                          ? 'opacity-100 text-red-600 dark:text-red-400 font-bold'
-                          : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400'
+                          ? 'opacity-100 text-neutral-900 dark:text-neutral-100 font-bold'
+                          : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
                       }`}
                     >
                       {isDeleteArmed ? '削除?' : '×'}
@@ -657,7 +658,7 @@ export default function DashboardPage() {
                   if (e.key === 'Enter') commitPendingFolder()
                   else if (e.key === 'Escape') setPendingFolder(null)
                 }}
-                className="shrink-0 px-3 py-2 text-sm font-medium border-b-2 border-blue-600 bg-transparent text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none whitespace-nowrap"
+                className="shrink-0 px-3 py-2 text-sm font-medium border-b-2 border-neutral-900 dark:border-neutral-100 bg-transparent text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none whitespace-nowrap"
                 style={{ width: '8rem' }}
               />
             ) : (
@@ -961,22 +962,20 @@ function MandalartCard({
         size="md"
         actions={[
           {
-            // 形 (closed shackle vs open shackle) で on/off を識別。色は黒/白単色 (variant neutral)。
+            // 形 (closed shackle vs open shackle) で on/off を識別。色は黒/白単色。
             icon: m.locked ? <LockClosedIcon /> : <LockOpenIcon />,
-            variant: 'neutral',
             onClick: onToggleLock,
             title: m.locked ? 'ロックを解除' : 'ロック (編集不可にする)',
           },
           {
-            // 形 (filled vs outline) で on/off を識別。色は黒/白単色 (variant neutral)。
+            // 形 (filled vs outline) で on/off を識別。色は黒/白単色。
             icon: m.pinned ? <StarFilledIcon /> : <StarOutlineIcon />,
-            variant: 'neutral',
             onClick: onTogglePin,
             title: m.pinned ? 'ピン留めを外す' : 'ピン留め',
           },
-          { icon: <CopyIcon />, variant: 'neutral', onClick: onDuplicate, title: '複製' },
-          // 削除のみ red variant を残す (誤操作防止のため hover で警告色)
-          { icon: <XMarkIcon />, variant: 'red', onClick: onDelete, title: '削除' },
+          { icon: <CopyIcon />, onClick: onDuplicate, title: '複製' },
+          // 削除アクションも色は neutral、形 (XMarkIcon) で識別。
+          { icon: <XMarkIcon />, onClick: onDelete, title: '削除' },
         ]}
       />
     </div>
@@ -1019,19 +1018,24 @@ function SyncIndicator({
     lastSync ? `${formatTime(lastSync)} 同期済み` :
     '未同期'
 
-  const colorClass =
-    status === 'syncing' ? 'text-blue-500' :
-    status === 'error' ? 'text-red-500' :
-    'text-neutral-500 dark:text-neutral-400'
+  // 状態区別はアイコン形状で行う (色は neutral 統一、Q3=A 方針)。
+  // - syncing: SpinnerIcon (animate-spin)
+  // - error: WarningIcon
+  // - idle / offline: SpinnerIcon (静止)
+  const Icon = status === 'error' ? WarningIcon : SpinnerIcon
+  const iconClass = status === 'syncing' ? 'w-3.5 h-3.5 animate-spin' : 'w-3.5 h-3.5'
+  // error 状態は font-bold で強調 (色は neutral のまま)
+  const labelWeight = status === 'error' ? 'font-bold' : ''
 
   return (
     <button
       onClick={onSync}
       disabled={status === 'syncing'}
       title={error ?? '今すぐ同期'}
-      className={`text-xs ${colorClass} border border-neutral-200 dark:border-neutral-700 rounded-lg px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-50`}
+      className={`text-xs text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 rounded-lg px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-50 inline-flex items-center gap-1.5 ${labelWeight}`}
     >
-      ⟳ {label}
+      <Icon className={iconClass} />
+      {label}
     </button>
   )
 }

@@ -23,7 +23,7 @@ import type { ActionDropType } from '@/hooks/useDragAndDrop'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
-import { LockClosedIcon } from '@/components/ui/icons'
+import { LockClosedIcon, WarningIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
 import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
@@ -2074,10 +2074,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   return (
     <div className="flex flex-col h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
-      {/* オフラインインジケーター */}
+      {/* オフラインインジケーター。色は neutral 統一、状態は WarningIcon の形で識別 (Q3=A 方針)。 */}
       {isOffline && (
-        <div className="bg-yellow-500 text-white text-xs text-center py-1">
-          オフライン — 変更はローカルに保存されます
+        <div className="bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 border-b border-neutral-300 dark:border-neutral-700 text-xs py-1 flex items-center justify-center gap-1.5">
+          <WarningIcon className="w-3.5 h-3.5 shrink-0" />
+          <span>オフライン — 変更はローカルに保存されます</span>
         </div>
       )}
 
@@ -2120,7 +2121,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             onClick={handleToggleShowCheckbox}
             className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
               showCheckbox
-                ? 'bg-blue-600 border-blue-600 text-white'
+                ? 'bg-neutral-900 dark:bg-neutral-100 border-neutral-900 dark:border-neutral-100 text-white dark:text-neutral-900'
                 : 'bg-white dark:bg-neutral-900 border-neutral-400 dark:border-neutral-500 hover:border-neutral-700 dark:hover:border-neutral-300 text-transparent'
             }`}
             title={showCheckbox ? 'チェックボックス表示中 (クリックで非表示)' : 'チェックボックス非表示 (クリックで表示)'}
@@ -2180,7 +2181,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           編集経路は EditorLayout 全 mutation handler が isLocked early-return ガード済み。
           解除はダッシュボードカードのロック解除アイコン経由 (エディタ内では切替できない仕様)。 */}
       {isLocked && (
-        <div className="shrink-0 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
+        <div className="shrink-0 bg-neutral-100 dark:bg-neutral-800 border-b border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
           <LockClosedIcon className="w-4 h-4 shrink-0" />
           <span>このマンダラートはロックされています — 編集するにはダッシュボードでロックを解除してください</span>
         </div>
@@ -3020,7 +3021,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 return (
                   <button
                     onClick={handleAddParallel}
-                    className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                    className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 hover:border-neutral-500 dark:hover:border-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
                     title="新しい並列グリッドを追加"
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

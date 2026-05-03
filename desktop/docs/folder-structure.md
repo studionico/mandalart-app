@@ -80,7 +80,7 @@ samples/
 src/
 ├── main.tsx                  # React エントリーポイント
 ├── App.tsx                   # HashRouter + Routes + グローバル hooks (useTheme / useAuthBootstrap / useGlobalShortcut / useAppUpdate)
-├── App.css / index.css       # グローバルスタイル (index.css で Tailwind + @custom-variant dark 定義)
+├── index.css                 # グローバルスタイル (Tailwind + @custom-variant dark 定義、@keyframes 群)
 ├── vite-env.d.ts
 │
 ├── pages/                    # ページコンポーネント (React Router のルート単位)
@@ -124,7 +124,7 @@ src/
 │       ├── Toast.tsx         # トースト通知 (info / success / error + Undo)
 │       ├── HoverActionButtons.tsx # カード/タイル右上の hover アクションアイコン群 (StockEntry / MandalartCard 共通、size: sm/md)
 │       ├── ColorPicker.tsx   # PRESET_COLORS の円形ピッカー (Cell 拡大エディタ / CellEditModal 共通、size: sm/md)
-│       └── icons.tsx         # 単色 inline SVG アイコン集 (Lock {Closed,Open} / Star {Filled,Outline} / Copy / XMark / ArrowDown、stroke=currentColor で黒/白単色運用)
+│       └── icons.tsx         # 単色 inline SVG アイコン集 (Lock {Closed,Open} / Star {Filled,Outline} / Copy / XMark / ArrowDown / Warning / Info / Check / Spinner、stroke=currentColor で黒/白単色運用)
 │
 ├── hooks/                    # React カスタムフック
 │   ├── useGrid.ts            # グリッド + セルデータの取得・更新

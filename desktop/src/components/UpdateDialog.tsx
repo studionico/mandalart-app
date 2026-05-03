@@ -42,7 +42,7 @@ export default function UpdateDialog({ status, onInstall, onDismiss }: Props) {
           <p className="text-sm">ダウンロード中... {status.progress}%</p>
           <div className="w-full h-2 bg-neutral-100 rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-500 transition-all"
+              className="h-full bg-neutral-900 dark:bg-neutral-100 transition-all"
               style={{ width: `${status.progress}%` }}
             />
           </div>

@@ -74,13 +74,13 @@ export default function MemoTab({ gridId, initialMemo, isReadOnly = false }: Pro
         <div className="flex gap-1">
           <button
             onClick={() => setPreview(false)}
-            className={`text-xs px-2 py-1 rounded-md transition-colors ${!preview ? 'bg-neutral-200 font-medium' : 'hover:bg-neutral-100 text-neutral-500'}`}
+            className={`text-xs px-2 py-1 rounded-md transition-colors ${!preview ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 font-medium' : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'}`}
           >
             編集
           </button>
           <button
             onClick={() => setPreview(true)}
-            className={`text-xs px-2 py-1 rounded-md transition-colors ${preview ? 'bg-neutral-200 font-medium' : 'hover:bg-neutral-100 text-neutral-500'}`}
+            className={`text-xs px-2 py-1 rounded-md transition-colors ${preview ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 font-medium' : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'}`}
           >
             プレビュー
           </button>
@@ -105,7 +105,7 @@ export default function MemoTab({ gridId, initialMemo, isReadOnly = false }: Pro
           // textarea は cols 属性のデフォルト (~20ch) で intrinsic 幅を持つので w-full を明示。
           // placeholder を多行で表示するため whitespace-pre-line を当てて改行を保つ
           // (textarea の placeholder は \n を改行として描画するが、念のため明示)
-          className={`flex-1 w-full text-sm resize-none border border-neutral-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono whitespace-pre-line ${
+          className={`flex-1 w-full text-sm resize-none border border-neutral-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500 font-mono whitespace-pre-line ${
             isReadOnly ? 'bg-neutral-50 dark:bg-neutral-800/40 text-neutral-500 cursor-not-allowed' : ''
           }`}
         />

@@ -56,13 +56,12 @@ function ActionTile({
   dropProps?: DropHandlers
   children: React.ReactNode
 }) {
-  const baseClass = action === 'shred'
-    ? 'border-red-300 dark:border-red-700 text-red-600 dark:text-red-400'
-    : 'border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300'
+  // 全アクション (shred / move / copy / export) を neutral 統一。状態は **アイコン形状** で識別する
+  // (Q3=A 方針)。shred = ShredderIcon、move = ArrowOutIcon、copy = DocumentDuplicateIcon、
+  // export = ArrowDownTrayIcon のような形で識別され、外側の枠は全部同じ neutral グレー階調。
+  const baseClass = 'border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300'
   const hoverClass = hovered
-    ? action === 'shred'
-      ? 'border-red-500 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 scale-[1.04]'
-      : 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 scale-[1.04]'
+    ? 'border-neutral-700 dark:border-neutral-300 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 scale-[1.04]'
     : ''
   return (
     <div
