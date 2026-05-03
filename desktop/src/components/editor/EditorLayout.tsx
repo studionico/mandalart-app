@@ -2129,19 +2129,19 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             </svg>
           </button>
 
-          {/* 表示モード切替 */}
-          <div className="flex rounded-lg border border-neutral-200 overflow-hidden text-xs">
-            {(['3x3', '9x9'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => handleViewModeSwitch(mode)}
-                disabled={viewSwitch != null}
-                className={`px-3 py-1.5 transition-colors disabled:opacity-60 ${viewMode === mode ? 'bg-blue-600 text-white' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300'}`}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
+          {/* 表示モード切替: **次に切り替わる先** のラベルだけを 1 ボタンで表示する。
+              3×3 モード時は `9x9` ボタン、9×9 モード時は `3x3` ボタンが見える。
+              「現状ハイライト + クリック対象」を分離していた旧 segmented control よりも
+              "押すと何が起きるか" が即座に伝わる (Welcome モーダルでもこの前提で説明する)。 */}
+          <button
+            onClick={() => handleViewModeSwitch(viewMode === '3x3' ? '9x9' : '3x3')}
+            disabled={viewSwitch != null}
+            className="px-3 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-60"
+            title={viewMode === '3x3' ? '9×9 表示に切替' : '3×3 表示に戻る'}
+            aria-label={viewMode === '3x3' ? '9×9 表示に切替' : '3×3 表示に戻る'}
+          >
+            {viewMode === '3x3' ? '9x9' : '3x3'}
+          </button>
 
           {/* エクスポート */}
           <div className="relative">

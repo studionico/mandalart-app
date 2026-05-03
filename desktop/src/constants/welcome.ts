@@ -7,4 +7,4 @@
  * 「次回以降表示しない」をチェックして閉じた user は現行 `WELCOME_VERSION` が保存され、
  * 再 bump されるまで表示されなくなる。新機能告知や welcome 内容の刷新時に bump する想定。
  */
-export const WELCOME_VERSION = 1
+export const WELCOME_VERSION = 2

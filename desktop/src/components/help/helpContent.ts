@@ -42,42 +42,42 @@ export const WELCOME_SLIDES: WelcomeSlide[] = [
   {
     kind: 'feature',
     title: 'マンダラートを新規作成',
-    description: 'ホーム画面のカードグリッド先頭の「+」をクリックすると、新しいマンダラートが作れます。',
+    description: 'ホーム画面の「+」カードをクリックすると、新しいマンダラートが作れます。',
     durationMs: STANDARD_DURATION_MS,
   },
   // 3. セルを編集
   {
     kind: 'feature',
     title: 'セルを編集',
-    description: 'セルをクリックで文字を入力。ダブルクリックで拡大エディタが開き、色や画像も付けられます。',
+    description: '空のセルはクリック、文字が入っているセルはダブルクリックで編集できます。編集中にテキスト欄をダブルクリックすると拡大表示になり、色や画像も追加できます。',
     durationMs: STANDARD_DURATION_MS,
   },
   // 4. 階層の移動
   {
     kind: 'feature',
     title: '階層の移動',
-    description: '入力済みの周辺セルをクリックすると、そのセルを中心に新しい 3×3 が開きます (ドリルダウン)。中心セルをクリックすると親階層へ戻れます。',
+    description: '入力済みの周辺セルをクリックすると、そのセルを中心とした新しい 9 マスが開きます (掘り下げ)。中心セルをクリックすると親階層へ戻れます。',
     durationMs: STANDARD_DURATION_MS,
   },
   // 5. 9×9 表示
   {
     kind: 'feature',
     title: '9×9 表示',
-    description: '右上のトグルで切替。現在のグリッドと直下のサブグリッドを 2 階層まとめて俯瞰できます (読み取り専用)。',
+    description: '画面上部の `[9x9]` ボタンを押すと、現在の階層と下の階層を一度に見渡せます (表示のみ、編集はできません)。元に戻すときは `[3x3]` ボタンを押します。',
     durationMs: STANDARD_DURATION_MS,
   },
   // 6. ホームへ戻る
   {
     kind: 'feature',
     title: 'ホームへ戻る',
-    description: 'ルートグリッドの中心セルをクリックすると、ダッシュボード (ホーム画面) へ戻ります。',
+    description: '最初の階層 (一番上) の中心セルをクリックすると、ホーム画面に戻ります。',
     durationMs: STANDARD_DURATION_MS,
   },
   // 7. マンダラートを開く
   {
     kind: 'feature',
     title: 'マンダラートを開く',
-    description: 'ホームに並んでいるカードをクリックすると、その続きをいつでも編集できます。',
+    description: 'ホームに並ぶカードをクリックすると、前回開いていた階層から続きを編集できます。',
     durationMs: STANDARD_DURATION_MS,
   },
 ]
