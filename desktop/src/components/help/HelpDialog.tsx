@@ -61,11 +61,21 @@ export default function HelpDialog({
     // (= メニュー経由でも 12 秒のアニメ完了後にスライド 2 へ抜ける)
     const shouldAdvance = autoAdvance || slide.kind === 'concept'
     if (!shouldAdvance) return
+    // 動画 slide (autoAdvance ON 時) は <video onEnded> で次へ進むので setTimeout を立てない。
+    // そうしないと「動画長 < durationMs」で setTimeout が先に発火し、動画途中で進んでしまう。
+    if (autoAdvance && slide.kind === 'feature' && slide.video) return
     const t = setTimeout(() => {
       setCurrentIndex((i) => Math.min(total - 1, i + 1))
     }, slide.durationMs)
     return () => clearTimeout(t)
   }, [open, autoAdvance, isPaused, currentIndex, isLastSlide, total])
+
+  // 動画 slide の onVideoEnded callback (autoAdvance 時のみ次に進む)
+  const handleVideoEnded = useCallback(() => {
+    if (!autoAdvance) return
+    if (isLastSlide) return
+    setCurrentIndex((i) => Math.min(total - 1, i + 1))
+  }, [autoAdvance, isLastSlide, total])
 
   // キーボードナビ
   useEffect(() => {
@@ -109,8 +119,10 @@ export default function HelpDialog({
             <FeatureSlide
               title={slide.kind === 'feature' ? slide.title : ''}
               description={slide.kind === 'feature' ? slide.description : ''}
+              video={slide.kind === 'feature' ? slide.video : undefined}
               screenshot={slide.kind === 'feature' ? slide.screenshot : undefined}
               screenshotAlt={slide.kind === 'feature' ? slide.screenshotAlt : undefined}
+              onVideoEnded={autoAdvance ? handleVideoEnded : undefined}
             />
           </div>
         )}
