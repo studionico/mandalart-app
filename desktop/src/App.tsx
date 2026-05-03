@@ -43,11 +43,13 @@ export default function App() {
     }
   }, [welcome.shouldShow, helpMode])
 
-  // Tauri menu「ヘルプ」→「使い方を見る」 (id='help.show') を購読 → manual で開く
+  // Tauri menu「ヘルプ」→「使い方を見る」 (id='help.show') を購読 → manual で開く。
+  // event 名は `menu:help-show` (ハイフン区切り)。Tauri v2 の event 名は `.` を含められない
+  // (英数字 / `-` / `/` / `:` / `_` のみ許可、含むと listen 登録自体が失敗する)。
   useEffect(() => {
     let unlisten: (() => void) | undefined
     void import('@tauri-apps/api/event').then(({ listen }) => {
-      void listen('menu:help.show', () => {
+      void listen('menu:help-show', () => {
         setHelpMode('manual')
       }).then((u) => { unlisten = u })
     })

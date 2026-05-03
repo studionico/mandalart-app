@@ -105,9 +105,12 @@ pub fn run() {
             Ok(())
         })
         // 「使い方を見る」クリックで JS 側に通知 (App.tsx が listen して HelpDialog を開く)。
+        // NOTE: Tauri v2 の event 名は英数字 / `-` / `/` / `:` / `_` のみ許可。`.` を含むと
+        // listen 側で `Event name must include only alphanumeric characters, ...` エラーで
+        // 登録自体が失敗するので、`menu:help-show` のようにハイフン区切りで統一する。
         .on_menu_event(|app, event| {
             if event.id() == "help.show" {
-                let _ = app.emit("menu:help.show", ());
+                let _ = app.emit("menu:help-show", ());
             }
         })
         // ⌘Q / ウィンドウ close 時にフロントエンドへ "before-quit" を発火する。
