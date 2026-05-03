@@ -23,6 +23,7 @@ import type { ActionDropType } from '@/hooks/useDragAndDrop'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
+import { LockClosedIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
 import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
@@ -2174,10 +2175,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
       {/* ロックバナー (migration 011): マンダラートがロック中のみ表示。
           編集経路は EditorLayout 全 mutation handler が isLocked early-return ガード済み。
-          解除はダッシュボードカードの 🔒 トグル経由 (エディタ内では切替できない仕様)。 */}
+          解除はダッシュボードカードのロック解除アイコン経由 (エディタ内では切替できない仕様)。 */}
       {isLocked && (
         <div className="shrink-0 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
-          <span aria-hidden="true">🔒</span>
+          <LockClosedIcon className="w-4 h-4 shrink-0" />
           <span>このマンダラートはロックされています — 編集するにはダッシュボードでロックを解除してください</span>
         </div>
       )}

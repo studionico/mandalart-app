@@ -31,8 +31,12 @@ const SIZE_CLASSES = {
   md: { wrapper: 'top-1 right-1 gap-1', btn: 'w-5 h-5 text-[10px]' },
 } as const
 
+// neutral は「黒/白単色」運用 (ロック / ピン / 複製アイコンの基本色)。on/off は
+// アイコン形状で区別しているので color に役割を持たせない。
+// red は削除アクション専用 (hover で警告色を出して誤操作を防ぐ)。
+// blue は「目立たせる必要のある active 状態」用に残しているが、現状未使用 (将来取り除いてよい)。
 const VARIANT_CLASSES: Record<ActionVariant, string> = {
-  neutral: 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100',
+  neutral: 'text-neutral-900 dark:text-neutral-100 hover:text-black dark:hover:text-white',
   blue: 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200',
   red: 'text-red-500 dark:text-red-300 hover:text-red-700',
 }

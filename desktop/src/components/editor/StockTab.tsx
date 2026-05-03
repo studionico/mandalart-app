@@ -4,6 +4,7 @@ import { getStockItems, deleteStockItem } from '@/lib/api/stock'
 import { CONVERGE_DURATION_MS } from '@/constants/timing'
 import Button from '@/components/ui/Button'
 import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
+import { ArrowDownIcon, XMarkIcon } from '@/components/ui/icons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
 import { useTwoClickConfirm } from '@/hooks/useTwoClickConfirm'
@@ -204,8 +205,9 @@ function StockEntry({
       <HoverActionButtons
         size="sm"
         actions={[
-          { icon: '↓', variant: 'blue', onClick: () => onPaste(item), title: '貼付' },
-          { icon: '✕', variant: 'red', onClick: () => onDelete(item.id), title: '削除' },
+          // size='sm' は w-4 h-4 (16px) なので SVG は w-3 h-3 (12px) に絞って中央配置。
+          { icon: <ArrowDownIcon className="w-3 h-3" />, variant: 'neutral', onClick: () => onPaste(item), title: '貼付' },
+          { icon: <XMarkIcon className="w-3 h-3" />, variant: 'red', onClick: () => onDelete(item.id), title: '削除' },
         ]}
       />
     </div>

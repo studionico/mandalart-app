@@ -123,7 +123,8 @@ src/
 │       ├── BottomSheet.tsx   # モバイル用ボトムシート
 │       ├── Toast.tsx         # トースト通知 (info / success / error + Undo)
 │       ├── HoverActionButtons.tsx # カード/タイル右上の hover アクションアイコン群 (StockEntry / MandalartCard 共通、size: sm/md)
-│       └── ColorPicker.tsx   # PRESET_COLORS の円形ピッカー (Cell 拡大エディタ / CellEditModal 共通、size: sm/md)
+│       ├── ColorPicker.tsx   # PRESET_COLORS の円形ピッカー (Cell 拡大エディタ / CellEditModal 共通、size: sm/md)
+│       └── icons.tsx         # 単色 inline SVG アイコン集 (Lock {Closed,Open} / Star {Filled,Outline} / Copy / XMark / ArrowDown、stroke=currentColor で黒/白単色運用)
 │
 ├── hooks/                    # React カスタムフック
 │   ├── useGrid.ts            # グリッド + セルデータの取得・更新
