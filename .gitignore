@@ -46,3 +46,13 @@ next-env.d.ts
 .claude/*
 !.claude/commands/
 !.claude/agents/
+
+# Marketing storyboard images (Midjourney 等で生成したキービジュアル)
+# プロンプト markdown は git 管理、生成画像は容量が大きく個人手元保管推奨。
+marketing/storyboard/
+marketing/**/*.png
+marketing/**/*.jpg
+marketing/**/*.jpeg
+marketing/**/*.webp
+marketing/**/*.mp4
+marketing/**/*.mov
