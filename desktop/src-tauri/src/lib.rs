@@ -103,14 +103,15 @@ pub fn run() {
             let help_show = MenuItem::with_id(handle, "help.show",
                 "使い方を見る", true, None::<&str>)?;
             // ウィンドウサイズプリセット (= プリセット 2 種から初期サイズを切替える)。
-            // 値の出典: tauri.conf.json の `width: 1200, height: 800` をデフォルトとして「ふつう」に、
-            // 9×9 表示で 81 セル全部の文字が読める実用上限として MacBook 13.3" の論理解像度
-            // 1440×900 を「広め」に採用。tauri-plugin-window-state により resize 結果は次回
-            // 起動に自動引継ぎされる。
+            // 値の方針: 16:9 完全一致で揃える (1280×720 = HD / 1600×900 = HD+)。
+            // - welcome モーダルの `FeatureSlide` 枠 (aspect-video = 16:9) と寸法整合
+            // - スクショ撮影時にウィンドウ全体をそのまま撮るだけで切り抜き不要
+            // - 9×9 表示でサイドパネル w-72 を引いてもセル ~70px (ふつう) / ~88px (広め) が確保される
+            // tauri-plugin-window-state により resize 結果は次回起動に自動引継ぎされる。
             let size_normal = MenuItem::with_id(handle, "window-size-normal",
-                "ふつう (1200 × 800)", true, None::<&str>)?;
+                "ふつう (1280 × 720)", true, None::<&str>)?;
             let size_wide = MenuItem::with_id(handle, "window-size-wide",
-                "広め (1440 × 900)", true, None::<&str>)?;
+                "広め (1600 × 900)", true, None::<&str>)?;
 
             let menu = Menu::default(handle)?;
             for item_kind in menu.items()? {
@@ -149,12 +150,12 @@ pub fn run() {
                 }
                 "window-size-normal" => {
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.set_size(LogicalSize::new(1200.0, 800.0));
+                        let _ = window.set_size(LogicalSize::new(1280.0, 720.0));
                     }
                 }
                 "window-size-wide" => {
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.set_size(LogicalSize::new(1440.0, 900.0));
+                        let _ = window.set_size(LogicalSize::new(1600.0, 900.0));
                     }
                 }
                 _ => {}

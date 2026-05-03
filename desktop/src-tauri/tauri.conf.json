@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Mandalart",
-        "width": 1200,
-        "height": 800,
+        "width": 1280,
+        "height": 720,
         "minWidth": 800,
         "minHeight": 600,
         "dragDropEnabled": false

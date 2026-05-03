@@ -78,7 +78,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   } = useEditorStore()
   // ロック状態は store の currentMandalart 経由で購読 (migration 011 以降)。realtime で別端末/別タブの
   // ロック切替が即時反映される。詳細は editorStore.ts の `currentMandalart` コメント参照。
-  const isLocked = useEditorStore((s) => s.currentMandalart?.locked ?? false)
+  // NOTE: SQLite から `locked` が number 0 で返る経路があるので **必ず `!!` で boolean 化**。
+  // `?? false` だと null/undefined にしか反応せず number 0 は素通り → `{isLocked && ...}` で
+  // "0" が描画される罠 (落とし穴 #16) を踏む。
+  const isLocked = useEditorStore((s) => !!s.currentMandalart?.locked)
 
   // セル左上 done チェックボックス UI の表示 ON/OFF。マンダラート単位で記憶 (migration 007)。
   // mandalartId 変更時に DB から復元、トグル時は楽観的更新 + DB 永続化。
