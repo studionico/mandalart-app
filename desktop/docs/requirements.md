@@ -361,6 +361,7 @@ Shift+Tab は逆順
 | 画像ファイル D&D | セルへのファイルドロップ → `$APPDATA/images/` に保存 | ✅ 実装済み (HTML5 `dataTransfer.files` の window-level listener + `storage.ts:uploadCellImage`) |
 | 自動アップデート | GitHub Releases の `latest.json` からチェック・適用 | ✅ 実装済み ([`updater-setup.md`](./updater-setup.md) 参照) |
 | ウィンドウ制約 | 最小サイズ 800×600、デフォルト 1200×800 | ✅ 実装済み (`tauri.conf.json`) |
+| ウィンドウサイズプリセット | OS メニューバー「Window」→「ふつう (1200×800)」「広め (1440×900)」で初期サイズを切替。値は `tauri-plugin-window-state` で次回起動時に自動引継 | ✅ 実装済み ([`lib.rs`](../src-tauri/src/lib.rs) の `setup` で OS 標準 Window submenu 内に append) |
 | コードサイニング | macOS / Windows の正式署名 | ⬜ 未対応 (有料証明書が必要) |
 
 ---

@@ -1,5 +1,5 @@
-use tauri::{Emitter, WindowEvent};
-use tauri::menu::{Menu, MenuItem, SubmenuBuilder};
+use tauri::{Emitter, LogicalSize, Manager, WindowEvent};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -90,27 +90,74 @@ pub fn run() {
         // ~/Library/Application Support/jp.mandalart.app/window-state.json)。
         // 初回起動時はこの state が無いので tauri.conf.json の width/height が使われる。
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        // メニューバーに「ヘルプ」 submenu を追加 (使い方モーダルの手動再表示エントリ)。
-        // macOS は system menu bar、Windows / Linux はウィンドウメニューに自動配置される。
-        // OS 標準の App / Edit / Window 等は `Menu::default(handle)` をベースに保持する。
+        // メニューバーの OS 標準 Window / Help submenu に独自項目を追加する。
+        // 旧実装では独立した「ウィンドウサイズ」「ヘルプ」 submenu を `Menu::default` に
+        // append していたが、OS 標準と二重表示になったため (= [Window][Help][ウィンドウサイズ][ヘルプ])、
+        // 標準 submenu の **内部** に append する形に変更した。
+        // `Menu::default` は OS 言語に関わらず固定で英語名 ("Window" / "Help") の submenu を作るので、
+        // text() 比較で確実に拾える。
         .setup(|app| {
             let handle = app.handle();
-            let help_show = MenuItem::with_id(handle, "help.show", "使い方を見る", true, None::<&str>)?;
-            let help_menu = SubmenuBuilder::new(handle, "ヘルプ")
-                .item(&help_show)
-                .build()?;
+
+            // 追加する MenuItem を構築
+            let help_show = MenuItem::with_id(handle, "help.show",
+                "使い方を見る", true, None::<&str>)?;
+            // ウィンドウサイズプリセット (= プリセット 2 種から初期サイズを切替える)。
+            // 値の出典: tauri.conf.json の `width: 1200, height: 800` をデフォルトとして「ふつう」に、
+            // 9×9 表示で 81 セル全部の文字が読める実用上限として MacBook 13.3" の論理解像度
+            // 1440×900 を「広め」に採用。tauri-plugin-window-state により resize 結果は次回
+            // 起動に自動引継ぎされる。
+            let size_normal = MenuItem::with_id(handle, "window-size-normal",
+                "ふつう (1200 × 800)", true, None::<&str>)?;
+            let size_wide = MenuItem::with_id(handle, "window-size-wide",
+                "広め (1440 × 900)", true, None::<&str>)?;
+
             let menu = Menu::default(handle)?;
-            menu.append(&help_menu)?;
+            for item_kind in menu.items()? {
+                if let Some(submenu) = item_kind.as_submenu() {
+                    let text = submenu.text().unwrap_or_default();
+                    match text.as_str() {
+                        "Window" => {
+                            // OS 標準 Window submenu (Minimize / Zoom / Show All /
+                            // Bring All to Front) の下に separator + サイズプリセットを追加
+                            let separator = PredefinedMenuItem::separator(handle)?;
+                            let _ = submenu.append(&separator);
+                            let _ = submenu.append(&size_normal);
+                            let _ = submenu.append(&size_wide);
+                        }
+                        "Help" => {
+                            // OS 標準 Help submenu (Search 等) の下に「使い方を見る」を追加
+                            let _ = submenu.append(&help_show);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             app.set_menu(menu)?;
             Ok(())
         })
-        // 「使い方を見る」クリックで JS 側に通知 (App.tsx が listen して HelpDialog を開く)。
-        // NOTE: Tauri v2 の event 名は英数字 / `-` / `/` / `:` / `_` のみ許可。`.` を含むと
-        // listen 側で `Event name must include only alphanumeric characters, ...` エラーで
-        // 登録自体が失敗するので、`menu:help-show` のようにハイフン区切りで統一する。
+        // メニュー click のハンドラ。MenuItem の id を `event.id().as_ref()` (= &str) で
+        // 比較して dispatch する。
+        // NOTE: Tauri v2 の event 名 (= app.emit / listen の channel) は英数字 / `-` / `/` /
+        // `:` / `_` のみ許可、`.` 不可 (落とし穴 #20)。MenuItem の id 自体には文字制約は
+        // 無いが、安全側として新規 id はハイフン区切り (`window-size-*`) で揃える。
         .on_menu_event(|app, event| {
-            if event.id() == "help.show" {
-                let _ = app.emit("menu:help-show", ());
+            match event.id().as_ref() {
+                "help.show" => {
+                    // 「使い方を見る」クリックで JS 側に通知 (App.tsx が listen して HelpDialog を開く)。
+                    let _ = app.emit("menu:help-show", ());
+                }
+                "window-size-normal" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_size(LogicalSize::new(1200.0, 800.0));
+                    }
+                }
+                "window-size-wide" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_size(LogicalSize::new(1440.0, 900.0));
+                    }
+                }
+                _ => {}
             }
         })
         // ⌘Q / ウィンドウ close 時にフロントエンドへ "before-quit" を発火する。
