@@ -39,6 +39,8 @@ type Props = {
   }
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
   onToggleDone?: (cell: Cell) => void
+  /** ロック中 (migration 011)。true なら Cell の編集 / drag / 空 slot click 起動を抑止する。 */
+  isReadOnly?: boolean
 }
 
 export default function GridView3x3({
@@ -47,6 +49,7 @@ export default function GridView3x3({
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate, onStartEmptySlotEdit,
   onDrill, onDragStart, onDragEnd, dropProps, onContextMenu, onToggleDone,
+  isReadOnly = false,
 }: Props) {
   const center = getCenterCell(cells)
   const centerEmpty = !center || isCellEmpty(center)
@@ -62,6 +65,7 @@ export default function GridView3x3({
           // - クリックで inline edit に入れるよう data-grid-id + data-position + onClick を付与
           // - D&D も data-grid-id + data-position を見て target 解決する
           const isCenter = isCenterPosition(i)
+          // ロック中も周辺の disabled (中心空) ルールを維持。さらに空 slot は読取専用扱いで cursor-default に。
           const isDisabled = !isCenter && centerEmpty
           const dragOverKey = `slot:${gridId}:${i}`
           const isDragOver = dragOverId === dragOverKey
@@ -75,11 +79,11 @@ export default function GridView3x3({
                 ${isCenter
                   ? 'border-[6px] border-black dark:border-white shadow-md'
                   : 'border border-neutral-300 dark:border-neutral-700'}
-                ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
+                ${isDisabled || isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
                 ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
               `}
               onClick={() => {
-                if (isDisabled) return
+                if (isDisabled || isReadOnly) return
                 onStartEmptySlotEdit?.(gridId, i)
               }}
               onDragEnter={dropProps?.onDragEnter}
@@ -117,6 +121,7 @@ export default function GridView3x3({
             dropProps={dropProps}
             onContextMenu={onContextMenu}
             onToggleDone={onToggleDone}
+            isReadOnly={isReadOnly}
           />
         )
       })}

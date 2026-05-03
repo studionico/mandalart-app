@@ -24,6 +24,7 @@ CREATE TABLE mandalarts (
   sort_order      INTEGER,                    -- ダッシュボードでのユーザー定義並び順 (migration 009 以降、nullable / 低い方が先頭)
   pinned          INTEGER NOT NULL DEFAULT 0, -- 1 = 最上位固定 (migration 009 以降)
   folder_id       TEXT,                       -- 所属フォルダ id (migration 010 以降、bootstrap 後は実質 NOT NULL)
+  locked          INTEGER NOT NULL DEFAULT 0, -- 1 = ロック中 (read-only)、migration 011 以降
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at       TEXT,                       -- 最終クラウド同期日時
@@ -39,6 +40,8 @@ CREATE TABLE mandalarts (
 > **`sort_order` / `pinned` はダッシュボード整理 UI のため (migration 009 以降)**。`getMandalarts` の ORDER BY は `pinned DESC, sort_order ASC NULLS LAST, created_at DESC`。card-to-card D&D で `reorderMandalarts(orderedIds)` が一括 0..N で振り直し、★ ボタンで `pinned` を切替える。push/pull/realtime で同期される。fallback に `updated_at` ではなく `created_at` を使うのは、編集 (タイトル変更 / セル入力) で `updated_at` が bumped されてもダッシュボード上のカード位置を動かさないため。
 
 > **`folder_id` はダッシュボードのフォルダタブ機能 (migration 010 以降)**。すべてのマンダラートは必ず 1 つのフォルダに所属する。Inbox は `folders.is_system=1` の system folder として `ensureInboxFolder()` の冪等 bootstrap で自動生成され、削除不可。タブ間 D&D で `updateMandalartFolderId(id, folderId)` を呼ぶと `sort_order` は NULL リセットされ移動先末尾に並ぶ。push/pull/realtime で同期される。
+
+> **`locked` はマンダラート単位の編集ロック (migration 011 以降)**。1 = ロック中で、エディタを開くと read-only モードになり全 mutation 経路 (cell 編集 / drill 新規 / 並列追加 / メモ / clipboard ⌘X⌘V / D&D の move・shred・stock 貼付け) が block される。閲覧 (drill / 9×9 / parallel switch / breadcrumb / copy / export / ⌘C) と マンダラート 操作 (pin / 複製 / フォルダ移動 / ゴミ箱 / 完全削除) は通る。複製時は **継承される** (`pinned` は継承しない)。push/pull/realtime で同期され別端末・別タブのエディタも即時 read-only に切り替わる。
 
 ### folders
 
@@ -351,6 +354,9 @@ tauri_plugin_sql::Builder::new()
         Migration { version: 6, description: "add grids.parent_cell_id for independent parallel centers", sql: include_str!("../migrations/006_parent_cell_id.sql"), kind: MigrationKind::Up },
         Migration { version: 7, description: "add mandalarts.show_checkbox (per-mandalart UI preference, cloud-synced)", sql: include_str!("../migrations/007_mandalart_show_checkbox.sql"), kind: MigrationKind::Up },
         Migration { version: 8, description: "add mandalarts.last_grid_id (last opened sub-grid for restore)", sql: include_str!("../migrations/008_mandalart_last_grid_id.sql"), kind: MigrationKind::Up },
+        Migration { version: 9, description: "add mandalarts.sort_order + pinned (Phase A: manual reorder + pin)", sql: include_str!("../migrations/009_mandalart_sort_pin.sql"), kind: MigrationKind::Up },
+        Migration { version: 10, description: "add folders table + mandalarts.folder_id (Phase B: folder tabs + Inbox bootstrap)", sql: include_str!("../migrations/010_folders.sql"), kind: MigrationKind::Up },
+        Migration { version: 11, description: "add mandalarts.locked (per-mandalart read-only flag, cloud-synced)", sql: include_str!("../migrations/011_mandalart_locked.sql"), kind: MigrationKind::Up },
     ])
     .build()
 ```

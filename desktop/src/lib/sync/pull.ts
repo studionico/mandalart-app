@@ -28,6 +28,7 @@ type CloudMandalart = {
   sort_order: number | null
   pinned: boolean
   folder_id: string | null
+  locked: boolean
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -75,7 +76,7 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
 
   const [f, m, g, c] = await Promise.all([
     supabase.from('folders').select('id, name, sort_order, is_system, created_at, updated_at, deleted_at'),
-    supabase.from('mandalarts').select('id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, created_at, updated_at, deleted_at'),
+    supabase.from('mandalarts').select('id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, locked, created_at, updated_at, deleted_at'),
     supabase.from('grids').select('id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at'),
     supabase.from('cells').select('id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at'),
   ])
@@ -113,14 +114,14 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     )
     if (local.length === 0) {
       await tryInsert('mandalarts',
-        'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-        [cm.id, cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
+        'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, locked, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [cm.id, cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.locked ? 1 : 0, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
       )
       mCount++
     } else if (cm.updated_at > local[0].updated_at) {
       await tryUpdate('mandalarts',
-        'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-        [cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
+        'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, locked=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+        [cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.locked ? 1 : 0, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
       )
       mCount++
     }

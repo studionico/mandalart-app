@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   getMandalarts, getMandalart, createMandalart, deleteMandalart, duplicateMandalart,
   searchMandalarts, permanentDeleteMandalart, createMandalartFromStockItem,
-  updateMandalartPinned, reorderMandalarts, updateMandalartFolderId,
+  updateMandalartPinned, updateMandalartLocked, reorderMandalarts, updateMandalartFolderId,
 } from '@/lib/api/mandalarts'
 import {
   getFolders, createFolder, updateFolderName, deleteFolder, ensureInboxFolder,
@@ -260,6 +260,21 @@ export default function DashboardPage() {
     } catch (e) {
       setToast({ message: `ピン留め失敗: ${(e as Error).message}`, type: 'error' })
       load()
+    }
+  }
+
+  /**
+   * マンダラートのロック切替 (migration 011)。楽観的 UI 更新後に DB 永続化、失敗時はロールバック。
+   * エディタを開いている別タブ / 別端末は realtime で即時反映され read-only モードに切替わる。
+   */
+  async function handleToggleLock(m: Mandalart) {
+    const next = !m.locked
+    setMandalarts((prev) => prev.map((x) => (x.id === m.id ? { ...x, locked: next } : x)))
+    try {
+      await updateMandalartLocked(m.id, next)
+    } catch (e) {
+      setMandalarts((prev) => prev.map((x) => (x.id === m.id ? { ...x, locked: !next } : x)))
+      setToast({ message: `ロック切替失敗: ${(e as Error).message}`, type: 'error' })
     }
   }
 
@@ -735,6 +750,7 @@ export default function DashboardPage() {
                     onDuplicate={() => handleDuplicate(m)}
                     onDelete={() => handleDelete(m.id)}
                     onTogglePin={() => handleTogglePin(m)}
+                    onToggleLock={() => handleToggleLock(m)}
                     onCardDragStart={dnd.onCardDragStart}
                     onCardDragEnd={dnd.onDragEnd}
                     wasRecentlyDragged={dnd.wasRecentlyDragged}
@@ -809,7 +825,7 @@ export default function DashboardPage() {
 }
 
 function MandalartCard({
-  mandalart: m, index, shift, isDragSource, onOpen, onDuplicate, onDelete, onTogglePin,
+  mandalart: m, index, shift, isDragSource, onOpen, onDuplicate, onDelete, onTogglePin, onToggleLock,
   onCardDragStart, onCardDragEnd, wasRecentlyDragged,
 }: {
   mandalart: Mandalart
@@ -826,6 +842,7 @@ function MandalartCard({
   onDuplicate: () => void
   onDelete: () => void
   onTogglePin: () => void
+  onToggleLock: () => void
   onCardDragStart: (mandalartId: string, e: React.DragEvent) => void
   onCardDragEnd: () => void
   wasRecentlyDragged: () => boolean
@@ -927,9 +944,23 @@ function MandalartCard({
       <div className="absolute bottom-1 left-2 right-2 text-[9px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
         {new Date(m.updated_at).toLocaleDateString('ja-JP')}
       </div>
+      {/* ロック中の常時 badge (hover に依存せず識別できるよう card 左下に固定表示)。
+          pointer-events-none でクリックは下のカード本体に通す (= タップでエディタを開ける)。
+          解除は hover アクションの 🔓 アイコンから。 */}
+      {m.locked && (
+        <div className="absolute bottom-1 left-1 text-[12px] text-amber-600 dark:text-amber-400 pointer-events-none select-none" aria-label="locked">
+          🔒
+        </div>
+      )}
       <HoverActionButtons
         size="md"
         actions={[
+          {
+            icon: m.locked ? '🔓' : '🔒',
+            variant: m.locked ? 'blue' : 'neutral',
+            onClick: onToggleLock,
+            title: m.locked ? 'ロックを解除' : 'ロック (編集不可にする)',
+          },
           {
             icon: m.pinned ? '★' : '☆',
             variant: m.pinned ? 'blue' : 'neutral',

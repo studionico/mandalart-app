@@ -143,6 +143,7 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
       sort_order: m.sort_order ?? null,
       pinned: !!m.pinned,
       folder_id: m.folder_id ?? null,
+      locked: !!m.locked,
       created_at: m.created_at,
       updated_at: m.updated_at,
       deleted_at: m.deleted_at ?? null,

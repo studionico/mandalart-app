@@ -44,6 +44,16 @@ export type Mandalart = {
    * 型としては nullable。ensureInboxFolder の冪等呼び出しで NULL → Inbox に揃う。
    */
   folder_id?: string | null
+  /**
+   * 編集ロック (migration 011 以降)。true = ロック中で エディタが read-only モードになる。
+   * 全 mutation 経路 (cell 編集 / drill 新規 / 並列追加 / メモ / clipboard ⌘X⌘V / D&D の
+   * move・shred・stock 貼付け) を block する。閲覧 (drill / 9×9 / parallel switch /
+   * breadcrumb / copy / export / ⌘C) と マンダラート 操作 (pin / 複製 / フォルダ移動 /
+   * ゴミ箱 / 完全削除) は通る。SQLite INTEGER 0/1、Supabase BOOLEAN。複製時は継承される
+   * (= テンプレート用途、`pinned` とは挙動が異なる)。push/pull/realtime で同期され
+   * 別端末・別タブのエディタも即時 read-only に切り替わる。
+   */
+  locked: boolean
   created_at: string
   updated_at: string
   deleted_at?: string | null

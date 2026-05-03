@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase/client'
 import { execute, query } from '@/lib/db'
+import { useEditorStore } from '@/store/editorStore'
 import type { Cell, Grid } from '@/types'
 
 type CloudCell = Cell
@@ -101,12 +102,15 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
     )
     await execute('DELETE FROM grids WHERE mandalart_id = ?', [id])
     await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+    // 開いているマンダラートが消されたら editorStore も clear
+    const current = useEditorStore.getState().currentMandalart
+    if (current && current.id === id) useEditorStore.getState().setCurrentMandalart(null)
     return true
   }
-  const m = payload.new as { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; last_grid_id?: string | null; sort_order?: number | null; pinned?: boolean; folder_id?: string | null; created_at: string; updated_at: string; deleted_at: string | null }
+  const m = payload.new as { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; last_grid_id?: string | null; sort_order?: number | null; pinned?: boolean; folder_id?: string | null; locked?: boolean; created_at: string; updated_at: string; deleted_at: string | null }
   if (!m.id) return false
-  const local = await query<{ title: string; root_cell_id: string; show_checkbox: number; last_grid_id: string | null; sort_order: number | null; pinned: number; folder_id: string | null; deleted_at: string | null; updated_at: string }>(
-    'SELECT title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, deleted_at, updated_at FROM mandalarts WHERE id = ?',
+  const local = await query<{ title: string; root_cell_id: string; show_checkbox: number; last_grid_id: string | null; sort_order: number | null; pinned: number; folder_id: string | null; locked: number; deleted_at: string | null; updated_at: string }>(
+    'SELECT title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, locked, deleted_at, updated_at FROM mandalarts WHERE id = ?',
     [m.id],
   )
   const showCheckboxInt = m.show_checkbox ? 1 : 0
@@ -114,11 +118,13 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
   const sortOrder = m.sort_order ?? null
   const pinnedInt = m.pinned ? 1 : 0
   const folderId = m.folder_id ?? null
+  const lockedInt = m.locked ? 1 : 0
   if (local.length === 0) {
     await execute(
-      'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      [m.id, m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, folderId, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
+      'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, locked, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [m.id, m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, folderId, lockedInt, m.created_at, m.updated_at, m.deleted_at, m.updated_at],
     )
+    syncCurrentMandalartFromCloud(m)
     return true
   }
   if (!tsNewer(m.updated_at, local[0].updated_at)) return false
@@ -130,6 +136,7 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
     (local[0].sort_order ?? null) === sortOrder &&
     Number(local[0].pinned) === pinnedInt &&
     (local[0].folder_id ?? null) === folderId &&
+    Number(local[0].locked) === lockedInt &&
     tsEqual(local[0].deleted_at, m.deleted_at)
   if (contentSame) {
     // echo: timestamp だけ揃えて UI reload はスキップ
@@ -140,10 +147,33 @@ export async function applyMandalartChange(payload: { eventType: string; new: Re
     return false
   }
   await execute(
-    'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
-    [m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, folderId, m.updated_at, m.deleted_at, m.updated_at, m.id],
+    'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, locked=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
+    [m.title, m.root_cell_id, showCheckboxInt, lastGridId, sortOrder, pinnedInt, folderId, lockedInt, m.updated_at, m.deleted_at, m.updated_at, m.id],
   )
+  syncCurrentMandalartFromCloud(m)
   return true
+}
+
+/**
+ * エディタが開いている対象 mandalart に対する realtime 更新を editorStore.currentMandalart にも反映する。
+ * 別端末/別タブで `locked` を切り替えた瞬間にエディタの read-only モードを即時反映するため。
+ */
+function syncCurrentMandalartFromCloud(m: { id: string; title: string; root_cell_id: string; show_checkbox?: boolean; last_grid_id?: string | null; sort_order?: number | null; pinned?: boolean; folder_id?: string | null; locked?: boolean; created_at: string; updated_at: string; deleted_at: string | null }): void {
+  const current = useEditorStore.getState().currentMandalart
+  if (!current || current.id !== m.id) return
+  useEditorStore.getState().setCurrentMandalart({
+    ...current,
+    title: m.title,
+    root_cell_id: m.root_cell_id,
+    show_checkbox: !!m.show_checkbox,
+    last_grid_id: m.last_grid_id ?? null,
+    sort_order: m.sort_order ?? null,
+    pinned: !!m.pinned,
+    folder_id: m.folder_id ?? null,
+    locked: !!m.locked,
+    updated_at: m.updated_at,
+    deleted_at: m.deleted_at,
+  })
 }
 
 /**

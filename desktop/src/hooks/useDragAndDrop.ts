@@ -109,6 +109,13 @@ export function useDragAndDrop(
   onCellsUpdated?: (updated: Cell[]) => void,
   onStockReplaceDrop?: (stockItemId: string, targetCellId: string) => void,
   onActionDrop?: (action: ActionDropType, cellId: string) => void,
+  /**
+   * ロックフラグ (migration 011 以降)。true なら drag start も drop も無効化する。
+   * cell source / stock source / 4 アクションアイコン すべてを block。
+   * Cell.tsx の `isReadOnly` と二重 defensive (UI 側で draggable=false になるが、
+   * stock など別 source からの drop も止めるため hook 側にも入れる)。
+   */
+  isLocked?: boolean,
 ) {
   const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -120,14 +127,22 @@ export function useDragAndDrop(
   // ===== Source 側 =====
 
   const handleDragStart = useCallback((cell: Cell, e: React.DragEvent) => {
+    if (isLocked) {
+      // ロック中は drag を始めさせない (Cell.tsx の draggable=false でほぼ防げるが defensive)
+      e.preventDefault()
+      return
+    }
     sourceRef.current = { kind: 'cell', cell }
     setDragSourceId(cell.id)
     setDragPayload(e, { kind: 'cell', cellId: cell.id })
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
     applyCleanDragImage(e, e.currentTarget as HTMLElement)
-  }, [])
+  }, [isLocked])
 
   const handleStockItemDragStart = useCallback((itemId: string, e: React.DragEvent) => {
+    // ストック → cell drop は target 側がロック中なら受け付けない (canAcceptDrop で防ぐ)。
+    // ただし stock 側が drag を始める動作自体はストックパネル内で完結するので block しない
+    // (= dashboard など別画面でドロップする可能性があるため)。
     sourceRef.current = { kind: 'stock', itemId }
     setDragSourceId(`stock:${itemId}`)
     setDragPayload(e, { kind: 'stock', stockItemId: itemId })
@@ -151,6 +166,7 @@ export function useDragAndDrop(
 
     return {
       onDragEnter: (e: React.DragEvent) => {
+        if (isLocked) return  // ロック中は drop target にもなれない
         const src = sourceRef.current
         if (!src) return
         const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
@@ -161,6 +177,7 @@ export function useDragAndDrop(
         setHoveredAction(null)
       },
       onDragOver: (e: React.DragEvent) => {
+        if (isLocked) return
         const src = sourceRef.current
         if (!src) return
         const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
@@ -184,6 +201,7 @@ export function useDragAndDrop(
         setDragSourceId(null)
         setDragOverId(null)
         setHoveredAction(null)
+        if (isLocked) return  // ロック中は drop も無効
         if (!src) return
         const target = readDropTarget(e.currentTarget as HTMLElement, cellsRef.current)
         if (!target) return
@@ -234,21 +252,25 @@ export function useDragAndDrop(
         }
       },
     }
-  }, [onComplete, onStockPaste, pushUndo, onCellsUpdated, onStockReplaceDrop])
+  }, [onComplete, onStockPaste, pushUndo, onCellsUpdated, onStockReplaceDrop, isLocked])
 
   // ===== Target 側 (4 アクションアイコン) =====
 
   const getActionDropProps = useCallback(
     (action: ActionDropType) => ({
       onDragEnter: (e: React.DragEvent) => {
+        if (isLocked) return
         const src = sourceRef.current
         // アクションアイコンは cell source のみ受ける (stock は対象外)
         if (src?.kind !== 'cell') return
+        // copy / export は閲覧操作なのでロック中も通したいが、ロック中はそもそも drag start
+        // できないのでこの分岐に来ない (defensive で全アクション一律 block)。
         e.preventDefault()
         setHoveredAction(action)
         setDragOverId(null)
       },
       onDragOver: (e: React.DragEvent) => {
+        if (isLocked) return
         const src = sourceRef.current
         if (src?.kind !== 'cell') return
         e.preventDefault()
@@ -263,11 +285,12 @@ export function useDragAndDrop(
         setDragSourceId(null)
         setDragOverId(null)
         setHoveredAction(null)
+        if (isLocked) return
         if (src?.kind !== 'cell') return
         onActionDrop?.(action, src.cell.id)
       },
     }),
-    [onActionDrop],
+    [onActionDrop, isLocked],
   )
 
   return {

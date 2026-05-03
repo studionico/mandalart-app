@@ -25,6 +25,8 @@ type Props = {
     onDrop: (e: React.DragEvent) => void
   }
   dragSourceId?: string | null
+  /** ロック中 (migration 011)。MemoTab textarea を readOnly にして編集を block する。 */
+  isReadOnly?: boolean
 }
 
 /**
@@ -38,6 +40,7 @@ type Props = {
 export default function SidePanel({
   gridId, gridMemo, onStockPaste, isDragging, hoveredAction, stockReloadKey,
   onStockItemDragStart, onStockDragEnd, getActionDropProps, dragSourceId,
+  isReadOnly = false,
 }: Props) {
   const [tab, setTab] = useState<Tab>('memo')
 
@@ -88,7 +91,7 @@ export default function SidePanel({
         {/* memo / stock タブの DOM は state を保持するため display:none で隠すだけ */}
         <div className={`h-full ${isDraggingCellToActions ? 'invisible' : ''}`}>
           {tab === 'memo' ? (
-            <MemoTab gridId={gridId} initialMemo={gridMemo} />
+            <MemoTab gridId={gridId} initialMemo={gridMemo} isReadOnly={isReadOnly} />
           ) : (
             <StockTab
               onPaste={onStockPaste}

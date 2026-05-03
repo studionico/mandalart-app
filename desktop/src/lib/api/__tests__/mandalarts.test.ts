@@ -9,7 +9,7 @@ import {
   deleteMandalart, restoreMandalart, getDeletedMandalarts,
   permanentDeleteMandalart, updateMandalartTitle,
   updateMandalartPinned, updateMandalartSortOrder, reorderMandalarts,
-  duplicateMandalart,
+  updateMandalartLocked, duplicateMandalart,
 } from '@/lib/api/mandalarts'
 
 let db: Database.Database
@@ -245,6 +245,60 @@ describe('Phase A: 並び替え + ピン留め (migration 009)', () => {
     const list = await getMandalarts()
     // 期待: pinned 先頭、次に sort_order=0 の ordered、その後 sort_order=NULL を created_at 新→旧
     expect(list.map((m) => m.id)).toEqual([pinned.id, ordered.id, newer.id, old.id])
+  })
+})
+
+describe('migration 011: ロック機能', () => {
+  // SQLite INTEGER 0/1 は better-sqlite3 で number で返る。pinned / show_checkbox と同じく
+  // テストは truthy / 0/1 比較で行う (実 runtime の Tauri ↔ Supabase 経路で boolean 正規化される)。
+  it('createMandalart は locked=0 (未ロック) で作る', async () => {
+    const m = await createMandalart('テスト')
+    expect(!!m.locked).toBe(false)
+    const row = db.prepare('SELECT locked FROM mandalarts WHERE id = ?').get(m.id) as { locked: number }
+    expect(row.locked).toBe(0)
+  })
+
+  it('updateMandalartLocked は locked カラムを 1/0 に切替える', async () => {
+    const m = await createMandalart()
+    await updateMandalartLocked(m.id, true)
+    const row1 = db.prepare('SELECT locked FROM mandalarts WHERE id = ?').get(m.id) as { locked: number }
+    expect(row1.locked).toBe(1)
+    await updateMandalartLocked(m.id, false)
+    const row2 = db.prepare('SELECT locked FROM mandalarts WHERE id = ?').get(m.id) as { locked: number }
+    expect(row2.locked).toBe(0)
+  })
+
+  it('updateMandalartLocked は updated_at を bump して push 同期に乗せる', async () => {
+    const m = await createMandalart()
+    const before = (db.prepare('SELECT updated_at FROM mandalarts WHERE id = ?').get(m.id) as { updated_at: string }).updated_at
+    await new Promise((r) => setTimeout(r, 5))
+    await updateMandalartLocked(m.id, true)
+    const after = (db.prepare('SELECT updated_at FROM mandalarts WHERE id = ?').get(m.id) as { updated_at: string }).updated_at
+    expect(after > before).toBe(true)
+  })
+
+  it('getMandalart は locked を伝搬する (round-trip)', async () => {
+    const m = await createMandalart()
+    const m1 = await getMandalart(m.id)
+    expect(!!m1?.locked).toBe(false)
+    await updateMandalartLocked(m.id, true)
+    const m2 = await getMandalart(m.id)
+    expect(!!m2?.locked).toBe(true)
+  })
+
+  it('duplicateMandalart は locked を継承する (テンプレート複製挙動)', async () => {
+    const src = await createMandalart('original')
+    await updateMandalartLocked(src.id, true)
+    const dup = await duplicateMandalart(src.id)
+    expect(!!dup.locked).toBe(true)
+    const row = db.prepare('SELECT locked FROM mandalarts WHERE id = ?').get(dup.id) as { locked: number }
+    expect(row.locked).toBe(1)
+  })
+
+  it('duplicateMandalart はロック未設定でも未ロックで複製できる', async () => {
+    const src = await createMandalart('original')
+    const dup = await duplicateMandalart(src.id)
+    expect(!!dup.locked).toBe(false)
   })
 })
 

@@ -70,6 +70,12 @@ pub fn run() {
                             sql: include_str!("../migrations/010_folders.sql"),
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 11,
+                            description: "add mandalarts.locked (per-mandalart read-only flag, cloud-synced)",
+                            sql: include_str!("../migrations/011_mandalart_locked.sql"),
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

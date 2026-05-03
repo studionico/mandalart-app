@@ -35,6 +35,8 @@ type Props = {
     onDrop: (e: React.DragEvent) => void
   }
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
+  /** ロック中 (migration 011)。Cell の編集 / drag を抑止する。 */
+  isReadOnly?: boolean
 }
 
 export default function GridView9x9({
@@ -43,6 +45,7 @@ export default function GridView9x9({
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
   onDrill, onDragStart, onDragEnd, dropProps, onContextMenu,
+  isReadOnly = false,
 }: Props) {
   const rootCellMap = new Map(rootCells.map((c) => [c.position, c]))
   const rootCenter = getCenterCell(rootCells)
@@ -96,6 +99,7 @@ export default function GridView9x9({
                     dropProps={dropProps}
                     onContextMenu={onContextMenu}
                     size="small"
+                    isReadOnly={isReadOnly}
                   />
                 )
               })}
@@ -151,6 +155,7 @@ export default function GridView9x9({
                     dropProps={dropProps}
                     onContextMenu={onContextMenu}
                     size="small"
+                    isReadOnly={isReadOnly}
                   />
                 )
               }
@@ -181,6 +186,7 @@ export default function GridView9x9({
                     dropProps={dropProps}
                     onContextMenu={onContextMenu}
                     size="small"
+                    isReadOnly={isReadOnly}
                   />
                 )
               }

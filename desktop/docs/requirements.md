@@ -227,6 +227,29 @@ Shift+Tab は逆順
 - **完全削除の 2 クリック確認**: Tauri v2 の WebView は `window.confirm` が無効なので、ブラウザダイアログは使わず「1 回目クリックでボタン表記を『本当に削除?』に切替、2 回目で実行、4 秒放置で自動リセット」という state ベース UI を採用
 - **完全削除の cloud 反映**: ローカル SQLite から物理削除した後、サインイン中であれば Supabase 側も `cells → grids → mandalarts` の順で `delete` する。これをやらないと次回 pull で cloud の `deleted_at` 付き行が再挿入されてゴミ箱に復活してしまう
 
+### ロック (編集不可)
+マンダラート単位の **ロックフラグ** (`mandalarts.locked`、migration 011 以降)。完成版を保護したり誤操作で内容を壊すのを防ぐ。
+
+- **トグル UI**: ダッシュボードカードの hover アクション 🔒 / 🔓 アイコン (HoverActionButtons の先頭)
+- **ロック中の常時 badge**: card 左下に 🔒 を `pointer-events-none` で表示 (hover に依存せず識別できる)
+- **エディタは開いたら read-only モード**: header 直下にロックバナー (`🔒 このマンダラートはロックされています — 編集するにはダッシュボードでロックを解除してください`) を表示。エディタ内ではロック解除できない (誤操作防止のため意図的)
+- **ロック中に block される操作**:
+  - cell の編集 (拡大エディタの色 / 画像 / commit、inline edit、空 slot click 起動、ダブルクリック編集起動)
+  - drill 時の **新規 sub-grid 作成** (既存 sub-grid への drill-down は通す)
+  - 並列グリッドの追加 / 削除
+  - メモタブの textarea 編集 (readOnly + grayed-out、プレビューは通常通り閲覧可能)
+  - clipboard `⌘X` (cut)、`⌘V` (paste)、context menu の cut / paste / import
+  - D&D の `move` / `shred` (cell-to-cell drag 自体が起動しない、stock → cell の paste も block)
+  - チェックボックス state の切替 (`handleToggleDone`)
+- **ロック中も通る操作 (閲覧 / マンダラート操作)**:
+  - drill / drill-up / 9×9 切替 / parallel switch / breadcrumb / home navigation
+  - `⌘C` (copy)、context menu の copy / stock 追加 (= 元 cell 不変)
+  - D&D の 4 アクション `copy` / `export` (読み取り操作)、ダッシュボードカード経由の copy / export / pin / 複製 / フォルダ移動 / ゴミ箱 / 完全削除 (ロックは「中身を編集させない」目的、削除権は別)
+- **複製時の継承**: `pinned` は継承しないが、`locked` は **継承する** (テンプレートとしてロック済みマンダラートを複製する用途を想定。新コピーもロック状態で渡る)
+- **クロスタブ / クロスデバイス即時反映**: editorStore の `currentMandalart` を realtime の `applyMandalartChange` で同期する。1 つの端末でロック切替 → 別タブで開いているエディタの banner / mutation 状態が即時更新される
+- **ロック ≠ 削除制限**: ロック中マンダラートも `deleteMandalart` (ゴミ箱) / `permanentDeleteMandalart` (完全削除) は許可する。ピン / 複製 / フォルダ移動 / インポート / エクスポートも同様
+- **将来 out of scope**: per-cell や per-grid のロック (部分ロック) / PIN 認証 / エディタヘッダーへのロックトグル配置 (= エディタ内で気軽に解除できると誤操作防止意味が薄れるため意図的に外す)
+
 ---
 
 ## 空データの非保存ルール

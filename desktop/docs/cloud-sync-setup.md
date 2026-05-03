@@ -187,6 +187,18 @@ ALTER TABLE mandalarts ADD COLUMN folder_id text;
 
 RLS は user_id ベースで他デバイスと折衝なし。タブ追加 / 名前変更 / 削除 / カードのフォルダ移動はすべて push/pull/realtime で同期されます。
 
+### 必須スキーマ変更: マンダラート ロック (`locked`)
+
+migration 011 で「マンダラート単位のロック (= 編集不可)」を追加しました。Supabase 側では以下を実行してください:
+
+```sql
+ALTER TABLE mandalarts ADD COLUMN locked boolean NOT NULL DEFAULT false;
+```
+
+ローカル側は migration 011 で自動的に適用されます (SQLite は `INTEGER NOT NULL DEFAULT 0`)。
+SQLite INTEGER 0/1 ↔ Supabase BOOLEAN は自動 boolean 正規化で互換 (`done` / `show_checkbox` / `pinned` と同パターン)。
+RLS ポリシーへの影響はなし。ロック切替は別端末・別タブにも realtime で即時反映されエディタも自動 read-only に切り替わります。
+
 ---
 
 ## ステップ 4: Auth 設定

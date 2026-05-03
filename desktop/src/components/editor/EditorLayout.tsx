@@ -71,10 +71,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const navigate = useNavigate()
   const {
     currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
-    setMandalartId, setCurrentGrid, setViewMode,
+    setMandalartId, setCurrentMandalart, setCurrentGrid, setViewMode,
     pushBreadcrumb, popBreadcrumbTo, setBreadcrumb, updateBreadcrumbItem,
     bumpFontLevel, resetFontLevel,
   } = useEditorStore()
+  // ロック状態は store の currentMandalart 経由で購読 (migration 011 以降)。realtime で別端末/別タブの
+  // ロック切替が即時反映される。詳細は editorStore.ts の `currentMandalart` コメント参照。
+  const isLocked = useEditorStore((s) => s.currentMandalart?.locked ?? false)
 
   // セル左上 done チェックボックス UI の表示 ON/OFF。マンダラート単位で記憶 (migration 007)。
   // mandalartId 変更時に DB から復元、トグル時は楽観的更新 + DB 永続化。
@@ -86,12 +89,22 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         const m = await getMandalart(mandalartId)
         if (cancelled) return
         setShowCheckbox(!!m?.show_checkbox)
+        // 同じ fetch 結果を editorStore.currentMandalart にセットして isLocked 等の購読源にする (migration 011)。
+        setCurrentMandalart(m)
       } catch {
-        if (!cancelled) setShowCheckbox(false)
+        if (!cancelled) {
+          setShowCheckbox(false)
+          setCurrentMandalart(null)
+        }
       }
     })()
     return () => { cancelled = true }
-  }, [mandalartId])
+  }, [mandalartId, setCurrentMandalart])
+
+  // unmount 時に store をクリアして次回エディタ起動までゴミを残さない (Cell の isReadOnly 等が誤購読しないように)。
+  useEffect(() => {
+    return () => { setCurrentMandalart(null) }
+  }, [setCurrentMandalart])
 
   const handleToggleShowCheckbox = useCallback(async () => {
     const next = !showCheckbox
@@ -429,6 +442,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const pendingCellId = pendingEdit ? `pending:${pendingEdit.gridId}:${pendingEdit.position}` : null
 
   function handleStartEmptySlotEdit(targetGridId: string, position: number) {
+    if (isLocked) return  // ロック中は新規編集を起動しない (migration 011)
     setPendingEdit({ gridId: targetGridId, position })
     setInlineEditingCellId(`pending:${targetGridId}:${position}`)
   }
@@ -752,6 +766,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }, [reload])
 
   const handleStockPasteDrop = useCallback(async (stockItemId: string, targetCellId: string) => {
+    if (isLocked) return  // ロック中は stock → cell 貼付けを block (migration 011)
     try {
       await pasteFromStock(stockItemId, targetCellId)
       reloadAll()
@@ -759,19 +774,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     } catch (e) {
       setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
     }
-  }, [reloadAll])
+  }, [reloadAll, isLocked])
 
   // ストック → 入力ありの周辺セル drop: 確認 dialog を開く
   const [replaceConfirm, setReplaceConfirm] = useState<{ stockItemId: string; targetCellId: string; targetText: string } | null>(null)
 
   const handleStockReplaceDrop = useCallback((stockItemId: string, targetCellId: string) => {
+    if (isLocked) return  // ロック中は確認 dialog も開かない
     const target = dndCells.find((c) => c.id === targetCellId)
     setReplaceConfirm({
       stockItemId,
       targetCellId,
       targetText: target?.text ?? '',
     })
-  }, [dndCells])
+  }, [dndCells, isLocked])
 
   const handleReplaceConfirm = useCallback(async () => {
     if (!replaceConfirm) return
@@ -851,6 +867,10 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }, [mandalartId])
 
   const handleActionDrop = useCallback(async (action: ActionDropType, cellId: string) => {
+    // ロック中は shred / move (mutation 系) を block。copy / export (読み取り) は通す (migration 011)。
+    // ただし上層の useDragAndDrop でも isLocked=true なら drop event 自体が来ないので、
+    // ここは defensive (テストや将来の経路追加に備える)。
+    if (isLocked && (action === 'shred' || action === 'move')) return
     const cell = dndCells.find((c) => c.id === cellId)
     const isCenter = cell?.position === CENTER_POSITION
     const targetText = cell?.text ?? ''
@@ -938,7 +958,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         return
       }
     }
-  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate, runConvergeAnim, captureCellSource])
+  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate, runConvergeAnim, captureCellSource, isLocked])
 
   const handleShredConfirm = useCallback(async () => {
     if (!shredConfirm) return
@@ -1035,6 +1055,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     handleDndCellsUpdated,
     handleStockReplaceDrop,
     handleActionDrop,
+    isLocked,  // ロック中は drag/drop 全 path を block (migration 011)
   )
 
   // クリップボードショートカット用: マウス位置を追跡
@@ -1043,6 +1064,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   dndCellsRef.current = dndCells
   // 最新の handlePaste を保持（useEffect の []-deps クロージャ越しでも最新参照を使うため）
   const handlePasteRef = useRef<(target: Cell) => Promise<void>>(async () => {})
+  // 最新の isLocked を keydown listener (deps=[]) から参照するための ref (migration 011)
+  const isLockedRef = useRef(isLocked)
+  isLockedRef.current = isLocked
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
@@ -1066,6 +1090,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       if (e.key === 'c' || e.key === 'x') {
         const cell = getHoveredCell()
         if (!cell || isCellEmpty(cell)) return
+        // ロック中は ⌘X (cut = 元セル空化を伴う) を block。⌘C は通す (migration 011)。
+        if (e.key === 'x' && isLockedRef.current) return
         e.preventDefault()
         const mode = e.key === 'x' ? 'cut' : 'copy'
         useClipboardStore.getState().set(mode, cell.id)
@@ -1075,6 +1101,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         if (!cell) return
         const cb = useClipboardStore.getState()
         if (!cb.sourceCellId || !cb.mode) return
+        if (isLockedRef.current) return  // ロック中は ⌘V (paste) を block
         e.preventDefault()
         handlePasteRef.current(cell)
       }
@@ -1404,7 +1431,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         setOrbit9(null)
       }
     } else if (!isCellEmpty(cell)) {
-      // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ
+      // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ。
+      // ロック中は新規 grid 作成を行わない (既存サブグリッドへの drill-down は上の children.length>0 経路で許可)。
+      if (isLocked) return
       // 新モデル: center_cell_id = cell.id (親の周辺セルがそのまま子グリッドの中心になる)
       // 中心の text/image/color/done は親セルそのものなので別途コピー不要
       const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, centerCellId: cell.id, sortOrder: 0 })
@@ -1489,11 +1518,18 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   // インライン編集の開始 (シングルクリック)
   function handleCellStartInlineEdit(cell: Cell) {
+    if (isLocked) return  // ロック中は編集を起動しない (migration 011)
     setInlineEditingCellId(cell.id)
   }
 
   // インライン編集の確定 (blur / Esc / Tab / Cmd+Enter)
   async function handleCellCommitInlineEdit(cell: Cell, text: string) {
+    if (isLocked) {
+      // ロック中: 万が一 inline edit が開いてしまっていても commit は通さない (defensive)
+      setInlineEditingCellId(null)
+      setPendingEdit(null)
+      return
+    }
     setInlineEditingCellId(null)
     // pending edit (空 slot からの新規) を判定
     const isPending = cell.id.startsWith('pending:')
@@ -1528,6 +1564,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // Tab キーでの次のセルへの移動
   // currentText: 直前にコミットしたテキスト（DB 反映前の状態を見る必要があるため引数で受け取る）
   function handleCellInlineNavigate(currentPosition: number, currentText: string, reverse: boolean) {
+    if (isLocked) return  // ロック中は Tab 移動も無効 (新規 slot edit を起こさない)
     const cells = gridData?.cells ?? []
     // gridData は更新前なので、今 commit したテキストで上書きしたバーチャル配列で判定する
     // currentPosition の cell が無い (空 slot からの pending edit commit) ケースは push する
@@ -1562,6 +1599,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   async function handleSaveCell(cellId: string, params: { text: string; image_path: string | null; color: string | null }) {
+    if (isLocked) return  // ロック中は cell 保存を block (拡大エディタ経由・色/画像も含む)
     // pending edit (空 slot からの新規) で expand editor (色 / 画像) が呼ばれたケース。
     // synthetic cell.id を持っているので gridData には居ない。upsertCellAt で先に INSERT する。
     if (cellId.startsWith('pending:') && pendingEdit) {
@@ -1802,6 +1840,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   async function handleAddParallel() {
     if (slide) return
+    if (isLocked) return  // ロック中は並列追加 (新規 grid 作成) を block (migration 011)
 
     // migration 006 以降: 並列グリッドは独立した center cell を持つ。
     // parent_cell_id は現在 grid から継承し (root なら null、drilled なら drill 元 cell)、
@@ -1899,6 +1938,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         setToast({ message: 'コピーしました', type: 'info' })
         break
       case 'cut':
+        if (isLocked) return  // ロック中は cut (paste 時に source 削除) を block
         clipboard.set('cut', cell.id)
         setToast({ message: 'カットしました', type: 'info' })
         break
@@ -1906,11 +1946,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         await handlePaste(cell)
         break
       case 'stock':
+        // stock 追加は cell の copy 操作 (元 cell に変化なし) なのでロック中も通す
         await addToStock(cell.id)
         setStockReloadKey((k) => k + 1)
         setToast({ message: 'ストックに追加しました', type: 'success' })
         break
       case 'import':
+        if (isLocked) return  // ロック中は import (cell 編集) を block
         setImportTarget({
           cellId: cell.id,
           cellLabel: cell.text || `セル ${cell.position + 1}`,
@@ -1920,6 +1962,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   async function handlePaste(target: Cell) {
+    if (isLocked) return  // ロック中は paste を block (migration 011)
     if (!clipboard.sourceCellId || !clipboard.mode) {
       setToast({ message: 'クリップボードが空です', type: 'info' })
       return
@@ -1950,6 +1993,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
   // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。
   async function handleToggleDone(cell: Cell) {
+    if (isLocked) return  // ロック中はチェックボックス state も変更させない (migration 011)
     try {
       await toggleCellDone(cell.id)
       reloadAll()
@@ -1959,6 +2003,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   async function handleStockPaste(item: StockItem) {
+    if (isLocked) return  // ロック中はストックからの貼付けを block (migration 011)
     // インライン編集中のセルを貼り付け先にする (詳細編集モーダル廃止後の動線)
     let targetCellId = inlineEditingCellId
     if (!targetCellId) {
@@ -2126,6 +2171,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           </div>
         </div>
       </header>
+
+      {/* ロックバナー (migration 011): マンダラートがロック中のみ表示。
+          編集経路は EditorLayout 全 mutation handler が isLocked early-return ガード済み。
+          解除はダッシュボードカードの 🔒 トグル経由 (エディタ内では切替できない仕様)。 */}
+      {isLocked && (
+        <div className="shrink-0 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
+          <span aria-hidden="true">🔒</span>
+          <span>このマンダラートはロックされています — 編集するにはダッシュボードでロックを解除してください</span>
+        </div>
+      )}
 
       {/* メインエリア */}
       <div className="flex flex-1 overflow-hidden">
@@ -2900,6 +2955,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       dropProps={cellOrSlotDropProps}
                       onContextMenu={handleContextMenu}
                       onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                      isReadOnly={isLocked}
                     />
                   )}
                   {gridData && viewMode === '9x9' && gridSize > 0 && (
@@ -2928,6 +2984,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onInlineNavigate={NOOP_EDIT}
                       onDrill={handleCellDrill}
                       onContextMenu={PREVENT_CONTEXT_MENU}
+                      isReadOnly={isLocked}
                     />
                   )}
                 </>
@@ -2990,6 +3047,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             onStockDragEnd={handleDragEnd}
             getActionDropProps={getActionDropProps}
             dragSourceId={dragSourceId}
+            isReadOnly={isLocked}
           />
         </div>
       </div>

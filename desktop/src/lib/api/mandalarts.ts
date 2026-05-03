@@ -119,6 +119,7 @@ export async function createMandalart(title = '', folderId?: string | null): Pro
     sort_order: sortOrder,
     pinned: false,
     folder_id: folderId ?? null,
+    locked: false,
     created_at: ts,
     updated_at: ts,
     user_id: '',
@@ -151,6 +152,20 @@ export async function updateMandalartPinned(id: string, pinned: boolean): Promis
   await execute(
     'UPDATE mandalarts SET pinned = ?, updated_at = ? WHERE id = ?',
     [pinned ? 1 : 0, now(), id],
+  )
+}
+
+/**
+ * マンダラートのロック状態を更新する (migration 011 以降)。
+ * locked=1 でエディタが read-only モードになり全 mutation 経路が block される
+ * (詳細は types/index.ts の `Mandalart.locked` 参照)。`updated_at` も bump して
+ * push 同期に乗せ、別端末・別タブの editorStore.currentMandalart も realtime で
+ * 即時更新される。
+ */
+export async function updateMandalartLocked(id: string, locked: boolean): Promise<void> {
+  await execute(
+    'UPDATE mandalarts SET locked = ?, updated_at = ? WHERE id = ?',
+    [locked ? 1 : 0, now(), id],
   )
 }
 
@@ -379,15 +394,17 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
   const newRootCellId = cellIdMap.get(src.root_cell_id)
   if (!newRootCellId) throw new Error(`root_cell_id not found in source cells: ${src.root_cell_id}`)
 
-  // show_checkbox / folder_id はコピー元の設定を継承する (テンプレ複製の自然な挙動)。
+  // show_checkbox / folder_id / locked はコピー元の設定を継承する (テンプレ複製の自然な挙動)。
   // last_grid_id は継承しない (新規コピーは root から始まるのが自然) → 列省略で NULL になる。
   // pinned は継承しない (複製は未ピンで開始)。
+  // locked は継承する → ロック済みマンダラートをテンプレートとして複製する用途を想定
+  //   (新コピーもロック状態で渡る; ダッシュボードでロック解除すれば編集可能になる)。
   // sort_order は他の作成経路 (createMandalart / importFromJSON) と統一して `nextTopSortOrder`
   // で「folder の先頭」に配置 (Inbox / Archive 共通: reorder 済みでも必ず top に並ぶ)。
   const sortOrder = src.folder_id ? await nextTopSortOrder(src.folder_id) : null
   await execute(
-    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, folder_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, src.folder_id ?? null, sortOrder, ts, ts],
+    'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, folder_id, sort_order, locked, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [newMandalartId, src.title, newRootCellId, src.show_checkbox ? 1 : 0, src.folder_id ?? null, sortOrder, src.locked ? 1 : 0, ts, ts],
   )
 
   for (const g of allGrids) {
@@ -428,6 +445,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     sort_order: sortOrder,
     pinned: false,
     folder_id: src.folder_id ?? null,
+    locked: src.locked,
     created_at: ts,
     updated_at: ts,
     user_id: '',

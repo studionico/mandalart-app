@@ -63,6 +63,14 @@ updateMandalartLastGridId(id: string, lastGridId: string | null): Promise<void>
 // ピン留めフラグを切替える (migration 009 以降)。pinned=1 で getMandalarts の ORDER BY で最上位固定。
 updateMandalartPinned(id: string, pinned: boolean): Promise<void>
 
+// マンダラートのロック (= 編集不可) を切替える (migration 011 以降)。locked=1 で
+// エディタが read-only モードになり全 mutation 経路 (cell 編集 / drill 新規 / 並列追加 /
+// メモ / clipboard ⌘X⌘V / D&D の move・shred・stock 貼付け) を block する。閲覧
+// (drill / 9×9 / parallel switch / breadcrumb / copy / export / ⌘C) と マンダラート
+// 操作 (pin / 複製 / フォルダ移動 / ゴミ箱 / 完全削除) は通る。`updated_at` も bump して
+// push 同期に乗せ、別端末・別タブの editorStore.currentMandalart も realtime で即時更新される。
+updateMandalartLocked(id: string, locked: boolean): Promise<void>
+
 // 単体のマンダラートに sort_order を直接設定する (migration 009 以降)。一覧全体を一括振り直す
 // 用途には reorderMandalarts を使う方が整合的。
 updateMandalartSortOrder(id: string, sortOrder: number): Promise<void>
@@ -92,7 +100,8 @@ deleteMandalart(id: string): Promise<void>
 searchMandalarts(q: string): Promise<Mandalart[]>
 
 // マンダラートを丸ごと複製 (全グリッド / セル / サブツリーを再帰複製)
-// タイトル / show_checkbox はソースのまま継承される
+// タイトル / show_checkbox / locked はソースのまま継承される (locked はテンプレート用途を想定。
+// 一方で pinned は継承しない = 複製は未ピンで開始)
 duplicateMandalart(sourceId: string): Promise<Mandalart>
 
 // ソフトデリートされたマンダラートを削除日降順で取得 (ゴミ箱)
@@ -526,6 +535,11 @@ nextTabPosition(current: number, reverse?: boolean): number
 ```typescript
 // 状態
 mandalartId: string | null
+// 現在開いているマンダラート全体 (migration 011 以降)。EditorLayout 起動時に getMandalart(id) の
+// 結果を setCurrentMandalart で投入、unmount で null クリア。realtime の applyMandalartChange でも
+// 対象 id 一致時に同期され、別端末/別タブで `locked` 切替時にエディタ read-only モードが即時反映される。
+// 主用途は `useEditorStore((s) => s.currentMandalart?.locked ?? false)` のロック購読。
+currentMandalart: Mandalart | null
 currentGridId: string | null
 viewMode: '3x3' | '9x9'
 breadcrumb: BreadcrumbItem[]
@@ -543,6 +557,7 @@ type BreadcrumbItem = {
 
 // アクション
 setMandalartId(id: string): void
+setCurrentMandalart(m: Mandalart | null): void
 setCurrentGrid(gridId: string | null): void
 setViewMode(mode: '3x3' | '9x9'): void
 pushBreadcrumb(item: BreadcrumbItem): void

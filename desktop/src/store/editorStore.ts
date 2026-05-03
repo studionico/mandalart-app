@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { STORAGE_KEYS } from '@/constants/storage'
-import type { Cell } from '@/types'
+import type { Cell, Mandalart } from '@/types'
 
 export type ViewMode = '3x3' | '9x9'
 
@@ -52,6 +52,17 @@ function persistFontLevel(level: number) {
 
 type EditorState = {
   mandalartId: string | null
+  /**
+   * 現在開いているマンダラート全体 (migration 011 以降)。EditorLayout 起動時に
+   * `getMandalart(id)` の結果を `setCurrentMandalart` で投入し、unmount で null クリアする。
+   * realtime の `applyMandalartChange` でも対象 id 一致時に同期されるので、別端末/別タブで
+   * `locked` を切替えるとエディタの read-only モードが即時反映される。
+   *
+   * 主用途は `locked` の購読 (`useEditorStore((s) => s.currentMandalart?.locked ?? false)`)。
+   * ダッシュボードカード経由のロック切替は楽観的 UI 更新と push 同期で完結し、本 store は
+   * エディタ内部での read-only 表示専用。
+   */
+  currentMandalart: Mandalart | null
   currentGridId: string | null
   viewMode: ViewMode
   breadcrumb: BreadcrumbItem[]
@@ -59,6 +70,7 @@ type EditorState = {
   fontScale: number   // 1.1^fontLevel (派生値、Cell に渡す)
 
   setMandalartId: (id: string) => void
+  setCurrentMandalart: (m: Mandalart | null) => void
   setCurrentGrid: (gridId: string | null) => void
   setViewMode: (mode: ViewMode) => void
   pushBreadcrumb: (item: BreadcrumbItem) => void
@@ -81,6 +93,7 @@ export const useEditorStore = create<EditorState>((set) => {
   const initialLevel = loadFontLevel()
   return {
     mandalartId: null,
+    currentMandalart: null,
     currentGridId: null,
     viewMode: '3x3',
     breadcrumb: [],
@@ -88,6 +101,7 @@ export const useEditorStore = create<EditorState>((set) => {
     fontScale: levelToScale(initialLevel),
 
     setMandalartId: (id) => set({ mandalartId: id }),
+    setCurrentMandalart: (m) => set({ currentMandalart: m }),
     setCurrentGrid: (gridId) => set({ currentGridId: gridId }),
     setViewMode: (mode) => set({ viewMode: mode }),
 

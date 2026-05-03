@@ -46,6 +46,12 @@ type Props = {
   size?: 'normal' | 'small'
   /** 外側ラッパー div に追加するスタイル (アニメーション制御用) */
   wrapperStyle?: React.CSSProperties
+  /**
+   * read-only モード (migration 011 以降)。マンダラートのロック中は true で渡され、
+   * draggable 抑止 / 拡大エディタ無効 / inline edit 起動禁止になる。
+   * **drill (シングルクリック) は通す** (閲覧操作なので)。
+   */
+  isReadOnly?: boolean
 }
 
 const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
@@ -58,6 +64,7 @@ export default function Cell({
   onDragStart, onDragEnd, dropProps, onContextMenu, onToggleDone,
   size = 'normal',
   wrapperStyle,
+  isReadOnly = false,
 }: Props) {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
@@ -175,6 +182,8 @@ export default function Cell({
 
   function handleTextareaDoubleClick(e: React.MouseEvent<HTMLTextAreaElement>) {
     e.stopPropagation()
+    // ロック中は拡大エディタを起動させない (read-only モードのため、color / image 編集 UI も封じる)
+    if (isReadOnly) return
     if (isExpanded) {
       // 拡大中にもう一度ダブルクリックされたら元のサイズに戻す
       setExpandedRect(null)
@@ -193,8 +202,9 @@ export default function Cell({
 
   function handleDragStart(e: React.DragEvent) {
     // 空セル (text 空 + image_path null) は drag source にしない (誤操作防止)。
+    // ロック中も drag source にしない (read-only モードでは move / shred を block するため)。
     // UI 側で `draggable=false` にしているため通常 dragstart は発火しないが、defensive ガードで二重抑止する。
-    if (isDisabled || isInlineEditing || !onDragStart || isCellEmpty(cell)) {
+    if (isDisabled || isInlineEditing || !onDragStart || isCellEmpty(cell) || isReadOnly) {
       e.preventDefault()
       return
     }
@@ -214,6 +224,23 @@ export default function Cell({
   function handleClick() {
     if (isDisabled || didDrag.current) return
     if (isInlineEditing) return // 編集中は click ハンドラを発火させない（textarea 側に任せる）
+
+    if (isReadOnly) {
+      // ロック中: 入力なしセルは何もしない (新規 drill 抑止)。
+      // 入力ありセルは drill のみ通す (閲覧用、ダブルクリック編集は handleTextareaDoubleClick で別途 block)。
+      if (isEmpty) return
+      // シングルクリックは drill、ダブルクリックは無視 (2 回目で空振り)
+      if (clickTimer.current) {
+        clearTimeout(clickTimer.current)
+        clickTimer.current = null
+        return
+      }
+      clickTimer.current = setTimeout(() => {
+        clickTimer.current = null
+        onDrill(cell)
+      }, CLICK_DELAY)
+      return
+    }
 
     if (isEmpty) {
       // 空セル: シングルクリックで即編集開始。ダブルクリックは無視
@@ -342,7 +369,7 @@ export default function Cell({
         ${isDragOver && !isDisabled ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
         group
       `}
-      draggable={!isDisabled && !isInlineEditing && !!onDragStart && !isCellEmpty(cell)}
+      draggable={!isDisabled && !isInlineEditing && !!onDragStart && !isCellEmpty(cell) && !isReadOnly}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragEnter={dropProps?.onDragEnter}

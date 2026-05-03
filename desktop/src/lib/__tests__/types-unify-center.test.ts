@@ -52,6 +52,7 @@ describe('grid schema — type guards', () => {
       root_cell_id: 'c1',
       show_checkbox: false,
       pinned: false,
+      locked: false,
       created_at: '2026-04-18T00:00:00Z',
       updated_at: '2026-04-18T00:00:00Z',
     }

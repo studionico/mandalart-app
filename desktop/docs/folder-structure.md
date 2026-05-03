@@ -146,7 +146,7 @@ src/
 │   └── useWelcomeOnFirstRun.ts      # 初回起動 / WELCOME_VERSION bump 時に welcome モーダルを出すべきか判定 (App.tsx で 1 回呼出)
 │
 ├── store/                    # Zustand グローバルストア
-│   ├── editorStore.ts        # currentGridId / viewMode / breadcrumb / fontLevel
+│   ├── editorStore.ts        # currentMandalart (ロック購読源) / currentGridId / viewMode / breadcrumb / fontLevel
 │   ├── undoStore.ts          # 操作履歴スタック
 │   ├── clipboardStore.ts     # mode / sourceCellId (スナップショットは持たない)
 │   ├── authStore.ts          # session / user / loading
