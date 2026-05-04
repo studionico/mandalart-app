@@ -23,7 +23,7 @@
  *   `backgroundColor: rgb(221, 58, 63)` で塗って線を円の内側に通さない
  */
 
-import { ORBIT_ORDER_PERIPHERAL } from '@/constants/grid'
+import { ORBIT_ORDER_PERIPHERAL, GRID_CELL_COUNT, CENTER_POSITION } from '@/constants/grid'
 
 const RED_BG = 'rgb(221, 58, 63)'
 
@@ -116,8 +116,8 @@ function ConceptBlock3x3({
       className="grid grid-cols-3 grid-rows-3 gap-1"
       style={{ animation, gridColumnStart, gridRowStart }}
     >
-      {Array.from({ length: 9 }).map((_, i) => {
-        const isBlockCenter = i === 4
+      {Array.from({ length: GRID_CELL_COUNT }).map((_, i) => {
+        const isBlockCenter = i === CENTER_POSITION
         return (
           <div
             key={i}
@@ -208,8 +208,8 @@ export default function ConceptSlide() {
 
           {/* === Phase 3 周辺ブロック展開: 8 blocks (中央 block は除外、上の縮小 3×3 が担う) === */}
           <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-3">
-            {Array.from({ length: 9 }).map((_, blockPos) => {
-              if (blockPos === 4) return null
+            {Array.from({ length: GRID_CELL_COUNT }).map((_, blockPos) => {
+              if (blockPos === CENTER_POSITION) return null
               const orbitIdx = ORBIT_ORDER_PERIPHERAL.indexOf(blockPos)
               const blockDelayMs =
                 PHASE3_BLOCK_FIRST_DELAY_MS + Math.max(0, orbitIdx) * PHASE3_BLOCK_STAGGER_MS

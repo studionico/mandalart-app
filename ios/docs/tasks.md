@@ -1,0 +1,128 @@
+# tasks.md (iOS)
+
+iOS 版 Phase 0-11 のチェックリスト。実装中のセッションが進捗確認に使う。
+
+詳細な phase 設計 / 工数見積 / out-of-scope は plan file ([`/Users/maro02/.claude/plans/ios-twinkly-sonnet.md`](../../../.claude/plans/ios-twinkly-sonnet.md)) を参照 (記載対象外で gitignore)。
+
+## Phase 0: 環境セットアップ ✅
+
+- [x] Xcode 16+ (Tahoe で Xcode 26.4.1 確認済)
+- [x] Apple ID で Free signing 有効化
+- [x] iPhone 実機接続 (将来用、現在は Simulator のみ)
+- [ ] Apple Developer Program 加入 ($99/年) — MVP 完成後
+
+## Phase 1: プロジェクト初期化 ✅
+
+- [x] xcodegen install (`brew install xcodegen`)
+- [x] [`project.yml`](../project.yml) 作成、bundle identifier `jp.mandalart.app.ios`
+- [x] Landscape 限定: `UISupportedInterfaceOrientations` を `LandscapeLeft + LandscapeRight` のみ
+- [x] supabase-swift SPM 依存 (umbrella `Supabase` product)
+- [x] `SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"` / `SUPPORTS_MACCATALYST = NO` を target 明示
+- [x] iPhone 17 Pro Simulator で空アプリ起動
+
+## Phase 2: データモデル + ローカル CRUD ✅
+
+- [x] 5 つの `@Model` 定義 (Mandalart / Grid / Cell / Folder / StockItem)
+- [x] フィールド名を desktop SQLite schema と一致 (`Cell.text` / `Grid.sortOrder` / `Folder.isSystem`)
+- [x] [`MandalartFactory`](../Mandalart/Services/MandalartFactory.swift) で `create` (root grid + center cell 同時 INSERT) / `permanentDelete` (cascade)
+- [x] DashboardView の `+` ボタンで新規作成 / 長押しで削除 / カードタップで Editor 遷移
+- [x] SwiftData が persist することを Simulator で確認
+- [ ] 単体テスト (`XCTest` / Swift Testing) — 後回し可
+
+## Phase 3: 認証 + 同期 (進行中)
+
+### 完了 ✅
+
+- [x] `SupabaseService` (umbrella `SupabaseClient` シングルトン)
+- [x] `AuthStore` (Email サインイン / 新規登録 / サインアウト)
+- [x] `SignInView` / `SettingsView` (今すぐ同期ボタン)
+- [x] `SyncEngine.pullAll(into: ModelContext)` (folders / mandalarts / grids / cells を並列 fetch + last-write-wins upsert)
+- [x] `SyncEngine.pushPending(from: ModelContext)` (synced_at < updated_at の dirty 行を upsert、folders/mandalarts に user_id 含める)
+- [x] desktop で作ったマンダラートが iOS に pull されてくることを実機検証 (commit 0d375c9)
+
+### 残作業
+
+- [ ] **realtime 購読**: `client.realtime.channel(...).on(.postgresChanges, ...)` で他端末の変更を即時反映
+- [ ] **自動同期**: アプリ起動時 / mandalart 保存時 / 一定間隔のバックグラウンド sync
+- [ ] **zombie cleanup / orphan dirty delete**: 落とし穴 #12 対策 (desktop の `syncAwareDelete` / `skipOrphanDirtyDelete` 相当)
+- [ ] **permanent delete の cloud 連動**: `MandalartFactory.permanentDelete` を Supabase 側 DELETE まで実行 (落とし穴 #6)
+- [ ] **OAuth サインイン (Google / GitHub)**: `Associated Domains` capability + `onOpenURL` で deep link 受け
+- [ ] **エラー UI**: PGRST204 / 403 / network エラー時のユーザー通知 (現状は Settings 画面のテキストのみ)
+
+## Phase 4: ダッシュボード画面 (未着手)
+
+- [ ] フォルダ sidebar (Landscape 余白活用)
+- [ ] カードグリッド `LazyVGrid(columns: .adaptive(minimum: 140))`
+- [ ] `.searchable` で検索
+- [ ] 長押しで context menu (ピン留め / ロック / 複製 / 削除 / フォルダ移動)
+- [ ] ストックサイドパネル (右 sidebar)
+- [ ] ピン留めカードを top 表示 (sort_order)
+
+## Phase 5: エディタ画面 (基本) (未着手)
+
+- [ ] Landscape 2 ペイン構成 (`HStack`、左 = 3×3 グリッド `.aspectRatio(1, contentMode: .fit)` 正方形、右 = breadcrumb + メモ / ストック)
+- [ ] `GridView3x3` Components / `CellView` Components
+- [ ] Tap で edit (TextField inline) / LongPress で context menu (色 / 画像 / 削除)
+- [ ] 並列グリッド (← / → ボタン or swipe)
+- [ ] breadcrumb (右ペイン上部)
+- [ ] ロック banner (上部、`mandalart.locked` のとき表示)
+
+## Phase 6: drill + 9×9 + アニメーション (未着手)
+
+- [ ] セルタップで `matchedGeometryEffect` を使った orbit-style drill アニメ
+- [ ] `GridView9x9` Components (3×3 を 9 個ネスト)
+- [ ] view-switch (3×3 ↔ 9×9) を 1 ボタンで切替 (= desktop と同じ UX)
+- [ ] アニメ中 `pointer-events: none` 相当 (`allowsHitTesting(false)`)
+
+## Phase 7: メモ / ストック (未着手)
+
+- [ ] メモタブ (Markdown プレビュー、`MarkdownUI` package or 自前)
+- [ ] ストックタブ (StockItem 一覧、drag でセルに paste)
+- [ ] StockItem は **local-only** (Supabase 同期しない、[`data-model.md`](data-model.md) 参照)
+
+## Phase 8: ロック / インポート / エクスポート (未着手)
+
+- [ ] ロック機能: `mandalart.locked → 全 mutation guard (Cell タップで read-only)`
+- [ ] エクスポート: JSON / Markdown / IndentText / PNG / PDF
+  - PNG / PDF は `ImageRenderer` (iOS 16+) で View → image
+  - Files app への保存は `UIDocumentPickerViewController` 経由
+- [ ] インポート: Files app から `.mandalart.json` を選択 → parse → 新規マンダラート作成
+
+## Phase 9: Welcome モーダル (未着手)
+
+- [ ] 初回起動判定 (UserDefaults で `welcomeSeenVersion` 比較)
+- [ ] ConceptSlide (= desktop Phase 1-4 アニメ) を SwiftUI keyframes で再現
+- [ ] FeatureSlide × 6: `VideoPlayer` (AVKit) で mp4 autoPlay loop
+- [ ] mp4 は [`../Mandalart/Resources/help/`](../Mandalart/Resources/help/) に desktop と同じファイルを配置
+- [ ] 「次回以降表示しない」チェックボックス
+
+## Phase 10: UI 仕上げ + テスト (未着手)
+
+- [ ] ダーク / ライトモード対応 (`@Environment(\.colorScheme)`)
+- [ ] iPhone 17 Pro / iPad (M4) Landscape で正常表示確認
+- [ ] アクセシビリティ (VoiceOver / Dynamic Type)
+- [ ] パフォーマンス計測 (Instruments)
+- [ ] SwiftData VersionedSchema migration (技術検証で済ませている wipe 運用を撤廃)
+
+## Phase 11: 配布準備 (オプション、未着手)
+
+- [ ] App Icon / Launch Screen
+- [ ] App Store スクリーンショット (6.7" / 6.1" / 12.9" iPad)
+- [ ] App Store Connect 申請文 (= desktop の MoQ をベース)
+- [ ] Apple Developer Program 加入
+- [ ] TestFlight ベータ → 内部テスター招待
+- [ ] App Store 申請
+
+## 工数見積 (再掲)
+
+iOS / Swift 経験者 1 人想定:
+
+| Phase | 工数 |
+|---|---|
+| 1-3 (基盤 + 認証 + 同期) | 2〜3 週 (現在 Phase 3 進行中、commit 0d375c9 時点で実機検証済) |
+| 4-5 (Dashboard + Editor 基本) | 2〜3 週 |
+| 6 (drill + 9×9 + アニメ) | 2〜3 週 |
+| 7-8 (メモ / ストック / lock / Import / Export) | 2 週 |
+| 9 (Welcome) | 1 週 |
+| 10 (仕上げ / テスト) | 1〜2 週 |
+| **合計** | **約 10〜14 週 (2.5〜3.5 ヶ月)** |
