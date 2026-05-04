@@ -79,6 +79,14 @@ settings:
 
 **対処**: [`data-model.md`](data-model.md) の対応表を参照して修正。新規列を足すときは desktop の migration を canonical にして両プラットフォーム揃える ([`sync.md`](sync.md) "新しい列を足すフロー" 節)。
 
+### #7. SwiftUI `.alert` の `TextField` は日本語 IME (予測変換) と相性が悪い
+
+**症状**: `.alert("...", isPresented: ...) { TextField(...) }` で日本語入力しようとしても、IME 変換候補が出ない / 確定できない / 文字が消える等で実用にならない。
+
+**原因**: SwiftUI の `.alert` 内 `TextField` は UIKit の `UIAlertController` をラップしているが、IME インタラクションの一部 (確定 / 取り消し / 変換) が SwiftUI binding に正しく伝搬しない iOS の既知不具合。英数字入力では問題なし。
+
+**対処**: 日本語入力が必要な簡易 input UI は **`.sheet` ベースに置き換え** る。`NavigationStack { Form { TextField } }` を `.presentationDetents([.height(200)])` で popup 風に出すと alert 同等の UX で IME 完全動作する。実装例: [`FolderNameSheet`](../Mandalart/Views/DashboardView.swift) (`DashboardView` 末尾の private struct)。
+
 ### #6. UUID は **小文字統一**。Swift `UUID().uuidString` は大文字で desktop と非互換
 
 **症状**: iOS で作成したマンダラートを desktop で開くと、ルート中心セルクリックでドリルダウンが起きる (本来は「ホームへ戻る」)。breadcrumb 2 階層目に 1 階層目と同じ名前が表示される。再クリックでドリルアップ。desktop で作成したマンダラートでは正常。

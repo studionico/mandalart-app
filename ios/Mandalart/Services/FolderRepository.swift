@@ -56,6 +56,76 @@ enum FolderRepository {
         return inbox
     }
 
+    /// 新規フォルダを作成する。`isSystem == false` (= ユーザー作成)、`sortOrder` は既存最大 + 1。
+    @discardableResult
+    static func createFolder(name: String, in context: ModelContext) throws -> Folder {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw NSError(domain: "FolderRepository", code: 10, userInfo: [
+                NSLocalizedDescriptionKey: "フォルダ名が空です"
+            ])
+        }
+        let now = Date()
+        let folder = Folder(
+            id: IDGenerator.uuid(),
+            name: trimmed,
+            sortOrder: nextSortOrder(in: context),
+            isSystem: false,
+            createdAt: now,
+            updatedAt: now
+        )
+        context.insert(folder)
+        try context.save()
+        return folder
+    }
+
+    /// フォルダ名を変更する。Inbox (`isSystem == true`) も改名可能 (desktop と同等)。
+    static func renameFolder(_ folder: Folder, to newName: String, in context: ModelContext) throws {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw NSError(domain: "FolderRepository", code: 11, userInfo: [
+                NSLocalizedDescriptionKey: "フォルダ名が空です"
+            ])
+        }
+        folder.name = trimmed
+        folder.updatedAt = Date()
+        try context.save()
+    }
+
+    /// フォルダを soft delete する。Inbox (`isSystem == true`) は削除不可。
+    /// 紐づくマンダラートは Inbox に振り分けてから folder 自体に `deletedAt` を立てる。
+    static func deleteFolder(_ folder: Folder, in context: ModelContext) throws {
+        guard !folder.isSystem else {
+            throw NSError(domain: "FolderRepository", code: 12, userInfo: [
+                NSLocalizedDescriptionKey: "Inbox は削除できません"
+            ])
+        }
+        let inbox = try ensureInboxFolder(in: context)
+        let folderId = folder.id
+        let descriptor = FetchDescriptor<Mandalart>(
+            predicate: #Predicate<Mandalart> { $0.folderId == folderId && $0.deletedAt == nil }
+        )
+        let mandalarts = try context.fetch(descriptor)
+        let now = Date()
+        for m in mandalarts {
+            m.folderId = inbox.id
+            m.updatedAt = now
+        }
+        folder.deletedAt = now
+        folder.updatedAt = now
+        try context.save()
+    }
+
+    /// 既存 folders の最大 `sortOrder` + 1 を返す (重複なしで末尾追加用)。
+    private static func nextSortOrder(in context: ModelContext) -> Int {
+        let descriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate<Folder> { $0.deletedAt == nil },
+            sortBy: [SortDescriptor(\Folder.sortOrder, order: .reverse)]
+        )
+        let folders = (try? context.fetch(descriptor)) ?? []
+        return (folders.first?.sortOrder ?? 0) + 1
+    }
+
     /// `folderId` が nil のマンダラートを Inbox folder に振り分ける。
     /// desktop の [`adoptOrphanMandalartsToInbox`](../../../desktop/src/lib/api/folders.ts) の iOS 版。
     /// pullAll で他デバイス (folder API 未対応の旧 iOS 等) から `folder_id=null` で push された

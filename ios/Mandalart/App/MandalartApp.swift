@@ -42,6 +42,19 @@ struct MandalartApp: App {
                         await RealtimeService.shared.unsubscribe()
                     }
                 }
+                // サインイン中の定期 auto-push (15 秒間隔)。
+                // 各 mutation point に debounced trigger を仕掛ける代わりに、シンプルな polling
+                // で「直近の編集を 15 秒以内に他デバイスへ push」する保証を作る。
+                // realtime 取りこぼし保険 (落とし穴 #22) や scene .background 待ちの遅延を埋める。
+                .task(id: auth.isSignedIn) {
+                    guard auth.isSignedIn else { return }
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(15))
+                        if Task.isCancelled { break }
+                        let context = sharedModelContainer.mainContext
+                        _ = try? await SyncEngine.shared.pushPending(from: context)
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
         // フォアグラウンド復帰 → pull (他端末の変更を取り込む)
