@@ -1,0 +1,19 @@
+# Xcode build artifacts
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+
+# xcodegen output (regenerated from project.yml)
+Mandalart.xcodeproj/
+
+# Local secrets (Supabase URL / anon key etc.)
+Mandalart/Services/Secrets.swift
+
+# macOS
+.DS_Store
+
+# SPM
+.swiftpm/
+Package.resolved
