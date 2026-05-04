@@ -56,25 +56,37 @@ struct EditorView: View {
     var body: some View {
         Group {
             if let m = mandalart, let grid = currentGrid {
-                VStack(spacing: 0) {
-                    if m.locked {
-                        lockBanner
-                    }
-                    ZStack(alignment: .topLeading) {
-                        content(mandalart: m, grid: grid)
+                // root GR で leading safe inset を **ignoreSafeArea 適用前に** 捕獲。
+                // この値を content() に渡し、ZStack 拡張で広がった分の補正計算に使う。
+                GeometryReader { rootGeo in
+                    let capturedLeadingInset = rootGeo.safeAreaInsets.leading
+                    VStack(spacing: 0) {
+                        if m.locked {
+                            lockBanner
+                        }
+                        ZStack(alignment: .topLeading) {
+                            content(
+                                mandalart: m,
+                                grid: grid,
+                                capturedLeadingInset: capturedLeadingInset
+                            )
                             .onAppear { bootstrapIfNeeded(mandalart: m) }
 
-                        // 左上 floating home button (lock banner と縦並び)
-                        Button(action: onBack) {
-                            Image(systemName: "house.fill")
-                                .font(.system(size: 18))
-                                .foregroundStyle(.primary)
-                                .frame(width: 36, height: 36)
-                                .background(.ultraThinMaterial, in: Circle())
+                            // 左上 floating home button: ZStack 拡張領域 (= 物理画面左端付近) に
+                            // 配置。padding 8pt で物理端から少し内側、top 20pt で grid 上端と
+                            // 視覚的に被らない位置。
+                            Button(action: onBack) {
+                                Image(systemName: "house.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 36, height: 36)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.leading, 32)
+                            .padding(.top, 20)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 12)
-                        .padding(.top, 8)
+                        .ignoresSafeArea(.container, edges: .leading)
                     }
                 }
             } else {
@@ -117,26 +129,52 @@ struct EditorView: View {
     }
 
     @ViewBuilder
-    private func content(mandalart: Mandalart, grid: Grid) -> some View {
+    private func content(mandalart: Mandalart, grid: Grid, capturedLeadingInset: CGFloat) -> some View {
         // GeometryReader で available size を取り、grid を「縦最大の正方形」、memo を
         // 「残り横幅」に相対的に割り当てる。横幅余りなく / bottom 揃いを両立する。
-        // (home button は ZStack overlay で top-leading に出るので left pane に leading padding
-        //  56pt を確保して被らないようにする。padding は GeometryReader の outer 側で消費する。)
+        //
+        // **物理画面での縦中央配置**: iOS の safe area は端末/向きで非対称になる
+        // (例: iPhone Pro Landscape は top=0 / bottom=21pt の home indicator)。
+        // GR は safe area 内に置かれるため SwiftUI の中央寄せだけだと物理画面では
+        // 偏って見える。`geo.safeAreaInsets` で実 inset を読み、bottom が大きい側に
+        // 合わせて top padding (or 逆) を補償することで全端末で物理中央配置を保つ。
+        //
+        // **leading safe area 補正**: 親 ZStack で `.ignoresSafeArea(.container, .leading)`
+        // を適用しているため availW に leading inset 分が追加されている。
+        // root GR で捕獲した `capturedLeadingInset` を使って HStack を内側に押し戻し、
+        // grid/memo は元の safe area 内に + 数 pt 内側に配置する。
         GeometryReader { geo in
             let availH = geo.size.height
             let availW = geo.size.width
-            let leadingPad: CGFloat = 56  // home button overlay 退避
-            let trailingPad: CGFloat = 8
+            let topInset = geo.safeAreaInsets.top
+            let bottomInset = geo.safeAreaInsets.bottom
+            // safe area 非対称補正 (bottom > top なら top に asymmetry pt 追加)
+            let asymmetry = bottomInset - topInset
+            let topCompensation: CGFloat = max(0, asymmetry)
+            let bottomCompensation: CGFloat = max(0, -asymmetry)
+            // 補正後の有効高さ (= 上下が物理的に対称になる有効領域)
+            let usableH = max(0, availH - topCompensation - bottomCompensation)
+
+            // home button は ZStack 拡張領域 (物理画面左) に出ているので chevron-left の
+            // breathing room は 8pt で十分
+            let leadingPad: CGFloat = 8
+            let trailingPad: CGFloat = 0  // memo を safe area trailing 端まで伸ばす
             let outerSpacing: CGFloat = 12  // 左右ペイン間
             let chevronW: CGFloat = 36
             let leftInnerSpacing: CGFloat = 8
             let leftOverhead: CGFloat = chevronW * 2 + leftInnerSpacing * 2
             let memoMinW: CGFloat = 200
-            // grid は正方形なので min(高さ, 左ペインに割ける最大幅) で確定
-            let leftPaneMaxInnerW = max(0, availW - memoMinW - leadingPad - trailingPad - outerSpacing - leftOverhead)
-            let gridSize = max(0, min(availH, leftPaneMaxInnerW))
+            // grid 上下に breathing room (= HStack 中央配置で自動的に均等になる)
+            let verticalMargin: CGFloat = 16
+            // grid を safe area 端からさらに数 pt 内側に押し込む (= 視覚的 breathing room)
+            let extraInsidePush: CGFloat = 4
+            // 実 content 領域 = availW から leading 拡張分と内押し分を除いた幅
+            let contentW = max(0, availW - capturedLeadingInset - extraInsidePush)
+            // grid は正方形なので min(有効高さ - 余白, 左ペインに割ける最大幅) で確定
+            let leftPaneMaxInnerW = max(0, contentW - memoMinW - leadingPad - trailingPad - outerSpacing - leftOverhead)
+            let gridSize = max(0, min(usableH - verticalMargin * 2, leftPaneMaxInnerW))
             // memo は残り横幅すべて
-            let memoW = max(memoMinW, availW - leadingPad - trailingPad - outerSpacing - leftOverhead - gridSize)
+            let memoW = max(memoMinW, contentW - leadingPad - trailingPad - outerSpacing - leftOverhead - gridSize)
 
             HStack(spacing: outerSpacing) {
                 // 左ペイン: chevron + grid + (chevron or +)。grid サイズを明示指定。
@@ -172,7 +210,10 @@ struct EditorView: View {
                 .frame(width: memoW, height: gridSize)
                 .padding(.trailing, trailingPad)
             }
-            .frame(width: availW, height: availH)
+            .frame(width: contentW, height: usableH)
+            .padding(.leading, capturedLeadingInset + extraInsidePush)
+            .padding(.top, topCompensation)
+            .padding(.bottom, bottomCompensation)
         }
     }
 
