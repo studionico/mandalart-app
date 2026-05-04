@@ -21,15 +21,19 @@ ios/
 │   │   └── StockItem.swift
 │   ├── Views/
 │   │   ├── DashboardView.swift   ホーム (LazyVGrid + 新規作成 + サインインボタン)
-│   │   ├── EditorView.swift      編集画面 (Phase 5 で本格実装予定)
+│   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state)
 │   │   ├── SettingsView.swift    アカウント / 同期ボタン
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
-│   │   └── Components/           1 セル / 3×3 / 9×9 (今後追加)
+│   │   └── Components/
+│   │       ├── CellView.swift    1 セル (tap → drill or inline edit、編集中以外は overlay で hit テスト)
+│   │       ├── GridView3x3.swift 3×3 (`displayCells: [Cell?]` 9 要素受け取り、id で grid 切替時 remount)
+│   │       └── Breadcrumb.swift  右ペイン上部の階層 navigation (タップで drill-up)
 │   ├── ViewModels/
 │   │   └── AuthStore.swift       @Observable / @MainActor / supabase-swift Auth ラッパ
 │   ├── Services/
 │   │   ├── SupabaseService.swift 共有 SupabaseClient
 │   │   ├── MandalartFactory.swift create / permanentDelete (cascade)
+│   │   ├── GridRepository.swift  drill helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry)
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template

@@ -35,7 +35,7 @@ struct DashboardView: View {
                     .padding(12)
                 }
             }
-            .navigationTitle("マンダラート")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
