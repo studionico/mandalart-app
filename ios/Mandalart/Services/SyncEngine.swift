@@ -18,7 +18,50 @@ final class SyncEngine {
 
     var isSyncing = false
 
-    // MARK: - Tombstone drain
+    // MARK: - Sanitize / Tombstone
+
+    /// 参照整合性サニタイズ: 親が local SwiftData に存在しない行を hard delete する (落とし穴 #12)。
+    ///
+    /// **背景**: 過去のバグ (削除時に子が残った / 部分 sync で分裂 / クラッシュ中断) で
+    /// `mandalart_id` が孤立した grids、`grid_id` が孤立した cells が残ることがある。
+    /// これらが `synced_at == nil` (= cloud には未登録) のまま push されると RLS 403 で失敗 →
+    /// 毎回 push のたびに同じ失敗が連鎖して全体パフォーマンスが劣化する (= push thrash)。
+    ///
+    /// pullAll 冒頭で実行することで cloud fetch 前に local をクリーンに保ち、
+    /// 続く push 経路で thrash が発生しないようにする。
+    private func sanitizeZombies(in context: ModelContext) {
+        guard let mandalarts = try? context.fetch(FetchDescriptor<Mandalart>()) else { return }
+        let mandalartIds = Set(mandalarts.map { $0.id })
+
+        // 1. 親 mandalart が消えた zombie grid を hard delete
+        if let grids = try? context.fetch(FetchDescriptor<Grid>()) {
+            var zombieGridCount = 0
+            for grid in grids where !mandalartIds.contains(grid.mandalartId) {
+                context.delete(grid)
+                zombieGridCount += 1
+            }
+            if zombieGridCount > 0 {
+                print("[sync] sanitized zombie grids: \(zombieGridCount)")
+            }
+        }
+
+        // 2. 残った grid id 集合に対して、孤立した cell を hard delete
+        if let remainingGrids = try? context.fetch(FetchDescriptor<Grid>()) {
+            let gridIds = Set(remainingGrids.map { $0.id })
+            if let cells = try? context.fetch(FetchDescriptor<Cell>()) {
+                var zombieCellCount = 0
+                for cell in cells where !gridIds.contains(cell.gridId) {
+                    context.delete(cell)
+                    zombieCellCount += 1
+                }
+                if zombieCellCount > 0 {
+                    print("[sync] sanitized zombie cells: \(zombieCellCount)")
+                }
+            }
+        }
+
+        try? context.save()
+    }
 
     /// `CloudDeleteTombstone` に積まれた mandalart id について cloud cascade delete を再試行する。
     /// 成功した id は tombstone から除去。失敗した id は残しておき、次回の pullAll でリトライ。
@@ -56,9 +99,12 @@ final class SyncEngine {
         isSyncing = true
         defer { isSyncing = false }
 
-        // 0. tombstone drain: オフライン / 未サインイン中に permanent delete された
-        //    マンダラートを cloud から cascade delete する。これがないと次の fetch で
-        //    zombie 復活する (落とし穴 #6)。
+        // 0a. 参照整合性サニタイズ: 親が消えた zombie grid / cell を hard delete (落とし穴 #12)
+        sanitizeZombies(in: context)
+
+        // 0b. tombstone drain: オフライン / 未サインイン中に permanent delete された
+        //     マンダラートを cloud から cascade delete する。これがないと次の fetch で
+        //     zombie 復活する (落とし穴 #6)。
         await drainCloudDeleteTombstones()
 
         async let foldersTask: [CloudFolder] = client.from("folders")
@@ -207,6 +253,10 @@ final class SyncEngine {
             throw SyncError.notSignedIn
         }
         let userId = session.user.id.uuidString
+
+        // pushPending を直接呼ぶ経路 (scene .background 等) でも参照整合性を保証する。
+        // pullAll → push の流れで来る場合は冗長だが、save() のみで何もしない時は no-op。
+        sanitizeZombies(in: context)
 
         let folderRows: [Folder] = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
         let mandalartRows: [Mandalart] = (try? context.fetch(FetchDescriptor<Mandalart>())) ?? []

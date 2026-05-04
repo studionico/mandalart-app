@@ -118,7 +118,17 @@ iOS 側でも同等の対策が必要:
 
 これがないとオフライン削除 → 再サインインで **「マンダラートが zombie 復活して再削除が必要」** になる (落とし穴 #6 の典型パターン)。tombstone は永続化されるので、アプリを kill/再起動しても削除予定 id は失われない。
 
+## zombie cleanup (実装済)
+
+[`SyncEngine.sanitizeZombies`](../Mandalart/Services/SyncEngine.swift) は **`pullAll` / `pushPending` の冒頭で参照整合性をサニタイズ** する (落とし穴 #12 対策):
+
+1. 親 `mandalart_id` が local SwiftData に存在しない `Grid` 行 → hard delete
+2. 残った grid id 集合に対して、孤立した `Cell` (= 親 `grid_id` が無い行) → hard delete
+
+**背景**: 過去のバグ (削除時の子残り / 部分 sync で分裂 / クラッシュ中断) で生まれた zombie 行が `synced_at == nil` のまま push されると RLS 403 / FK 23503 で失敗 → push のたびに同じ失敗が連鎖して全体パフォーマンスが劣化する (= push thrash、desktop 側で実測 1 往復 225ms 遅延)。
+
+サニタイズは pull / push の毎回冒頭で走るが、zombie が無ければ no-op (= ほぼ無料)。**新しい DELETE 経路を追加するときは、サニタイズに頼らず子連鎖を明示削除すること** (= サニタイズはバグの silent な隠蔽になり得るため、desktop 落とし穴 #12 の警告と同じ)。
+
 ## 未実装 (Phase 3 残作業)
 
-- **zombie cleanup / orphan dirty delete**: 落とし穴 #12 への対策
 - **OAuth サインイン (Google / GitHub)**: 現状 Email のみ。OAuth は `Associated Domains` capability + `onOpenURL` で deep link を受ける必要がある
