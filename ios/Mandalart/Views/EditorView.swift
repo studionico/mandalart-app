@@ -118,57 +118,30 @@ struct EditorView: View {
 
     @ViewBuilder
     private func content(mandalart: Mandalart, grid: Grid) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            // 左ペイン: 3×3 グリッド (正方形、上下センタリング) + 両脇に並列ナビボタン
-            VStack {
-                Spacer(minLength: 0)
-                HStack(spacing: 12) {
-                    parallelNavButton(
-                        systemName: "chevron.left",
-                        visible: parallelIndex > 0,
-                        accessibilityLabel: "前の並列グリッドへ"
-                    ) {
-                        handleParallelNav(direction: -1, mandalart: mandalart)
-                    }
-                    GridView3x3(
-                        gridId: grid.id,
-                        displayCells: GridRepository.displayCells(for: grid, in: modelContext),
-                        mandalart: mandalart,
-                        onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
-                    )
-                    parallelNavButton(
-                        systemName: "chevron.right",
-                        visible: parallelIndex < parallelGrids.count - 1,
-                        accessibilityLabel: "次の並列グリッドへ"
-                    ) {
-                        handleParallelNav(direction: 1, mandalart: mandalart)
-                    }
+        HStack(alignment: .top, spacing: 12) {
+            // 左ペイン: 3×3 グリッド (正方形、上下最大化) + 両脇に並列ナビボタン
+            HStack(spacing: 8) {
+                parallelNavButton(
+                    systemName: "chevron.left",
+                    visible: parallelIndex > 0,
+                    accessibilityLabel: "前の並列グリッドへ"
+                ) {
+                    handleParallelNav(direction: -1, mandalart: mandalart)
                 }
-                Spacer(minLength: 0)
-                if !mandalart.locked {
-                    HStack {
-                        Spacer()
-                        Button {
-                            handleAddParallel(mandalart: mandalart)
-                        } label: {
-                            Label("並列グリッド追加", systemImage: "plus.circle.fill")
-                                .font(.callout)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(.ultraThinMaterial, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        Spacer()
-                    }
-                    .padding(.bottom, 4)
-                }
+                GridView3x3(
+                    gridId: grid.id,
+                    displayCells: GridRepository.displayCells(for: grid, in: modelContext),
+                    mandalart: mandalart,
+                    onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
+                )
+                rightSlotButton(mandalart: mandalart, grid: grid)
             }
             .frame(maxWidth: .infinity)
             // 左上 home button と被らないように左を少しだけ空ける
             .padding(.leading, 56)
 
-            // 右ペイン: breadcrumb + メモ
-            VStack(alignment: .leading, spacing: 12) {
+            // 右ペイン: breadcrumb + メモ (memo を狭めて grid を最大化)
+            VStack(alignment: .leading, spacing: 8) {
                 Breadcrumb(items: breadcrumb) { index in
                     navigateToBreadcrumb(index, mandalart: mandalart)
                 }
@@ -176,12 +149,49 @@ struct EditorView: View {
                 MemoTab(grid: grid, mandalart: mandalart)
                     .id(grid.id)  // grid 切替時に MemoTab の @State を再初期化
             }
-            .frame(maxWidth: 320)
+            .frame(width: 240)
             .padding(.trailing, 8)
-            .padding(.top, 4)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+    }
+
+    /// 右側の並列ナビスロット (= desktop と同様、">" or 末尾なら "+" を同位置に出す)。
+    /// "+" は **末尾 + 周辺 1 セル以上に入力あり + 非ロック中** のみ表示 (= 空並列の連続生成を防ぐ)。
+    @ViewBuilder
+    private func rightSlotButton(mandalart: Mandalart, grid: Grid) -> some View {
+        if parallelIndex < parallelGrids.count - 1 {
+            parallelNavButton(
+                systemName: "chevron.right",
+                visible: true,
+                accessibilityLabel: "次の並列グリッドへ"
+            ) {
+                handleParallelNav(direction: 1, mandalart: mandalart)
+            }
+        } else if !mandalart.locked, currentGridHasPeripheralInput(grid: grid) {
+            parallelNavButton(
+                systemName: "plus",
+                visible: true,
+                accessibilityLabel: "新しい並列グリッドを追加"
+            ) {
+                handleAddParallel(mandalart: mandalart)
+            }
+        } else {
+            // layout 安定化用 placeholder (grid 中央寄せが揺れない)
+            Color.clear.frame(width: 36, height: 36)
+        }
+    }
+
+    /// 現在 grid の周辺セル (position != 4) の中に 1 つでも非空 (text/image/color/done) があるか。
+    private func currentGridHasPeripheralInput(grid: Grid) -> Bool {
+        let cells = GridRepository.displayCells(for: grid, in: modelContext)
+        for (i, c) in cells.enumerated() where i != GridConstants.centerPosition {
+            guard let c else { continue }
+            if !c.text.isEmpty || c.imagePath != nil || c.color != nil || c.done {
+                return true
+            }
+        }
+        return false
     }
 
     /// 並列ナビ用の chevron ボタン (visible=false でも layout を予約して grid サイズを安定させる)。
