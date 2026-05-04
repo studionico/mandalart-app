@@ -9,9 +9,9 @@ enum MandalartFactory {
         title: String,
         in context: ModelContext
     ) throws -> Mandalart {
-        let rootCellId = UUID().uuidString
-        let rootGridId = UUID().uuidString
-        let mandalartId = UUID().uuidString
+        let rootCellId = IDGenerator.uuid()
+        let rootGridId = IDGenerator.uuid()
+        let mandalartId = IDGenerator.uuid()
 
         let rootGrid = Grid(
             id: rootGridId,
@@ -25,11 +25,13 @@ enum MandalartFactory {
             position: GridConstants.centerPosition,
             text: title
         )
+        // lastGridId は nil で作成 (desktop の createMandalart と挙動を揃える)。
+        // root grid を非 nil で持っていると `getGridAncestry` が "drilled state" と誤認する経路がある。
         let mandalart = Mandalart(
             id: mandalartId,
             title: title,
             rootCellId: rootCellId,
-            lastGridId: rootGridId
+            lastGridId: nil
         )
 
         context.insert(rootGrid)

@@ -79,7 +79,7 @@ samples/
 ```
 src/
 ├── main.tsx                  # React エントリーポイント
-├── App.tsx                   # HashRouter + Routes + グローバル hooks (useTheme / useAuthBootstrap / useGlobalShortcut / useAppUpdate)
+├── App.tsx                   # HashRouter + Routes + グローバル hooks (useTheme / useAuthBootstrap / useVisibilityResync / useGlobalShortcut / useAppUpdate)
 ├── index.css                 # グローバルスタイル (Tailwind + @custom-variant dark 定義、@keyframes 群)
 ├── vite-env.d.ts
 │
@@ -135,7 +135,8 @@ src/
 │   ├── useCellImageUrl.ts    # セル / カード相当の image_path → blob URL 解決 (sync cache + async fallback、remount まばたき抑止)
 │   ├── useTwoClickConfirm.ts # window.confirm 不能 (落とし穴 #7) の代替 2 クリック確認 hook (boolean / keyed の 2 形式)
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
-│   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper
+│   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper (+ app:sync-pulled も listen)
+│   ├── useVisibilityResync.ts # Tauri window focus 復帰で pullAll 発火 (落とし穴 #22 保険同期、app:sync-pulled event を dispatch)
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)
 │   ├── useSync.ts            # クラウド同期 (起動時全同期 + realtime + manual 同期 + 300ms debounce)
 │   ├── useAuthBootstrap.ts   # 起動時のセッション復元 + deep link ハンドラ登録

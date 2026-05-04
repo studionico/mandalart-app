@@ -15,7 +15,7 @@ final class Grid {
     var syncedAt: Date?
 
     init(
-        id: String = UUID().uuidString,
+        id: String = IDGenerator.uuid(),
         mandalartId: String,
         centerCellId: String,
         parentCellId: String? = nil,

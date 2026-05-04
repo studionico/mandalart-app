@@ -79,6 +79,16 @@ settings:
 
 **対処**: [`data-model.md`](data-model.md) の対応表を参照して修正。新規列を足すときは desktop の migration を canonical にして両プラットフォーム揃える ([`sync.md`](sync.md) "新しい列を足すフロー" 節)。
 
+### #6. UUID は **小文字統一**。Swift `UUID().uuidString` は大文字で desktop と非互換
+
+**症状**: iOS で作成したマンダラートを desktop で開くと、ルート中心セルクリックでドリルダウンが起きる (本来は「ホームへ戻る」)。breadcrumb 2 階層目に 1 階層目と同じ名前が表示される。再クリックでドリルアップ。desktop で作成したマンダラートでは正常。
+
+**原因**: Swift の `UUID().uuidString` は **大文字** (`09469F25-EA72-486B-A3FB-72BD15F58D3E`) を返す。一方 desktop の `crypto.randomUUID()` は **小文字** (`09469f25-ea72-486b-a3fb-72bd15f58d3e`)。両プラットフォーム共に TEXT 型で大小を保存し、`===` で比較する。iOS push 由来データに対する desktop の判定 ([`desktop/src/components/editor/EditorLayout.tsx:1264`](../../desktop/src/components/editor/EditorLayout.tsx#L1264)) `cell.id === gridData.center_cell_id` が誤った経路に分岐する。
+
+**対処**: iOS 側の UUID 生成は **必ず [`Mandalart/Utils/IDGenerator.swift`](../Mandalart/Utils/IDGenerator.swift) の `IDGenerator.uuid()` を経由する** (= `UUID().uuidString.lowercased()`)。`UUID().uuidString` を直接使わない。5 つの `@Model` の `id: String = ...` 既定値および `MandalartFactory.create` 内の明示 ID 生成すべてで `IDGenerator.uuid()` を使用済み。新規の Swift コードを書くときも同 helper を使うこと。
+
+**既存の uppercase データ**: 既に cloud に push 済の uppercase ID レコードは手動で削除する (cloud + local 両方から)。push 後に lowercase 化する migration は実装しない (= ID が変わると参照整合性が崩れるため)。
+
 ### #5. umbrella `Supabase` SPM product を使う (個別 module を直 init しない)
 
 **症状**: 試行錯誤で `Auth` / `PostgREST` / `Realtime` / `Storage` を個別に SPM 依存に入れて `AuthClient(url:headers:flowType:)` 等を直接 init したが、API シグネチャが頻繁に変わる:

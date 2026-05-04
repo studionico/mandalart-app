@@ -13,7 +13,7 @@ final class Folder {
     var syncedAt: Date?
 
     init(
-        id: String = UUID().uuidString,
+        id: String = IDGenerator.uuid(),
         name: String,
         sortOrder: Int = 0,
         isSystem: Bool = false,

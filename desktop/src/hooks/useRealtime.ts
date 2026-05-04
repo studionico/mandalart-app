@@ -28,4 +28,13 @@ export function useRealtime(onChange: () => void, debounceMs = SYNC_DEBOUNCE_MS)
       unsubscribe()
     }
   }, [user, onChange, debounceMs])
+
+  // useVisibilityResync が pullAll 完了後に dispatch する `app:sync-pulled` を listen。
+  // editor 等で表示中 grid の reload を再発火させる (落とし穴 #22)。
+  useEffect(() => {
+    if (!user) return
+    const onSyncPulled = () => onChange()
+    window.addEventListener('app:sync-pulled', onSyncPulled)
+    return () => window.removeEventListener('app:sync-pulled', onSyncPulled)
+  }, [user, onChange])
 }

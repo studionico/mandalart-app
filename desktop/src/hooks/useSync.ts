@@ -67,5 +67,15 @@ export function useSync() {
     }
   }, [user])
 
+  // useVisibilityResync が pullAll 完了後に dispatch する `app:sync-pulled` を listen。
+  // realtime 取りこぼしの保険同期で SQLite に追加された行を UI に反映させるため、
+  // reloadKey を bump して dashboard 等の load() を再実行する (落とし穴 #22)。
+  useEffect(() => {
+    if (!user) return
+    const onSyncPulled = () => setReloadKey((k) => k + 1)
+    window.addEventListener('app:sync-pulled', onSyncPulled)
+    return () => window.removeEventListener('app:sync-pulled', onSyncPulled)
+  }, [user])
+
   return { status, lastSync, error, stats, sync, reloadKey }
 }

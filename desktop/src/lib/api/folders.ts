@@ -193,6 +193,30 @@ export function _resetInboxBootstrap(): void {
   inboxBootstrapPromise = null
 }
 
+/**
+ * `folder_id IS NULL` の mandalarts を Inbox folder に振り分ける。
+ *
+ * `ensureInboxFolder` は singleton promise なので bootstrap 時 1 回しか走らないが、
+ * **realtime / visibility resync で他デバイス (例: iOS、folder API 未実装) から
+ * `folder_id=null` で push されたマンダラートが pull されてきた直後** に呼び出すと、
+ * 即座に Inbox に振り分けられて Dashboard の folder filter (`m.folder_id = ?`) で
+ * ヒットするようになる。これがないと再起動するまで宙ぶらりんになる (落とし穴 #22 関連)。
+ *
+ * @returns 振り分けた行数 (0 なら orphan なし)
+ */
+export async function adoptOrphanMandalartsToInbox(): Promise<number> {
+  const inboxId = await ensureInboxFolder()
+  const orphans = await query<{ id: string }>(
+    'SELECT id FROM mandalarts WHERE folder_id IS NULL AND deleted_at IS NULL',
+  )
+  if (orphans.length === 0) return 0
+  await execute(
+    'UPDATE mandalarts SET folder_id = ?, updated_at = ? WHERE folder_id IS NULL AND deleted_at IS NULL',
+    [inboxId, now()],
+  )
+  return orphans.length
+}
+
 async function doEnsureInboxFolder(): Promise<string> {
   // 全 system folder を作成日昇順で取得 (最古を canonical 採用)
   const all = await query<{ id: string }>(

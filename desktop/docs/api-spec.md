@@ -266,6 +266,15 @@ deleteFolder(id: string): Promise<void>
 //  - その後、folder_id IS NULL の mandalarts を Inbox に振り分け
 // アプリ起動時 + ダッシュボードマウント時に呼ぶ想定
 ensureInboxFolder(): Promise<string>
+
+// folder_id IS NULL の mandalarts を Inbox folder に振り分ける。
+// `ensureInboxFolder` は singleton promise で bootstrap 時 1 回しか走らないが、
+// 本関数は **realtime / visibility resync で他デバイス (folder API 未実装の iOS 等) から
+// folder_id=null で push されたマンダラートを pull した直後** に呼ぶことを想定し、
+// 何度でも実行可能 (毎回 SELECT → UPDATE する)。これがないと Dashboard の
+// folder filter (`m.folder_id = ?`) でヒットせず再起動するまで宙ぶらりんになる
+// (落とし穴 #22 関連)。
+adoptOrphanMandalartsToInbox(): Promise<number>  // 振り分けた行数を返す
 ```
 
 ---

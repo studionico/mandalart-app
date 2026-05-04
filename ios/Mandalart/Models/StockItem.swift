@@ -10,7 +10,7 @@ final class StockItem {
     var createdAt: Date
 
     init(
-        id: String = UUID().uuidString,
+        id: String = IDGenerator.uuid(),
         snapshot: String = "",
         createdAt: Date = Date()
     ) {

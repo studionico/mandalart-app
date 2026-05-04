@@ -83,7 +83,7 @@ SwiftData の `@Model` field は camelCase、Postgres / desktop SQLite は snake
 
 ## 実例: ID 生成 / 同期メタ
 
-- `id`: `UUID().uuidString` で生成 (32 桁 hex + dash)
+- `id`: **必ず [`IDGenerator.uuid()`](../Mandalart/Utils/IDGenerator.swift) 経由** で生成 (= `UUID().uuidString.lowercased()`)。Swift 標準の `UUID().uuidString` は大文字で desktop の `crypto.randomUUID()` (小文字) と非互換になり、`===` 比較が失敗する経路がある ([`pitfalls.md`](pitfalls.md) #6 参照)
 - `createdAt` / `updatedAt`: SwiftData 側は `Date()`。Postgres 側は `now()`
 - `syncedAt`: `pullAll` で `updatedAt` と同じ値に揃える / `pushPending` で push 成功時に `updatedAt` を代入
 - `deletedAt`: soft delete。permanent delete は別 API (`MandalartFactory.permanentDelete`)

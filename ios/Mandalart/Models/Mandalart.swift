@@ -19,7 +19,7 @@ final class Mandalart {
     var syncedAt: Date?
 
     init(
-        id: String = UUID().uuidString,
+        id: String = IDGenerator.uuid(),
         title: String,
         rootCellId: String,
         imagePath: String? = nil,

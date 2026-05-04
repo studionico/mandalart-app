@@ -9,6 +9,7 @@ import HelpDialog from './components/help/HelpDialog'
 import { useGlobalShortcut } from './hooks/useGlobalShortcut'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import { useAuthBootstrap } from './hooks/useAuthBootstrap'
+import { useVisibilityResync } from './hooks/useVisibilityResync'
 import { useTheme } from './hooks/useTheme'
 import { useBeforeQuit } from './hooks/useBeforeQuit'
 import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
@@ -26,6 +27,7 @@ type HelpMode = 'welcome' | 'manual' | null
 export default function App() {
   useGlobalShortcut()
   useAuthBootstrap()
+  useVisibilityResync()
   useTheme()
   useBeforeQuit()
   useCloudEmptyCellsCleanup()

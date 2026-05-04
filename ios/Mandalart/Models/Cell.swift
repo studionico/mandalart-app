@@ -16,7 +16,7 @@ final class Cell {
     var syncedAt: Date?
 
     init(
-        id: String = UUID().uuidString,
+        id: String = IDGenerator.uuid(),
         gridId: String,
         position: Int,
         text: String = "",
