@@ -17,6 +17,9 @@ struct GridView3x3: View {
     let mandalart: Mandalart
     let transitionKind: DrillTransitionKind
     let readOnly: Bool
+    /// 各 position の cell が drill 元として子グリッドを持つかの mask (= 9 要素 Bool)。
+    /// 空配列を渡すと全位置 false 扱い (= 9×9 内 inner / 旧呼び出し互換)。
+    let hasChildAtPosition: [Bool]
     let onDrillRequest: ((Cell) -> Void)?
 
     init(
@@ -25,6 +28,7 @@ struct GridView3x3: View {
         mandalart: Mandalart,
         transitionKind: DrillTransitionKind = .initial,
         readOnly: Bool = false,
+        hasChildAtPosition: [Bool] = [],
         onDrillRequest: ((Cell) -> Void)? = nil
     ) {
         self.gridId = gridId
@@ -32,7 +36,12 @@ struct GridView3x3: View {
         self.mandalart = mandalart
         self.transitionKind = transitionKind
         self.readOnly = readOnly
+        self.hasChildAtPosition = hasChildAtPosition
         self.onDrillRequest = onDrillRequest
+    }
+
+    private func hasChild(at position: Int) -> Bool {
+        position < hasChildAtPosition.count ? hasChildAtPosition[position] : false
     }
 
     private let columns = Array(
@@ -50,6 +59,7 @@ struct GridView3x3: View {
                     mandalart: mandalart,
                     transitionKind: transitionKind,
                     readOnly: readOnly,
+                    hasChild: hasChild(at: position),
                     onDrillRequest: onDrillRequest
                 )
                 // grid 切替時 (= drill / drill-up) に CellView の @State (`text`) が

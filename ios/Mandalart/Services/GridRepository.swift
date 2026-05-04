@@ -101,6 +101,24 @@ enum GridRepository {
         return slots
     }
 
+    /// 指定 grid の displayCells 9 要素について、**各 cell に子グリッドが存在するか** を Bool 配列で返す。
+    /// CellView の border 太さ (= 子あり時 1.5pt、なし時 0.5pt) 描画に使う。
+    ///
+    /// 中心 (position=4) は drill 元にならないので常に false。
+    /// 周辺セル各々について `findChildGrid(parentCellId:)` を 1 回呼び出し (= 最大 8 回の DB fetch)。
+    /// 結果は EditorView の各 render 周期で計算 (= grid 切替や cell 更新で再計算)。
+    static func hasChildMaskForGrid(
+        displayCells: [Cell?],
+        in context: ModelContext
+    ) -> [Bool] {
+        var mask: [Bool] = Array(repeating: false, count: GridConstants.gridCellCount)
+        for (i, cell) in displayCells.enumerated() {
+            guard i != GridConstants.centerPosition, let cell else { continue }
+            mask[i] = findChildGrid(parentCellId: cell.id, in: context) != nil
+        }
+        return mask
+    }
+
     /// 同じ `parent_cell_id` を持つ兄弟 grid 群 (= 並列) を `sortOrder` 昇順で返す。
     /// `parentCellId == nil` の場合は同じ mandalart の root grids 群 (= 並列ルート) を返す。
     /// 並列ナビ (← / →) の対象集合を計算するのに使う。

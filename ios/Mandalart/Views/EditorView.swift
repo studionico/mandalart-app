@@ -10,6 +10,9 @@ struct EditorView: View {
     let onBack: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    /// 9×9 view を実用可能な画面幅か (= iPad regular)。compact (iPhone / iPad Split View 1/3 等)
+    /// では grid セルが 14pt 級まで縮小して読めなくなるため非表示にする。
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query private var mandalarts: [Mandalart]
     @Query private var grids: [Grid]
     @Query private var allCells: [Cell]
@@ -25,6 +28,12 @@ struct EditorView: View {
     @State private var lastTransitionKind: DrillTransitionKind = .initial
     /// 3×3 編集モード / 9×9 俯瞰モード。toggle ボタンで切替。9×9 中は edit / drill 全 NOOP。
     @State private var viewMode: EditorViewMode = .grid3x3
+
+    /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
+    /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
+    private var nineByNineSupported: Bool {
+        horizontalSizeClass == .regular
+    }
 
     init(mandalartId: String, onBack: @escaping () -> Void) {
         self.mandalartId = mandalartId
@@ -91,23 +100,36 @@ struct EditorView: View {
                             .padding(.leading, 32)
                             .padding(.top, 20)
 
-                            // 右上 floating 9×9 / 3×3 toggle ボタン。spring + opacity で滑らかに切替。
-                            Button {
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                    viewMode = viewMode == .grid3x3 ? .grid9x9 : .grid3x3
+                            // 右上 floating 9×9 / 3×3 toggle ボタン。iPad regular のみ表示。
+                            // iPhone / iPad compact (Split View 1/3 等) では grid セルが小さすぎる
+                            // ため非表示 + viewMode は .grid3x3 固定。
+                            if nineByNineSupported {
+                                Button {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                        viewMode = viewMode == .grid3x3 ? .grid9x9 : .grid3x3
+                                    }
+                                } label: {
+                                    Text(viewMode == .grid3x3 ? "9×9" : "3×3")
+                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 56, height: 36)
+                                        .background(.ultraThinMaterial, in: Capsule())
                                 }
-                            } label: {
-                                Text(viewMode == .grid3x3 ? "9×9" : "3×3")
-                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                    .frame(width: 56, height: 36)
-                                    .background(.ultraThinMaterial, in: Capsule())
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                .padding(.trailing, 16)
+                                .padding(.top, 20)
+                                .accessibilityLabel(viewMode == .grid3x3 ? "9×9 ビューに切替" : "3×3 ビューに戻る")
                             }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .topTrailing)
-                            .padding(.trailing, 16)
-                            .padding(.top, 20)
-                            .accessibilityLabel(viewMode == .grid3x3 ? "9×9 ビューに切替" : "3×3 ビューに戻る")
+                        }
+                        .onChange(of: horizontalSizeClass) { _, newClass in
+                            // iPad で Split View を縮小して compact に変わった場合、
+                            // 9×9 中なら 3×3 へ強制復帰 (= ボタンが消えてユーザーが戻れなくなるのを防止)
+                            if newClass != .regular, viewMode != .grid3x3 {
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                    viewMode = .grid3x3
+                                }
+                            }
                         }
                         .ignoresSafeArea(.container, edges: .leading)
                     }
@@ -123,6 +145,9 @@ struct EditorView: View {
         } message: {
             Text("編集するにはダッシュボードに戻り、カードを長押しして「ロックを外す」を選んでください。")
         }
+        // editor 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` トーンに揃える。
+        // safe area 外まで塗りつぶして status bar / home indicator 周辺の透過を防止。
+        .background(NeutralPalette.rootBackground.ignoresSafeArea())
     }
 
     /// 上部全幅 lock banner。tap で詳細 alert を表示。
@@ -210,11 +235,16 @@ struct EditorView: View {
                         ) {
                             handleParallelNav(direction: -1, mandalart: mandalart)
                         }
+                        let cells = GridRepository.displayCells(for: grid, in: modelContext)
                         GridView3x3(
                             gridId: grid.id,
-                            displayCells: GridRepository.displayCells(for: grid, in: modelContext),
+                            displayCells: cells,
                             mandalart: mandalart,
                             transitionKind: lastTransitionKind,
+                            hasChildAtPosition: GridRepository.hasChildMaskForGrid(
+                                displayCells: cells,
+                                in: modelContext
+                            ),
                             onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
                         )
                         .frame(width: gridSize, height: gridSize)

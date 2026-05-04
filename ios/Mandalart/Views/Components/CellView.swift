@@ -28,6 +28,9 @@ struct CellView: View {
     let transitionKind: DrillTransitionKind
     /// readOnly mode (= 9×9 view 内の inner 3×3)。tap / longPress / context menu 全 NOOP、focus 不可。
     let readOnly: Bool
+    /// このセルが drill 元として子グリッドを持つか (= peripheral で既に drill 済)。border 太さ出し分けに使用。
+    /// 中心セル / 空セル / readOnly では未使用。
+    let hasChild: Bool
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -45,6 +48,7 @@ struct CellView: View {
         mandalart: Mandalart,
         transitionKind: DrillTransitionKind = .initial,
         readOnly: Bool = false,
+        hasChild: Bool = false,
         onDrillRequest: ((Cell) -> Void)? = nil
     ) {
         self.cell = cell
@@ -53,6 +57,7 @@ struct CellView: View {
         self.mandalart = mandalart
         self.transitionKind = transitionKind
         self.readOnly = readOnly
+        self.hasChild = hasChild
         self.onDrillRequest = onDrillRequest
         _text = State(initialValue: cell?.text ?? "")
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
@@ -74,12 +79,27 @@ struct CellView: View {
         !readOnly && !isCenter && !isEmpty
     }
 
-    /// セル背景色 (画像がない場合のみ): cell.color → preset / なければ system 既定。
+    /// セル背景色 (画像がない場合のみ): cell.color → preset / なければ desktop と同じ
+    /// `bg-white dark:bg-neutral-900` トーン。
     private var cellBackground: Color {
         if let key = cell?.color, let preset = PresetColors.find(key) {
             return preset.backgroundColor(for: colorScheme)
         }
-        return Color(uiColor: .secondarySystemBackground)
+        return NeutralPalette.surfaceBackground
+    }
+
+    /// 中心 / 周辺 / 子あり / readOnly に応じた border 太さ。
+    /// readOnly (= 9×9 view 内の inner) は中心 1pt / 周辺 1pt で hairline 回避。
+    private var borderLineWidth: CGFloat {
+        if readOnly {
+            return LayoutConstants.cellNineByNineInnerBorder
+        }
+        if isCenter {
+            return LayoutConstants.cellCenterBorder
+        }
+        return hasChild
+            ? LayoutConstants.cellPeripheralWithChildBorder
+            : LayoutConstants.cellPeripheralBorder
     }
 
     var body: some View {
@@ -100,8 +120,8 @@ struct CellView: View {
                     cellBackground
                 }
 
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.primary.opacity(0.4), lineWidth: isCenter ? 2 : 1)
+                RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
+                    .stroke(Color.primary.opacity(0.4), lineWidth: borderLineWidth)
 
                 // TextField は常時 render (focus binding を機能させるため)
                 TextField("", text: $text, axis: .vertical)
@@ -132,7 +152,7 @@ struct CellView: View {
         .aspectRatio(1, contentMode: .fit)
         // GeometryReader 内で `.frame()` + `.clipped()` で Image を正確に枠内サイズに固定済だが、
         // 念のため外側でも `.clipShape` を適用して角丸を確保。
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius))
         // drill / drill-up / 並列ナビ / 初回表示で stagger fade-in。
         // remount (= GridView3x3 が `.id(...)` で view identity を変える) ごとに onAppear が
         // 発火し、position と transitionKind から計算した delay 後に visible=true に補間。

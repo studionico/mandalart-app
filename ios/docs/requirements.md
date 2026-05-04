@@ -28,6 +28,8 @@ Landscape 2 ペイン構成 (`HStack` ベース):
 - 左ペイン: `.aspectRatio(1, contentMode: .fit)` で正方形クランプ + 垂直中央寄せ
 - 右ペイン: 上に breadcrumb (現在のドリル位置)、下に メモ / ストック の `TabView`
 - 9×9 表示時も同じ正方形クランプで、3×3 を 9 個ネスト
+- **9×9 view は iPad regular のみ実用**: iPhone Landscape (= horizontalSizeClass .compact) では grid サイズが ~380pt / セル ~14pt まで縮小するため非表示にする ([`pitfalls.md`](pitfalls.md) #11)。toggle ボタンも非表示、`viewMode` は `.grid3x3` 固定
+- **breadcrumb 折りたたみ**: 4 階層以上で `[root] > [...] menu > [N-1] > [N]` 表示にして overflow 回避 ([`Breadcrumb.swift`](../Mandalart/Views/Components/Breadcrumb.swift))
 
 ### Dashboard (Phase 4)
 

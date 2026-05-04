@@ -62,6 +62,10 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             mainGrid
+                // dashboard 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` に揃える。
+                // NavigationStack の背景透過を防ぐため scrollContentBackground は hidden にせず、
+                // ZStack overlay で root 全面に塗る。
+                .background(NeutralPalette.rootBackground.ignoresSafeArea())
                 .navigationBarTitleDisplayMode(.inline)
                 .searchable(text: $query, placement: .toolbar, prompt: "検索")
             .toolbar {
@@ -383,8 +387,8 @@ private struct MandalartCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(uiColor: .secondarySystemBackground))
+            RoundedRectangle(cornerRadius: LayoutConstants.cardCornerRadius)
+                .fill(NeutralPalette.cardBackground)
                 .aspectRatio(1, contentMode: .fit)
                 .overlay(alignment: .topTrailing) {
                     HStack(spacing: 4) {

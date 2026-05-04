@@ -73,7 +73,7 @@ struct MemoTab: View {
             .font(.callout)
             .scrollContentBackground(.hidden)
             .padding(8)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(NeutralPalette.surfaceBackground)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .focused($isEditing)
             .disabled(mandalart.locked)
@@ -96,7 +96,7 @@ struct MemoTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
         }
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(NeutralPalette.surfaceBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 

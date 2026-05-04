@@ -147,6 +147,57 @@ self.client = SupabaseClient(
 
 **精緻な orbit (matchedGeometry 連鎖)** は Phase 6c 以降の課題。今は遷移種別 (`drillDown` / `drillUp` / `parallel` / `initial`) ごとの sequence を [`AnimationStagger.swift`](../Mandalart/Utils/AnimationStagger.swift) に集約し、desktop の時計回り順 `[7,6,3,0,1,2,5,8]` (周辺) を踏襲。
 
+### #10. 見た目の規則は desktop が canonical、iOS は pt にスケールして揃える
+
+**症状になる前段階の問題**: iOS と desktop で同じプロダクトなのに border 太さ / cornerRadius / カラートークンが別々に決まっており、cross-device で開いたときの印象がバラついていた。
+
+**方針**: **配色トークンと border / cornerRadius の規則は desktop ([`../../desktop/src/constants/colors.ts`](../../desktop/src/constants/colors.ts), [`../../desktop/src/components/editor/Cell.tsx`](../../desktop/src/components/editor/Cell.tsx)) を canonical** とし、iOS 側は同じ ratio で pt にスケール。
+
+主な対応 (`LayoutConstants` で定数化、[`Constants.swift`](../Mandalart/Utils/Constants.swift)):
+
+| 要素 | desktop | iOS pt |
+|---|---|---|
+| 中心セル border | 6px | `cellCenterBorder = 3` |
+| 周辺セル border | 1px | `cellPeripheralBorder = 0.5` (hairline) |
+| 周辺 + 子グリッドあり | 2px | `cellPeripheralWithChildBorder = 1.5` |
+| 9×9 inner cell border | 2px | `cellNineByNineInnerBorder = 1` (= readOnly 時 hairline 回避) |
+| cellCornerRadius | 8px | `cellCornerRadius = 8` (pt) |
+| dashboard card cornerRadius | 4px | `cardCornerRadius = 4` (pt) |
+
+**フォント weight は iOS .system 維持** (= Dynamic Type 対応のため強制 desktop 同期しない)。`.semibold` / `.regular` は iOS ネイティブ感を優先。
+
+**子グリッドあり判定**: `findChildGrid` は per-cell に O(N) クエリなので、`GridRepository.hasChildMaskForGrid(displayCells:in:)` で 9 要素 Bool を一度に計算 → `GridView3x3` → `CellView` に props 経路で pass-through。9×9 view 内では readOnly mode になるので mask 計算スキップ。
+
+### #11a. 背景トーンは Apple semantic color ではなく Tailwind neutral 系列に揃える
+
+**症状になる前段階の問題**: iOS の `Color(uiColor: .secondarySystemBackground)` (= ライト 242,242,247 / ダーク 28,28,30) は Apple HIG 標準のグレー寄りで、desktop の `bg-white dark:bg-neutral-900` (= 255,255,255 / 23,23,23) と RGB がズレる。同じマンダラートを iPhone と desktop で並べると、空セル / カード / root 背景の色味が違って見える。
+
+**方針**: 背景色は **Tailwind neutral palette を直接コピー** した [`NeutralPalette`](../Mandalart/Utils/NeutralPalette.swift) を使う:
+
+| iOS 用途 | NeutralPalette key | desktop 対応 | RGB (light/dark) |
+|---|---|---|---|
+| editor / dashboard root | `rootBackground` | `bg-neutral-50 dark:bg-neutral-950` | 250,250,250 / 10,10,10 |
+| 空セル / memo / breadcrumb 領域 | `surfaceBackground` | `bg-white dark:bg-neutral-900` | 255,255,255 / 23,23,23 |
+| dashboard card | `cardBackground` | `bg-white dark:bg-neutral-950` | 255,255,255 / 10,10,10 |
+| 9×9 outer gap (将来) | `dividerSurface` | `bg-neutral-300 dark:bg-neutral-700` | 212,212,212 / 64,64,64 |
+
+**注意**: Apple HIG の semantic color を使わない方針上、iOS の Increase Contrast / アクセシビリティ自動 contrast 補正は色味には適用されない (Dynamic Type / VoiceOver 等は引き続き有効)。プロダクト一貫性を優先した妥協。
+
+**floating UI 素材** (= home button / 9×9 toggle / lock banner / parallel chevron): `.ultraThinMaterial` を維持。desktop の `bg-white/90 backdrop-blur` と概念的に等価で、iOS ネイティブ感を残す。
+
+### #11. 9×9 view は iPad regular のみ実用、iPhone は非表示
+
+**症状**: iPhone Pro Landscape (grid ~380pt) で 9×9 ビューを開くと 1 セルが約 14pt × 14pt まで縮小してテキスト読めない。toggle ボタンが UI を占有して使えない機能を提示し続ける。
+
+**対処**: [`EditorView`](../Mandalart/Views/EditorView.swift) で `@Environment(\.horizontalSizeClass)` を読み、`hsc == .regular` (= iPad regular) のときのみ 9×9 toggle ボタンを表示。compact (iPhone / iPad Split View 1/3) では非表示 + `viewMode` が `.grid9x9` のまま縮小された場合は `.onChange(of: hsc)` で `.grid3x3` に強制復帰。
+
+| 環境 | hsc | 9×9 ボタン |
+|---|---|---|
+| iPhone Landscape | .compact | 非表示 |
+| iPad Landscape full | .regular | 表示 |
+| iPad Split View 1/3 | .compact | 非表示 (open 中なら 3×3 強制復帰) |
+| iPad Split View 1/2 | .regular | 表示 |
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。
