@@ -118,15 +118,29 @@ struct EditorView: View {
 
     @ViewBuilder
     private func content(mandalart: Mandalart, grid: Grid) -> some View {
-        // 外側 HStack は ZStack を埋め、HStack の縦中央配置で各ペインを縦中央に置く。
-        // 左ペインは grid を縦最大、右ペインは memo を縦最大にする。
-        HStack(spacing: 12) {
-            // 左ペイン: 3×3 グリッド (正方形) + 両脇に並列ナビボタン。
-            // VStack で Spacer で挟み grid を縦中央 + 縦方向にも最大化 (= aspectRatio が
-            // available height いっぱいまで膨らむ)。
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                HStack(spacing: 8) {
+        // GeometryReader で available size を取り、grid を「縦最大の正方形」、memo を
+        // 「残り横幅」に相対的に割り当てる。横幅余りなく / bottom 揃いを両立する。
+        // (home button は ZStack overlay で top-leading に出るので left pane に leading padding
+        //  56pt を確保して被らないようにする。padding は GeometryReader の outer 側で消費する。)
+        GeometryReader { geo in
+            let availH = geo.size.height
+            let availW = geo.size.width
+            let leadingPad: CGFloat = 56  // home button overlay 退避
+            let trailingPad: CGFloat = 8
+            let outerSpacing: CGFloat = 12  // 左右ペイン間
+            let chevronW: CGFloat = 36
+            let leftInnerSpacing: CGFloat = 8
+            let leftOverhead: CGFloat = chevronW * 2 + leftInnerSpacing * 2
+            let memoMinW: CGFloat = 200
+            // grid は正方形なので min(高さ, 左ペインに割ける最大幅) で確定
+            let leftPaneMaxInnerW = max(0, availW - memoMinW - leadingPad - trailingPad - outerSpacing - leftOverhead)
+            let gridSize = max(0, min(availH, leftPaneMaxInnerW))
+            // memo は残り横幅すべて
+            let memoW = max(memoMinW, availW - leadingPad - trailingPad - outerSpacing - leftOverhead - gridSize)
+
+            HStack(spacing: outerSpacing) {
+                // 左ペイン: chevron + grid + (chevron or +)。grid サイズを明示指定。
+                HStack(spacing: leftInnerSpacing) {
                     parallelNavButton(
                         systemName: "chevron.left",
                         visible: parallelIndex > 0,
@@ -140,31 +154,26 @@ struct EditorView: View {
                         mandalart: mandalart,
                         onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
                     )
+                    .frame(width: gridSize, height: gridSize)
                     rightSlotButton(mandalart: mandalart, grid: grid)
                 }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 左上 home button と被らないように左を少しだけ空ける
-            .padding(.leading, 56)
+                .padding(.leading, leadingPad)
 
-            // 右ペイン: breadcrumb + メモ (memo を縦最大化)。
-            VStack(alignment: .leading, spacing: 8) {
-                Breadcrumb(items: breadcrumb) { index in
-                    navigateToBreadcrumb(index, mandalart: mandalart)
+                // 右ペイン: breadcrumb / divider / memo。高さ = grid と同じ (bottom 揃え)
+                VStack(alignment: .leading, spacing: 8) {
+                    Breadcrumb(items: breadcrumb) { index in
+                        navigateToBreadcrumb(index, mandalart: mandalart)
+                    }
+                    Divider()
+                    MemoTab(grid: grid, mandalart: mandalart)
+                        .id(grid.id)  // grid 切替時に MemoTab の @State を再初期化
+                        .frame(maxHeight: .infinity)  // 残り縦領域を memo が吸収
                 }
-                Divider()
-                MemoTab(grid: grid, mandalart: mandalart)
-                    .id(grid.id)  // grid 切替時に MemoTab の @State を再初期化
-                    .frame(maxHeight: .infinity)  // 残り縦領域を memo が吸収
+                .frame(width: memoW, height: gridSize)
+                .padding(.trailing, trailingPad)
             }
-            .frame(width: 240)
-            .frame(maxHeight: .infinity)
-            .padding(.trailing, 8)
+            .frame(width: availW, height: availH)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 4)
     }
 
     /// 右側の並列ナビスロット (= desktop と同様、">" or 末尾なら "+" を同位置に出す)。
