@@ -17,6 +17,7 @@ struct EditorView: View {
     @State private var currentGridId: String?
     @State private var breadcrumb: [BreadcrumbItem] = []
     @State private var didBootstrap: Bool = false
+    @State private var showLockHint: Bool = false
 
     init(mandalartId: String, onBack: @escaping () -> Void) {
         self.mandalartId = mandalartId
@@ -41,42 +42,66 @@ struct EditorView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        Group {
             if let m = mandalart, let grid = currentGrid {
-                content(mandalart: m, grid: grid)
-                    .onAppear { bootstrapIfNeeded(mandalart: m) }
-
-                // 左上 floating controls
-                HStack(spacing: 8) {
-                    Button(action: onBack) {
-                        Image(systemName: "house.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-
+                VStack(spacing: 0) {
                     if m.locked {
-                        HStack(spacing: 4) {
-                            Image(systemName: "lock.fill")
-                            Text("ロック中")
+                        lockBanner
+                    }
+                    ZStack(alignment: .topLeading) {
+                        content(mandalart: m, grid: grid)
+                            .onAppear { bootstrapIfNeeded(mandalart: m) }
+
+                        // 左上 floating home button (lock banner と縦並び)
+                        Button(action: onBack) {
+                            Image(systemName: "house.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(.primary)
+                                .frame(width: 36, height: 36)
+                                .background(.ultraThinMaterial, in: Circle())
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
+                        .buttonStyle(.plain)
+                        .padding(.leading, 12)
+                        .padding(.top, 8)
                     }
                 }
-                .padding(.leading, 12)
-                .padding(.top, 8)
             } else {
                 Text("マンダラートが見つかりません")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .alert("ロック中のマンダラート", isPresented: $showLockHint) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("編集するにはダッシュボードに戻り、カードを長押しして「ロックを外す」を選んでください。")
+        }
+    }
+
+    /// 上部全幅 lock banner。tap で詳細 alert を表示。
+    private var lockBanner: some View {
+        Button {
+            showLockHint = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.fill")
+                Text("ロック中 — 編集できません")
+                    .lineLimit(1)
+                Spacer()
+                Text("解除はダッシュボードから")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

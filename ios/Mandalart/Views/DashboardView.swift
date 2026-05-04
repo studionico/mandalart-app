@@ -61,18 +61,18 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                folderTabBar
-                Divider()
-                mainGrid
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .toolbar, prompt: "検索")
+            mainGrid
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, placement: .toolbar, prompt: "検索")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: {
                         Image(systemName: auth.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
                     }
+                }
+                // 人アイコン横の空きスペースに folder tab を配置 (= 縦スペース節約)
+                ToolbarItem(placement: .principal) {
+                    folderTabBar
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -117,11 +117,11 @@ struct DashboardView: View {
         .onChange(of: foldersRaw.count) { _, _ in initSelectedFolder() }
     }
 
-    // MARK: - Folder tab bar (top horizontal scroll)
+    // MARK: - Folder tab bar (toolbar principal slot)
 
     private var folderTabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(sortedFolders) { folder in
                     folderTab(folder)
                 }
@@ -129,17 +129,14 @@ struct DashboardView: View {
                     newFolderName = ""
                     showAddFolder = true
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "folder.badge.plus")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
     }
 
@@ -147,24 +144,22 @@ struct DashboardView: View {
     private func folderTab(_ folder: Folder) -> some View {
         let isSelected = folder.id == selectedFolderId
         let count = mandalartsRaw.filter { $0.folderId == folder.id && $0.deletedAt == nil }.count
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Image(systemName: folder.isSystem ? "tray.fill" : "folder.fill")
-                .font(.caption)
+                .font(.caption2)
             Text(folder.name)
-                .font(.callout)
+                .font(.subheadline)
                 .fontWeight(isSelected ? .semibold : .regular)
                 .lineLimit(1)
             if count > 0 {
                 Text("\(count)")
                     .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.primary.opacity(0.1)))
+                    .foregroundStyle(.tertiary)
             }
         }
         .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
         .background(
             Capsule()
                 .fill(isSelected ? Color.primary.opacity(0.12) : Color.clear)

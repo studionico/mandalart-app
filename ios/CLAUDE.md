@@ -48,9 +48,10 @@
 
 | カテゴリ | 場所 | 代表定数 |
 |---|---|---|
-| グリッド構造 | `GridConstants` | `centerPosition`, `gridCellCount`, `orbitOrder` |
+| グリッド構造 | `GridConstants` | `centerPosition`, `gridSide`, `gridCellCount`, `orbitOrder` |
 | レイアウト (pt) | `LayoutConstants` | `outerGridGap`, `cellBaseFontSize`, `dashboardCardSize` |
 | タイミング (ms) | `TimingConstants` | `animStaggerMs`, `animFadeMs`, `convergeDurationMs` |
+| カラープリセット | [`PresetColors`](Mandalart/Utils/PresetColors.swift) | `all` (10 色)、`find(_:)`。desktop の `constants/colors.ts` と完全に同じ key 文字列 |
 
 ### モデル / 同期
 
