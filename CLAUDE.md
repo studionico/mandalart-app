@@ -7,6 +7,26 @@
 - iOS 配下の作業 → [`ios/CLAUDE.md`](ios/CLAUDE.md)
 - 両方触るとき → 両方を読む
 
+## ⚠️ Supabase Realtime 緊急停止中 (2026-05-04 〜)
+
+Supabase 運営から **Realtime Messages 過剰使用警告** (10.4M / 2.2M 制限、約 5 倍超過) を受け、両プラットフォームの自動同期経路を緊急停止中。
+
+**停止中の経路**:
+- iOS: `RealtimeService.subscribe` / 15 秒 auto-push polling / `scenePhase` 遷移時の pull/push (= [`MandalartApp.swift`](ios/Mandalart/App/MandalartApp.swift))
+- desktop: [`useSync`](desktop/src/hooks/useSync.ts) と [`useRealtime`](desktop/src/hooks/useRealtime.ts) の `subscribeRemoteChanges` / [`useVisibilityResync`](desktop/src/hooks/useVisibilityResync.ts) の `pullAll`
+
+**残している経路**: サインイン直後 1 回の syncAll/fullSync + 設定画面の手動「今すぐ同期」ボタン
+
+**復帰前のチェックリスト**:
+1. Supabase Dashboard → Project → Reports → Realtime Messages の累積グラフが水平に張り付くこと
+2. Supabase 側の `BEFORE UPDATE` トリガによる `updated_at = NOW()` 書き換え動作を確認 (echo を防ぐには無効化が必須かもしれない)
+3. echo skip ロジックを iOS / desktop 両方で完全実装
+4. subscribe 経路を 1 本に統合 (`useSync` と `useRealtime` の重複排除)
+5. iOS の 15 秒 polling は永久に廃止し、mutation 駆動の dirty flag + 60 秒以上 debounce に置換
+
+詳細経緯と段階復帰計画: [`/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md`](/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md)
+desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
+
 ## プロジェクト概要
 
 マンダラート — 3×3 グリッドで思考を階層的に展開するアプリ。**2 つの並列実装** が存在する:
