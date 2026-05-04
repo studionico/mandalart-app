@@ -31,10 +31,15 @@ struct MandalartApp: App {
                 .environment(auth)
                 .task { await auth.bootstrap() }
                 // サインイン状態が変わるたびに発火 (= bootstrap で session 復元時 / 手動サインイン時)。
-                // サインイン直後の初回フル同期 (pull → push) を自動で走らせる。
+                // サインイン直後: フル同期 + realtime 購読開始。サインアウト: realtime 停止。
                 .task(id: auth.isSignedIn) {
                     if auth.isSignedIn {
                         await fullSync()
+                        await RealtimeService.shared.subscribe(
+                            into: sharedModelContainer.mainContext
+                        )
+                    } else {
+                        await RealtimeService.shared.unsubscribe()
                     }
                 }
         }

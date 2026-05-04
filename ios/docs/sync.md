@@ -92,10 +92,23 @@ iOS 側でも同等の対策が必要:
 
 詳細は [`../../desktop/CLAUDE.md`](../../desktop/CLAUDE.md) の落とし穴節 #2 / #5 / #10 / #12 / #17 を参照。
 
+## realtime 購読 + 自動同期 (実装済)
+
+### scene phase ベース自動同期 ([`MandalartApp`](../Mandalart/App/MandalartApp.swift))
+
+- サインイン直後 (`.task(id: auth.isSignedIn)`): 初回フル同期 (pull → push)
+- フォアグラウンド復帰 (`scenePhase == .active`): pullAll
+- バックグラウンド遷移 (`scenePhase == .background`): pushPending
+- realtime 取りこぼしの保険 (= desktop 側 visibility resync 相当)
+
+### realtime 購読 ([`RealtimeService`](../Mandalart/Services/RealtimeService.swift))
+
+- サインイン時に `client.realtime.channel("mandalart-app").onPostgresChange(AnyAction.self, schema: "public", table: T)` を 4 テーブル (folders / mandalarts / grids / cells) で購読
+- **任意の change で 1 秒 debounce の `pullAll` を発火** する単純化方式 (incremental upsert ではない)。理由: 子行の cascade DELETE が realtime では届かない (落とし穴 #5)、incremental update で取りこぼしを再現するのは複雑、`last-write-wins` で冪等な pullAll なら自分自身の echo も無害
+- サインアウト時に `unsubscribe` で channel 切断
+
 ## 未実装 (Phase 3 残作業)
 
-- **realtime 購読**: `client.realtime.channel(...).on(.postgresChanges, ...)` で他端末の変更を即時反映
-- **自動同期**: アプリ起動時 / mandalart 保存時 / 一定間隔のバックグラウンド sync
 - **zombie cleanup / orphan dirty delete**: 落とし穴 #12 への対策
 - **permanent delete の cloud 連動**: 完全削除時に Supabase 側も DELETE する処理 (落とし穴 #6)
 - **OAuth サインイン (Google / GitHub)**: 現状 Email のみ。OAuth は `Associated Domains` capability + `onOpenURL` で deep link を受ける必要がある
