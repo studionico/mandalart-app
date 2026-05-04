@@ -32,8 +32,11 @@ ios/
 │   │   └── AuthStore.swift       @Observable / @MainActor / supabase-swift Auth ラッパ
 │   ├── Services/
 │   │   ├── SupabaseService.swift 共有 SupabaseClient
-│   │   ├── MandalartFactory.swift create / permanentDelete (cascade)
+│   │   ├── MandalartFactory.swift create / permanentDelete (cascade) / cloud cascade + tombstone
+│   │   ├── FolderRepository.swift ensureInboxFolder (重複 system folder 統合) / adoptOrphansToInbox
 │   │   ├── GridRepository.swift  drill helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry)
+│   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
+│   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template

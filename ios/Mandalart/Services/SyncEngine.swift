@@ -128,6 +128,14 @@ final class SyncEngine {
         for c in cells { upsertCell(c, in: context) }
 
         try context.save()
+
+        // 他端末 (folder API 未対応の旧 iOS 等) から folder_id=null で push された
+        // マンダラートを Inbox に振り分ける (desktop 側 adoptOrphanMandalartsToInbox 相当)。
+        // Dashboard が folder filter を入れたとき (Phase 4) に必要。
+        if let adopted = try? FolderRepository.adoptOrphansToInbox(in: context), adopted > 0 {
+            print("[sync] adopted orphan mandalarts to Inbox: \(adopted)")
+        }
+
         return (folders.count, mandalarts.count, grids.count, cells.count)
     }
 

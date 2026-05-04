@@ -6,11 +6,24 @@ import Supabase
 enum MandalartFactory {
     /// Create a new mandalart with its root grid + center cell.
     /// Mirrors desktop's lib/api/mandalarts.ts:createMandalart.
+    ///
+    /// **folderId**: 引数省略時は `FolderRepository.ensureInboxFolder` で取得した Inbox folder の id を
+    /// セットする。これがないと desktop の Dashboard 側 folder filter (`m.folder_id = ?`) でヒットせず
+    /// 一見見えなくなる (= desktop 側 `adoptOrphanMandalartsToInbox` の保険に依存) ので、iOS 側でも
+    /// 必ず folderId を埋める。
     @discardableResult
     static func create(
         title: String,
+        folderId: String? = nil,
         in context: ModelContext
     ) throws -> Mandalart {
+        let resolvedFolderId: String
+        if let folderId {
+            resolvedFolderId = folderId
+        } else {
+            resolvedFolderId = try FolderRepository.ensureInboxFolder(in: context).id
+        }
+
         let rootCellId = IDGenerator.uuid()
         let rootGridId = IDGenerator.uuid()
         let mandalartId = IDGenerator.uuid()
@@ -33,7 +46,8 @@ enum MandalartFactory {
             id: mandalartId,
             title: title,
             rootCellId: rootCellId,
-            lastGridId: nil
+            lastGridId: nil,
+            folderId: resolvedFolderId
         )
 
         context.insert(rootGrid)
