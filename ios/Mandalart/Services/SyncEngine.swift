@@ -18,12 +18,48 @@ final class SyncEngine {
 
     var isSyncing = false
 
+    // MARK: - Tombstone drain
+
+    /// `CloudDeleteTombstone` に積まれた mandalart id について cloud cascade delete を再試行する。
+    /// 成功した id は tombstone から除去。失敗した id は残しておき、次回の pullAll でリトライ。
+    /// サインインしていない場合は no-op (tombstone は維持)。
+    private func drainCloudDeleteTombstones() async {
+        let pending = CloudDeleteTombstone.current()
+        guard !pending.isEmpty else { return }
+        guard (try? await client.auth.session) != nil else { return }
+
+        for mandalartId in pending {
+            do {
+                // cloud から該当 mandalart の grid id を引いて cascade delete
+                let cloudGrids: [CloudGridIdOnly] = try await client.from("grids")
+                    .select("id")
+                    .eq("mandalart_id", value: mandalartId)
+                    .execute().value
+                let gridIds = cloudGrids.map { $0.id }
+                try await MandalartFactory.deleteFromCloud(
+                    mandalartId: mandalartId,
+                    gridIds: gridIds,
+                    client: client
+                )
+                CloudDeleteTombstone.remove(mandalartId)
+            } catch {
+                print("[sync] tombstone drain failed for \(mandalartId):", error)
+                // tombstone 残置、次回リトライ
+            }
+        }
+    }
+
     // MARK: - Pull
 
     @discardableResult
     func pullAll(into context: ModelContext) async throws -> (folders: Int, mandalarts: Int, grids: Int, cells: Int) {
         isSyncing = true
         defer { isSyncing = false }
+
+        // 0. tombstone drain: オフライン / 未サインイン中に permanent delete された
+        //    マンダラートを cloud から cascade delete する。これがないと次の fetch で
+        //    zombie 復活する (落とし穴 #6)。
+        await drainCloudDeleteTombstones()
 
         async let foldersTask: [CloudFolder] = client.from("folders")
             .select("id, name, sort_order, is_system, created_at, updated_at, deleted_at")
@@ -284,6 +320,11 @@ struct CloudCell: Codable {
     let created_at: String
     let updated_at: String
     let deleted_at: String?
+}
+
+/// Tombstone drain で「mandalart に紐づく grid の id だけ」を取りたいときの軽量 DTO。
+struct CloudGridIdOnly: Codable {
+    let id: String
 }
 
 // MARK: - Push payload builders

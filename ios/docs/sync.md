@@ -107,8 +107,18 @@ iOS 側でも同等の対策が必要:
 - **任意の change で 1 秒 debounce の `pullAll` を発火** する単純化方式 (incremental upsert ではない)。理由: 子行の cascade DELETE が realtime では届かない (落とし穴 #5)、incremental update で取りこぼしを再現するのは複雑、`last-write-wins` で冪等な pullAll なら自分自身の echo も無害
 - サインアウト時に `unsubscribe` で channel 切断
 
+## permanent delete の cloud 連動 (実装済)
+
+[`MandalartFactory.permanentDelete`](../Mandalart/Services/MandalartFactory.swift) は **local 物理削除後に Supabase 側でも cascade delete** する:
+
+1. ローカル削除 (cells → grids → mandalart)
+2. サインイン中なら cloud 側 `cells WHERE grid_id IN (...)` → grids → mandalarts の順で cascade delete
+3. cloud 削除失敗 / 未サインイン時は **`CloudDeleteTombstone` に id を積む** ([`Services/CloudDeleteTombstone.swift`](../Mandalart/Services/CloudDeleteTombstone.swift)、UserDefaults 永続)
+4. 次回 [`SyncEngine.pullAll`](../Mandalart/Services/SyncEngine.swift) 冒頭で `drainCloudDeleteTombstones` が tombstone を drain (= cascade cloud delete をリトライ) し、成功した id は除去
+
+これがないとオフライン削除 → 再サインインで **「マンダラートが zombie 復活して再削除が必要」** になる (落とし穴 #6 の典型パターン)。tombstone は永続化されるので、アプリを kill/再起動しても削除予定 id は失われない。
+
 ## 未実装 (Phase 3 残作業)
 
 - **zombie cleanup / orphan dirty delete**: 落とし穴 #12 への対策
-- **permanent delete の cloud 連動**: 完全削除時に Supabase 側も DELETE する処理 (落とし穴 #6)
 - **OAuth サインイン (Google / GitHub)**: 現状 Email のみ。OAuth は `Associated Domains` capability + `onOpenURL` で deep link を受ける必要がある

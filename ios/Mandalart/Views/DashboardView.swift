@@ -25,7 +25,7 @@ struct DashboardView: View {
                                 .onTapGesture { onOpenMandalart(m.id) }
                                 .contextMenu {
                                     Button(role: .destructive) {
-                                        try? MandalartFactory.permanentDelete(m, in: modelContext)
+                                        Task { try? await MandalartFactory.permanentDelete(m, in: modelContext) }
                                     } label: {
                                         Label("削除", systemImage: "trash")
                                     }
