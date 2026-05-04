@@ -18,6 +18,8 @@ struct EditorView: View {
     @State private var breadcrumb: [BreadcrumbItem] = []
     @State private var didBootstrap: Bool = false
     @State private var showLockHint: Bool = false
+    @State private var parallelGrids: [Grid] = []
+    @State private var parallelIndex: Int = 0
 
     init(mandalartId: String, onBack: @escaping () -> Void) {
         self.mandalartId = mandalartId
@@ -35,8 +37,18 @@ struct EditorView: View {
     private var mandalart: Mandalart? { mandalarts.first }
 
     private var currentGrid: Grid? {
-        if let id = currentGridId, let g = grids.first(where: { $0.id == id }) {
-            return g
+        if let id = currentGridId {
+            if let g = grids.first(where: { $0.id == id }) {
+                return g
+            }
+            // @Query 反映遅延 fallback: 直前に context.insert したばかりの新 grid (= 並列追加直後)
+            // は @Query にまだ載っていないので context から直接引く
+            let descriptor = FetchDescriptor<Grid>(
+                predicate: #Predicate<Grid> { $0.id == id && $0.deletedAt == nil }
+            )
+            if let g = (try? modelContext.fetch(descriptor))?.first {
+                return g
+            }
         }
         return grids.first(where: { $0.parentCellId == nil })
     }
@@ -107,16 +119,49 @@ struct EditorView: View {
     @ViewBuilder
     private func content(mandalart: Mandalart, grid: Grid) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            // 左ペイン: 3×3 グリッド (正方形、上下センタリング)
+            // 左ペイン: 3×3 グリッド (正方形、上下センタリング) + 両脇に並列ナビボタン
             VStack {
                 Spacer(minLength: 0)
-                GridView3x3(
-                    gridId: grid.id,
-                    displayCells: GridRepository.displayCells(for: grid, in: modelContext),
-                    mandalart: mandalart,
-                    onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
-                )
+                HStack(spacing: 12) {
+                    parallelNavButton(
+                        systemName: "chevron.left",
+                        visible: parallelIndex > 0,
+                        accessibilityLabel: "前の並列グリッドへ"
+                    ) {
+                        handleParallelNav(direction: -1, mandalart: mandalart)
+                    }
+                    GridView3x3(
+                        gridId: grid.id,
+                        displayCells: GridRepository.displayCells(for: grid, in: modelContext),
+                        mandalart: mandalart,
+                        onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
+                    )
+                    parallelNavButton(
+                        systemName: "chevron.right",
+                        visible: parallelIndex < parallelGrids.count - 1,
+                        accessibilityLabel: "次の並列グリッドへ"
+                    ) {
+                        handleParallelNav(direction: 1, mandalart: mandalart)
+                    }
+                }
                 Spacer(minLength: 0)
+                if !mandalart.locked {
+                    HStack {
+                        Spacer()
+                        Button {
+                            handleAddParallel(mandalart: mandalart)
+                        } label: {
+                            Label("並列グリッド追加", systemImage: "plus.circle.fill")
+                                .font(.callout)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.bottom, 4)
+                }
             }
             .frame(maxWidth: .infinity)
             // 左上 home button と被らないように左を少しだけ空ける
@@ -137,6 +182,27 @@ struct EditorView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
+    }
+
+    /// 並列ナビ用の chevron ボタン (visible=false でも layout を予約して grid サイズを安定させる)。
+    @ViewBuilder
+    private func parallelNavButton(
+        systemName: String,
+        visible: Bool,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
     }
 
     // MARK: - Navigation
@@ -168,6 +234,37 @@ struct EditorView: View {
                 label: mandalart.title.isEmpty ? "(無題)" : mandalart.title
             )]
         }
+        refreshParallelState(for: mandalart)
+    }
+
+    /// 現在 grid が属する並列セット (= 同じ parent_cell_id を持つ兄弟群) を再取得し、
+    /// `parallelIndex` を現在 gridId に合わせる。
+    /// drill / drill-up / breadcrumb-nav / parallel-nav / parallel-add の全ての遷移後に呼ぶ。
+    ///
+    /// **@Query 反映遅延を避けるため context 直 fetch**: 直前に context.insert したばかりの
+    /// 新 grid は `grids` @Query にまだ載っていない可能性があるので、currentGridId 起点で
+    /// SwiftData から直接 grid を引いて parentCellId を決める。
+    private func refreshParallelState(for mandalart: Mandalart) {
+        guard let id = currentGridId else {
+            parallelGrids = []
+            parallelIndex = 0
+            return
+        }
+        let descriptor = FetchDescriptor<Grid>(
+            predicate: #Predicate<Grid> { $0.id == id && $0.deletedAt == nil }
+        )
+        guard let cur = (try? modelContext.fetch(descriptor))?.first else {
+            parallelGrids = []
+            parallelIndex = 0
+            return
+        }
+        let siblings = GridRepository.getSiblingGrids(
+            parentCellId: cur.parentCellId,
+            mandalartId: mandalart.id,
+            in: modelContext
+        )
+        parallelGrids = siblings
+        parallelIndex = siblings.firstIndex(where: { $0.id == cur.id }) ?? 0
     }
 
     private func handleDrill(cell: Cell, mandalart: Mandalart) {
@@ -201,6 +298,7 @@ struct EditorView: View {
             mandalart.updatedAt = Date()
             try? modelContext.save()
         }
+        refreshParallelState(for: mandalart)
     }
 
     private func navigateToBreadcrumb(_ index: Int, mandalart: Mandalart) {
@@ -213,6 +311,73 @@ struct EditorView: View {
             mandalart.lastGridId = target.gridId
             mandalart.updatedAt = Date()
             try? modelContext.save()
+        }
+        refreshParallelState(for: mandalart)
+    }
+
+    // MARK: - Parallel grid
+
+    /// `direction = -1` → 前 / `+1` → 次。範囲外なら何もしない。
+    /// 切替後に旧 grid が完全に空 (cells が全部空 + 子グリッドなし) なら物理削除する。
+    private func handleParallelNav(direction: Int, mandalart: Mandalart) {
+        let nextIdx = parallelIndex + direction
+        guard nextIdx >= 0, nextIdx < parallelGrids.count else { return }
+        let nextGrid = parallelGrids[nextIdx]
+        let oldGridId = currentGridId
+
+        currentGridId = nextGrid.id
+        // breadcrumb 末尾 (= 現在地) の gridId を切替先に追従させる
+        if !breadcrumb.isEmpty {
+            let last = breadcrumb.last!
+            breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
+                gridId: nextGrid.id,
+                cellId: last.cellId,
+                label: last.label
+            )
+        }
+        if !mandalart.locked {
+            mandalart.lastGridId = nextGrid.id
+            mandalart.updatedAt = Date()
+            try? modelContext.save()
+        }
+
+        // 旧 grid が空なら物理削除 (ロック中は cleanup も書き込みなのでスキップ)
+        if !mandalart.locked, let oldGridId, oldGridId != nextGrid.id {
+            _ = GridRepository.cleanupGridIfEmpty(gridId: oldGridId, in: modelContext)
+        }
+        refreshParallelState(for: mandalart)
+    }
+
+    /// 並列グリッドを末尾に追加 (= 独立 center cell を持つ新規 grid)。
+    /// ロック中は no-op (= 書き込み禁止)。
+    private func handleAddParallel(mandalart: Mandalart) {
+        guard !mandalart.locked else { return }
+        guard let cur = currentGrid else { return }
+        let nextSortOrder = (parallelGrids.map(\.sortOrder).max() ?? -1) + 1
+
+        do {
+            let newGrid = try GridRepository.createParallelGrid(
+                parentCellId: cur.parentCellId,
+                mandalartId: mandalart.id,
+                sortOrder: nextSortOrder,
+                in: modelContext
+            )
+            currentGridId = newGrid.id
+            // breadcrumb 末尾 (= 現在地) の gridId を新 grid に追従。label は親 cell ベースで不変
+            if !breadcrumb.isEmpty {
+                let last = breadcrumb.last!
+                breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
+                    gridId: newGrid.id,
+                    cellId: last.cellId,
+                    label: last.label
+                )
+            }
+            mandalart.lastGridId = newGrid.id
+            mandalart.updatedAt = Date()
+            try? modelContext.save()
+            refreshParallelState(for: mandalart)
+        } catch {
+            print("[editor] add parallel grid failed:", error)
         }
     }
 

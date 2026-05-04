@@ -101,6 +101,121 @@ enum GridRepository {
         return slots
     }
 
+    /// 同じ `parent_cell_id` を持つ兄弟 grid 群 (= 並列) を `sortOrder` 昇順で返す。
+    /// `parentCellId == nil` の場合は同じ mandalart の root grids 群 (= 並列ルート) を返す。
+    /// 並列ナビ (← / →) の対象集合を計算するのに使う。
+    static func getSiblingGrids(
+        parentCellId: String?,
+        mandalartId: String,
+        in context: ModelContext
+    ) -> [Grid] {
+        let descriptor: FetchDescriptor<Grid>
+        if let pcid = parentCellId {
+            descriptor = FetchDescriptor<Grid>(
+                predicate: #Predicate<Grid> {
+                    $0.parentCellId == pcid && $0.deletedAt == nil
+                },
+                sortBy: [SortDescriptor(\Grid.sortOrder)]
+            )
+        } else {
+            descriptor = FetchDescriptor<Grid>(
+                predicate: #Predicate<Grid> {
+                    $0.mandalartId == mandalartId && $0.parentCellId == nil && $0.deletedAt == nil
+                },
+                sortBy: [SortDescriptor(\Grid.sortOrder)]
+            )
+        }
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    /// 並列グリッドを新規作成する (= 独立 center cell を持つ兄弟 grid)。
+    ///
+    /// - parentCellId が drill 元 cell の id (root parallel なら nil)
+    /// - 新 center cell を空コンテンツで先に INSERT し、その id を centerCellId に持つ grid を INSERT
+    /// - desktop の `createGrid({ parentCellId, centerCellId: null, sortOrder })` と等価
+    @discardableResult
+    static func createParallelGrid(
+        parentCellId: String?,
+        mandalartId: String,
+        sortOrder: Int,
+        in context: ModelContext
+    ) throws -> Grid {
+        let now = Date()
+        let newGridId = IDGenerator.uuid()
+        let centerCellId = IDGenerator.uuid()
+        let centerCell = Cell(
+            id: centerCellId,
+            gridId: newGridId,
+            position: GridConstants.centerPosition,
+            text: "",
+            createdAt: now,
+            updatedAt: now
+        )
+        let newGrid = Grid(
+            id: newGridId,
+            mandalartId: mandalartId,
+            centerCellId: centerCellId,
+            parentCellId: parentCellId,
+            sortOrder: sortOrder,
+            createdAt: now,
+            updatedAt: now
+        )
+        context.insert(centerCell)
+        context.insert(newGrid)
+        try context.save()
+        return newGrid
+    }
+
+    /// `gridId` の grid が完全に空 (= 自所属 cells が全て空 + 子グリッドなし) なら物理削除する。
+    /// 並列ナビ後に旧 grid を片付ける用途。
+    ///
+    /// **削除対象**:
+    /// - root / 並列 (独立 center) grid: 自所属 9 cells (center 含む) を全削除 + grid 削除
+    /// - X=C primary drilled: 自所属 8 peripherals のみ削除 (共有 center は親 grid 側に残る)
+    ///
+    /// **抑制条件**: 自所属 cells のいずれかが non-empty / done=true / 色 / 画像 / 子グリッドあり
+    ///
+    /// - returns: 削除したかどうか
+    @discardableResult
+    static func cleanupGridIfEmpty(
+        gridId: String,
+        in context: ModelContext
+    ) -> Bool {
+        let gridDescriptor = FetchDescriptor<Grid>(
+            predicate: #Predicate<Grid> { $0.id == gridId && $0.deletedAt == nil }
+        )
+        guard let grid = try? context.fetch(gridDescriptor).first else { return false }
+
+        let cellsDescriptor = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> { $0.gridId == gridId && $0.deletedAt == nil }
+        )
+        let cells = (try? context.fetch(cellsDescriptor)) ?? []
+        let allEmpty = cells.allSatisfy { c in
+            c.text.isEmpty && c.imagePath == nil && c.color == nil && !c.done
+        }
+        if !allEmpty { return false }
+
+        // 自所属 cell から派生する子グリッドが 1 つでもあれば cleanup を抑制
+        for c in cells {
+            let cid = c.id
+            let childDescriptor = FetchDescriptor<Grid>(
+                predicate: #Predicate<Grid> {
+                    $0.parentCellId == cid && $0.deletedAt == nil
+                }
+            )
+            if let count = try? context.fetch(childDescriptor), !count.isEmpty {
+                return false
+            }
+        }
+
+        for c in cells {
+            context.delete(c)
+        }
+        context.delete(grid)
+        try? context.save()
+        return true
+    }
+
     /// 指定 grid から root grid までの ancestry を返す (root が先頭、leaf が末尾)。
     /// `mandalart.lastGridId` から起動時に breadcrumb を復元するために使う。
     /// - 途中で grid / cell が見つからない場合は nil を返す → 呼出側で root にフォールバック。
