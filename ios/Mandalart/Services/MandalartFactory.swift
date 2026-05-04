@@ -57,6 +57,107 @@ enum MandalartFactory {
         return mandalart
     }
 
+    /// マンダラートを複製する。源 mandalart の全 grids / cells を新 id で複製し、
+    /// 新 mandalart に紐付ける。lazy cell creation 維持 (空セルはコピーしない、ただし
+    /// `center_cell_id` として参照される cell は整合性のため空でもコピー)。
+    ///
+    /// 継承する: title / showCheckbox / folderId / locked / 全 grids / cells 構造
+    /// 継承しない: lastGridId (= nil で root から開始)、sortOrder (nil)、pinned (false)
+    @discardableResult
+    static func duplicate(
+        _ source: Mandalart,
+        in context: ModelContext
+    ) throws -> Mandalart {
+        let sourceId = source.id
+        let gridFetch = FetchDescriptor<Grid>(
+            predicate: #Predicate<Grid> { $0.mandalartId == sourceId && $0.deletedAt == nil }
+        )
+        let sourceGrids = try context.fetch(gridFetch)
+        let gridIdsSet = Set(sourceGrids.map { $0.id })
+        let cellFetch = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> { gridIdsSet.contains($0.gridId) && $0.deletedAt == nil }
+        )
+        let sourceCells = try context.fetch(cellFetch)
+
+        // id 写像
+        var cellIdMap: [String: String] = [:]
+        for c in sourceCells { cellIdMap[c.id] = IDGenerator.uuid() }
+        var gridIdMap: [String: String] = [:]
+        for g in sourceGrids { gridIdMap[g.id] = IDGenerator.uuid() }
+
+        let newMandalartId = IDGenerator.uuid()
+        guard let newRootCellId = cellIdMap[source.rootCellId] else {
+            throw NSError(domain: "MandalartFactory", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "root cell が source cells に見つかりません: \(source.rootCellId)"
+            ])
+        }
+
+        let now = Date()
+
+        // 1. 新 mandalart を先に insert (FK 順序維持の意図)
+        let newMandalart = Mandalart(
+            id: newMandalartId,
+            title: source.title,
+            rootCellId: newRootCellId,
+            showCheckbox: source.showCheckbox,
+            lastGridId: nil,
+            sortOrder: nil,
+            pinned: false,
+            folderId: source.folderId,
+            locked: source.locked,
+            createdAt: now,
+            updatedAt: now
+        )
+        context.insert(newMandalart)
+
+        // 2. 新 grids
+        var newCenterCellIds = Set<String>()
+        for g in sourceGrids {
+            guard let newGridId = gridIdMap[g.id] else { continue }
+            guard let newCenterCellId = cellIdMap[g.centerCellId] else {
+                throw NSError(domain: "MandalartFactory", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "grid \(g.id) の center_cell_id \(g.centerCellId) が孤立"
+                ])
+            }
+            let newParentCellId = g.parentCellId.flatMap { cellIdMap[$0] }
+            let newGrid = Grid(
+                id: newGridId,
+                mandalartId: newMandalartId,
+                centerCellId: newCenterCellId,
+                parentCellId: newParentCellId,
+                sortOrder: g.sortOrder,
+                memo: g.memo,
+                createdAt: now,
+                updatedAt: now
+            )
+            context.insert(newGrid)
+            newCenterCellIds.insert(newCenterCellId)
+        }
+
+        // 3. 新 cells (lazy: 空セルはコピーしない、ただし center_cell_id 参照されているものは整合性で残す)
+        for c in sourceCells {
+            guard let newCellId = cellIdMap[c.id], let newGridId = gridIdMap[c.gridId] else { continue }
+            let isPopulated = !c.text.isEmpty || c.imagePath != nil || c.color != nil
+            let isReferenced = newCenterCellIds.contains(newCellId)
+            if !isPopulated && !isReferenced { continue }
+            let newCell = Cell(
+                id: newCellId,
+                gridId: newGridId,
+                position: c.position,
+                text: c.text,
+                color: c.color,
+                imagePath: c.imagePath,
+                done: c.done,
+                createdAt: now,
+                updatedAt: now
+            )
+            context.insert(newCell)
+        }
+
+        try context.save()
+        return newMandalart
+    }
+
     /// Permanent delete: cascade local + cloud。
     ///
     /// 削除順序 (desktop の `permanentDeleteMandalart` と同等):
