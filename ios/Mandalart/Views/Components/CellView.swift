@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
+import UIKit
 
 /// 1 セル: 表示 + tap 操作 (drill or inline edit) + commit + 長押し context menu。
 ///
@@ -7,13 +9,14 @@ import SwiftData
 /// - 中心セル (position=4) → 常に inline edit (root center は title 編集、child center は親 peripheral と X=C 共有編集)
 /// - 周辺セル (position 0-3, 5-8) で空 → inline edit
 /// - 周辺セル + 非空 → `onDrillRequest` 呼び出し (drill-down)
-/// - ロック中 → 全操作無効
+/// - ロック中 → 編集ブロック、ただし drill (= 閲覧 navigation) は許可
 ///
-/// **長押し**: cell が存在 + 非ロック中なら context menu を表示 (色プリセット 10 + クリア)。
+/// **長押し**: cell が存在 + 非ロック中なら context menu を表示
+/// (色プリセット 10 + 画像追加 / 削除 + 内容クリア)。
 ///
-/// **実装注意**: TextField を `if isFocused` で render 切替すると `.focused` binding が
-/// 反映されない (= 初回タップで focus が乗らない) ので、TextField は **常時 render** し、
-/// drill 用の透明 overlay で tap を上書きする方式を採用。
+/// **画像**: PhotosPicker で写真選択 → [`ImageStorage`](../../Services/ImageStorage.swift) で
+/// JPEG 圧縮 (最大辺 1200pt) して Application Support/images/ に保存、`Cell.imagePath` に
+/// 相対パスを記録。**ローカル保存のみで cross-device 同期されない**は既知の制約 (desktop と同じ仕様)。
 struct CellView: View {
     let cell: Cell?
     let gridId: String
@@ -25,6 +28,8 @@ struct CellView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var text: String
     @FocusState private var isFocused: Bool
+    @State private var photoItem: PhotosPickerItem?
+    @State private var loadedImage: UIImage?
 
     init(
         cell: Cell?,
@@ -39,11 +44,11 @@ struct CellView: View {
         self.mandalart = mandalart
         self.onDrillRequest = onDrillRequest
         _text = State(initialValue: cell?.text ?? "")
+        _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
     }
 
     private var isCenter: Bool { position == GridConstants.centerPosition }
     private var isLocked: Bool { mandalart.locked }
-    /// root center cell かどうか (= mandalart.rootCellId と一致)。
     private var isRootCell: Bool { cell?.id == mandalart.rootCellId }
     private var isEmpty: Bool {
         (cell?.text.isEmpty ?? true) && (cell?.imagePath == nil)
@@ -53,7 +58,7 @@ struct CellView: View {
         !isCenter && !isEmpty
     }
 
-    /// セル背景色: cell.color (preset key) があれば該当 PresetColor、なければ system 既定色。
+    /// セル背景色 (画像がない場合のみ): cell.color → preset / なければ system 既定。
     private var cellBackground: Color {
         if let key = cell?.color, let preset = PresetColors.find(key) {
             return preset.backgroundColor(for: colorScheme)
@@ -62,53 +67,87 @@ struct CellView: View {
     }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(cellBackground)
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.primary.opacity(0.4), lineWidth: isCenter ? 2 : 1)
-
-            // TextField は常時 render (focus binding を機能させるため)
-            // 編集中以外は hit テスト無効にして、上位 tap overlay に処理を委ねる
-            TextField("", text: $text, axis: .vertical)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .font(.system(size: isCenter ? 14 : 12, weight: isCenter ? .semibold : .regular))
-                .padding(6)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .focused($isFocused)
-                .disabled(isLocked)
-                .allowsHitTesting(isFocused)
-                .onSubmit { commit() }
-                .onChange(of: isFocused) { _, nowFocused in
-                    if !nowFocused { commit() }
+        GeometryReader { geo in
+            ZStack {
+                // 背景: 画像 or preset color
+                if let img = loadedImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                    // テキストありの場合は半透明黒オーバーレイで読みやすく
+                    if !text.isEmpty {
+                        Color.black.opacity(0.25)
+                    }
+                } else {
+                    cellBackground
                 }
 
-            // 編集モード以外では透明 overlay が全 tap を吸い、drill or focus に分岐する。
-            if !isFocused {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { handleTap() }
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.primary.opacity(0.4), lineWidth: isCenter ? 2 : 1)
+
+                // TextField は常時 render (focus binding を機能させるため)
+                TextField("", text: $text, axis: .vertical)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .font(.system(size: isCenter ? 14 : 12, weight: isCenter ? .semibold : .regular))
+                    .foregroundStyle(loadedImage != nil ? Color.white : Color.primary)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .focused($isFocused)
+                    .disabled(isLocked)
+                    .allowsHitTesting(isFocused)
+                    .onSubmit { commit() }
+                    .onChange(of: isFocused) { _, nowFocused in
+                        if !nowFocused { commit() }
+                    }
+
+                // 編集モード以外では透明 overlay が全 tap を吸い、drill or focus に分岐する。
+                if !isFocused {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { handleTap() }
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .aspectRatio(1, contentMode: .fit)
+        // GeometryReader 内で `.frame()` + `.clipped()` で Image を正確に枠内サイズに固定済だが、
+        // 念のため外側でも `.clipShape` を適用して角丸を確保。
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .contextMenu { cellContextMenu }
+        .photosPicker(
+            isPresented: photosPickerBinding,
+            selection: $photoItem,
+            matching: .images
+        )
+        .onChange(of: photoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                await handlePhotoSelection(newItem)
+                photoItem = nil
+            }
+        }
         .onChange(of: cell?.text) { _, newText in
-            // sync で更新された場合、focus 中でなければローカル state を追従させる
             if !isFocused, let newText, newText != text {
                 text = newText
             }
         }
+        .onChange(of: cell?.imagePath) { _, newPath in
+            // sync 経路 / context menu 経由の imagePath 変更を反映
+            loadedImage = ImageStorage.loadImage(at: newPath)
+        }
     }
 
+    // MARK: - Tap / commit
+
     private func handleTap() {
-        // ロック中でも drill (= 閲覧用 navigation) は許可。edit のみブロックする。
         if shouldDrillOnTap, let c = cell {
             onDrillRequest?(c)
             return
         }
         guard !isLocked else { return }
-        // 中心セル / 空 周辺セル → 編集モード
         isFocused = true
     }
 
@@ -140,10 +179,13 @@ struct CellView: View {
 
     // MARK: - Context menu
 
+    @State private var showImagePicker: Bool = false
+    private var photosPickerBinding: Binding<Bool> {
+        Binding(get: { showImagePicker }, set: { showImagePicker = $0 })
+    }
+
     @ViewBuilder
     private var cellContextMenu: some View {
-        // ロック中 / 行未生成 (= lazy slot) の場合はメニュー項目を一切出さない。
-        // SwiftUI は空 contextMenu を long-press で表示しないので結果として noop になる。
         if !isLocked, let cell {
             Menu {
                 ForEach(PresetColors.all) { preset in
@@ -167,12 +209,34 @@ struct CellView: View {
                 Label("色", systemImage: "paintpalette")
             }
 
+            Button {
+                showImagePicker = true
+            } label: {
+                Label(cell.imagePath == nil ? "画像を追加" : "画像を変更",
+                      systemImage: "photo.badge.plus")
+            }
+
+            if cell.imagePath != nil {
+                Button(role: .destructive) {
+                    clearImage(of: cell)
+                } label: {
+                    Label("画像を削除", systemImage: "photo.badge.xmark")
+                }
+            }
+
             Divider()
 
             Button(role: .destructive) {
                 clearContent(of: cell)
             } label: {
                 Label("内容をクリア", systemImage: "eraser")
+            }
+        } else if !isLocked, cell == nil {
+            // 空 slot でも画像追加だけは出す (lazy create で cell を生成)
+            Button {
+                showImagePicker = true
+            } label: {
+                Label("画像を追加", systemImage: "photo.badge.plus")
             }
         }
     }
@@ -184,15 +248,72 @@ struct CellView: View {
     }
 
     private func clearContent(of cell: Cell) {
+        if let path = cell.imagePath {
+            ImageStorage.deleteImage(at: path)
+        }
         cell.text = ""
         cell.color = nil
         cell.imagePath = nil
         cell.updatedAt = Date()
         text = ""
+        loadedImage = nil
         if isRootCell {
             mandalart.title = ""
             mandalart.updatedAt = Date()
         }
         try? modelContext.save()
+    }
+
+    private func clearImage(of cell: Cell) {
+        if let path = cell.imagePath {
+            ImageStorage.deleteImage(at: path)
+        }
+        cell.imagePath = nil
+        cell.updatedAt = Date()
+        loadedImage = nil
+        try? modelContext.save()
+    }
+
+    // MARK: - Photo selection
+
+    /// PhotosPicker の選択結果を受けて、画像を圧縮保存し cell.imagePath に紐付け。
+    /// cell が未生成 (lazy slot) の場合はここで先に Cell row を作る。
+    private func handlePhotoSelection(_ item: PhotosPickerItem) async {
+        guard !isLocked else { return }
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            print("[cell] PhotosPicker loadTransferable failed")
+            return
+        }
+
+        let now = Date()
+        let target: Cell
+        if let existing = cell {
+            target = existing
+        } else {
+            // lazy create
+            let newCell = Cell(
+                gridId: gridId,
+                position: position,
+                text: "",
+                createdAt: now,
+                updatedAt: now
+            )
+            modelContext.insert(newCell)
+            target = newCell
+        }
+
+        do {
+            // 古い画像があれば削除してから新規保存
+            if let oldPath = target.imagePath {
+                ImageStorage.deleteImage(at: oldPath)
+            }
+            let relPath = try ImageStorage.saveImage(data: data, cellId: target.id)
+            target.imagePath = relPath
+            target.updatedAt = Date()
+            try modelContext.save()
+            loadedImage = ImageStorage.loadImage(at: relPath)
+        } catch {
+            print("[cell] image save failed:", error)
+        }
     }
 }

@@ -35,6 +35,7 @@ ios/
 │   │   ├── SupabaseService.swift 共有 SupabaseClient
 │   │   ├── MandalartFactory.swift create / permanentDelete (cascade) / cloud cascade + tombstone
 │   │   ├── FolderRepository.swift ensureInboxFolder (重複 system folder 統合) / adoptOrphansToInbox
+│   │   ├── ImageStorage.swift     セル画像のローカル保存 (Application Support/images/、JPEG 圧縮、cross-device 非同期)
 │   │   ├── GridRepository.swift  drill helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry)
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
