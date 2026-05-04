@@ -26,7 +26,7 @@ struct GridView3x3: View {
 
     private let columns = Array(
         repeating: GridItem(.flexible(), spacing: LayoutConstants.outerGridGap),
-        count: 3
+        count: GridConstants.gridSide
     )
 
     var body: some View {
