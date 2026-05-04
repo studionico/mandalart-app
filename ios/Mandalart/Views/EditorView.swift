@@ -128,8 +128,8 @@ struct EditorView: View {
                     navigateToBreadcrumb(index, mandalart: mandalart)
                 }
                 Divider()
-                memoPlaceholder(grid: grid)
-                Spacer()
+                MemoTab(grid: grid, mandalart: mandalart)
+                    .id(grid.id)  // grid 切替時に MemoTab の @State を再初期化
             }
             .frame(maxWidth: 320)
             .padding(.trailing, 8)
@@ -137,19 +137,6 @@ struct EditorView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
-    }
-
-    @ViewBuilder
-    private func memoPlaceholder(grid: Grid) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("メモ")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(grid.memo ?? "(未実装)")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
     }
 
     // MARK: - Navigation

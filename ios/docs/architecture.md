@@ -25,9 +25,10 @@ ios/
 │   │   ├── SettingsView.swift    アカウント / 同期ボタン
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
-│   │       ├── CellView.swift    1 セル (tap → drill or inline edit、編集中以外は overlay で hit テスト)
+│   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / クリア context menu、編集中以外は overlay で hit テスト)
 │   │       ├── GridView3x3.swift 3×3 (`displayCells: [Cell?]` 9 要素受け取り、id で grid 切替時 remount)
-│   │       └── Breadcrumb.swift  右ペイン上部の階層 navigation (タップで drill-up)
+│   │       ├── Breadcrumb.swift  右ペイン上部の階層 navigation (タップで drill-up)
+│   │       └── MemoTab.swift     右ペイン下部のメモタブ (編集 / プレビュー切替、grid.memo を 1 秒 debounce で auto-save)
 │   ├── ViewModels/
 │   │   └── AuthStore.swift       @Observable / @MainActor / supabase-swift Auth ラッパ
 │   ├── Services/
