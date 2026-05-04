@@ -20,6 +20,11 @@ struct EditorView: View {
     @State private var showLockHint: Bool = false
     @State private var parallelGrids: [Grid] = []
     @State private var parallelIndex: Int = 0
+    /// 直近の grid 遷移種別。drill / drill-up / 並列ナビ / 初回表示で stagger 順序を
+    /// 切替えるため、各 handler 末尾でこの値を更新 → GridView3x3 → CellView へ伝搬。
+    @State private var lastTransitionKind: DrillTransitionKind = .initial
+    /// 3×3 編集モード / 9×9 俯瞰モード。toggle ボタンで切替。9×9 中は edit / drill 全 NOOP。
+    @State private var viewMode: EditorViewMode = .grid3x3
 
     init(mandalartId: String, onBack: @escaping () -> Void) {
         self.mandalartId = mandalartId
@@ -85,6 +90,24 @@ struct EditorView: View {
                             .buttonStyle(.plain)
                             .padding(.leading, 32)
                             .padding(.top, 20)
+
+                            // 右上 floating 9×9 / 3×3 toggle ボタン。spring + opacity で滑らかに切替。
+                            Button {
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                    viewMode = viewMode == .grid3x3 ? .grid9x9 : .grid3x3
+                                }
+                            } label: {
+                                Text(viewMode == .grid3x3 ? "9×9" : "3×3")
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 56, height: 36)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .topTrailing)
+                            .padding(.trailing, 16)
+                            .padding(.top, 20)
+                            .accessibilityLabel(viewMode == .grid3x3 ? "9×9 ビューに切替" : "3×3 ビューに戻る")
                         }
                         .ignoresSafeArea(.container, edges: .leading)
                     }
@@ -177,23 +200,38 @@ struct EditorView: View {
             let memoW = max(memoMinW, contentW - leadingPad - trailingPad - outerSpacing - leftOverhead - gridSize)
 
             HStack(spacing: outerSpacing) {
-                // 左ペイン: chevron + grid + (chevron or +)。grid サイズを明示指定。
+                // 左ペイン: 3×3 (chevron + grid + chevron/+) / 9×9 (chevron なし、grid 単体)
                 HStack(spacing: leftInnerSpacing) {
-                    parallelNavButton(
-                        systemName: "chevron.left",
-                        visible: parallelIndex > 0,
-                        accessibilityLabel: "前の並列グリッドへ"
-                    ) {
-                        handleParallelNav(direction: -1, mandalart: mandalart)
+                    if viewMode == .grid3x3 {
+                        parallelNavButton(
+                            systemName: "chevron.left",
+                            visible: parallelIndex > 0,
+                            accessibilityLabel: "前の並列グリッドへ"
+                        ) {
+                            handleParallelNav(direction: -1, mandalart: mandalart)
+                        }
+                        GridView3x3(
+                            gridId: grid.id,
+                            displayCells: GridRepository.displayCells(for: grid, in: modelContext),
+                            mandalart: mandalart,
+                            transitionKind: lastTransitionKind,
+                            onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
+                        )
+                        .frame(width: gridSize, height: gridSize)
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                        rightSlotButton(mandalart: mandalart, grid: grid)
+                    } else {
+                        // 9×9 mode: chevron 非表示で grid を中央に。chevron 分の空白を予約して
+                        // 3×3 と同じ grid 中心位置を保つ (= 切替時の視覚ぶれを抑える)。
+                        Color.clear.frame(width: 36, height: 36)
+                        GridView9x9(
+                            layout: nineByNineLayout(mandalart: mandalart),
+                            mandalart: mandalart
+                        )
+                        .frame(width: gridSize, height: gridSize)
+                        .transition(.scale(scale: 1.5).combined(with: .opacity))
+                        Color.clear.frame(width: 36, height: 36)
                     }
-                    GridView3x3(
-                        gridId: grid.id,
-                        displayCells: GridRepository.displayCells(for: grid, in: modelContext),
-                        mandalart: mandalart,
-                        onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
-                    )
-                    .frame(width: gridSize, height: gridSize)
-                    rightSlotButton(mandalart: mandalart, grid: grid)
                 }
                 .padding(.leading, leadingPad)
 
@@ -357,6 +395,7 @@ struct EditorView: View {
             }
         }
         guard let target = child else { return }
+        lastTransitionKind = .drillDown
         breadcrumb.append(BreadcrumbItem(
             gridId: target.id,
             cellId: cell.id,
@@ -375,6 +414,7 @@ struct EditorView: View {
     private func navigateToBreadcrumb(_ index: Int, mandalart: Mandalart) {
         guard index >= 0, index < breadcrumb.count else { return }
         let target = breadcrumb[index]
+        lastTransitionKind = .drillUp
         breadcrumb = Array(breadcrumb.prefix(index + 1))
         currentGridId = target.gridId
         // ロック中は lastGridId 更新スキップ (drill-up も navigation 専用、書き込みなし)
@@ -396,6 +436,7 @@ struct EditorView: View {
         let nextGrid = parallelGrids[nextIdx]
         let oldGridId = currentGridId
 
+        lastTransitionKind = .parallel
         currentGridId = nextGrid.id
         // breadcrumb 末尾 (= 現在地) の gridId を切替先に追従させる
         if !breadcrumb.isEmpty {
@@ -433,6 +474,7 @@ struct EditorView: View {
                 sortOrder: nextSortOrder,
                 in: modelContext
             )
+            lastTransitionKind = .parallel
             currentGridId = newGrid.id
             // breadcrumb 末尾 (= 現在地) の gridId を新 grid に追従。label は親 cell ベースで不変
             if !breadcrumb.isEmpty {
@@ -450,6 +492,21 @@ struct EditorView: View {
         } catch {
             print("[editor] add parallel grid failed:", error)
         }
+    }
+
+    /// 9×9 view 用 layout (= 9 ブロック分の `(Grid?, displayCells)`)。
+    /// 9×9 は **常に root grid 起点** で全体俯瞰するため、`currentGridId` がどこを指していても
+    /// root から計算する (= drill 中に 9×9 へ切替えても全 81 セルが見られる)。
+    /// root grid が存在しない異常状態 (= bootstrap 前など) は 9 個の空ブロックを返す。
+    private func nineByNineLayout(mandalart: Mandalart) -> [(Grid?, [Cell?])] {
+        guard let root = grids.first(where: { $0.parentCellId == nil }) else {
+            let emptyDisplay: [Cell?] = Array(repeating: nil, count: GridConstants.gridCellCount)
+            return Array(
+                repeating: (nil, emptyDisplay),
+                count: GridConstants.gridCellCount
+            )
+        }
+        return GridRepository.loadNineByNineLayout(rootGrid: root, in: modelContext)
     }
 
     private func labelForGrid(_ grid: Grid, mandalart: Mandalart) -> String {

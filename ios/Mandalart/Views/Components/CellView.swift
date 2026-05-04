@@ -23,6 +23,11 @@ struct CellView: View {
     let position: Int
     let mandalart: Mandalart
     let onDrillRequest: ((Cell) -> Void)?
+    /// drill / drill-up / 並列ナビ / 初回表示それぞれで stagger 順序を切替えるための種別。
+    /// `onAppear` 時に `AnimationStagger.delay(...)` に渡して visible: false → true を補間。
+    let transitionKind: DrillTransitionKind
+    /// readOnly mode (= 9×9 view 内の inner 3×3)。tap / longPress / context menu 全 NOOP、focus 不可。
+    let readOnly: Bool
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -30,21 +35,31 @@ struct CellView: View {
     @FocusState private var isFocused: Bool
     @State private var photoItem: PhotosPickerItem?
     @State private var loadedImage: UIImage?
+    /// drill アニメ用 opacity 補間。`onAppear` で stagger delay 経過後に true に切替。
+    @State private var animatedVisible: Bool = false
 
     init(
         cell: Cell?,
         gridId: String,
         position: Int,
         mandalart: Mandalart,
+        transitionKind: DrillTransitionKind = .initial,
+        readOnly: Bool = false,
         onDrillRequest: ((Cell) -> Void)? = nil
     ) {
         self.cell = cell
         self.gridId = gridId
         self.position = position
         self.mandalart = mandalart
+        self.transitionKind = transitionKind
+        self.readOnly = readOnly
         self.onDrillRequest = onDrillRequest
         _text = State(initialValue: cell?.text ?? "")
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
+        // stagger 順序に含まれない position は X=C 連続セル (= drill-down 中心) なので
+        // 最初から visible=true。fade-in 動作なし、ちらつきも防げる。
+        let inSequence = AnimationStagger.staggerIndex(for: position, kind: transitionKind) != nil
+        _animatedVisible = State(initialValue: !inSequence)
     }
 
     private var isCenter: Bool { position == GridConstants.centerPosition }
@@ -54,8 +69,9 @@ struct CellView: View {
         (cell?.text.isEmpty ?? true) && (cell?.imagePath == nil)
     }
     /// drill 経路 (周辺 + 非空)。**ロック中も drill は許可** (= 閲覧用の階層 navigation)。
+    /// readOnly mode (= 9×9 view inner) では drill しない。
     private var shouldDrillOnTap: Bool {
-        !isCenter && !isEmpty
+        !readOnly && !isCenter && !isEmpty
     }
 
     /// セル背景色 (画像がない場合のみ): cell.color → preset / なければ system 既定。
@@ -96,15 +112,16 @@ struct CellView: View {
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .focused($isFocused)
-                    .disabled(isLocked)
-                    .allowsHitTesting(isFocused)
+                    .disabled(isLocked || readOnly)
+                    .allowsHitTesting(isFocused && !readOnly)
                     .onSubmit { commit() }
                     .onChange(of: isFocused) { _, nowFocused in
                         if !nowFocused { commit() }
                     }
 
                 // 編集モード以外では透明 overlay が全 tap を吸い、drill or focus に分岐する。
-                if !isFocused {
+                // readOnly では tap 自体を取らず、上位 view (9×9) の操作に流す。
+                if !isFocused && !readOnly {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { handleTap() }
@@ -116,7 +133,20 @@ struct CellView: View {
         // GeometryReader 内で `.frame()` + `.clipped()` で Image を正確に枠内サイズに固定済だが、
         // 念のため外側でも `.clipShape` を適用して角丸を確保。
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .contextMenu { cellContextMenu }
+        // drill / drill-up / 並列ナビ / 初回表示で stagger fade-in。
+        // remount (= GridView3x3 が `.id(...)` で view identity を変える) ごとに onAppear が
+        // 発火し、position と transitionKind から計算した delay 後に visible=true に補間。
+        // X=C 連続セル (drill-down の中心) は init で既に visible=true なので no-op。
+        .opacity(animatedVisible ? 1 : 0)
+        .onAppear {
+            guard !animatedVisible else { return }
+            let delay = AnimationStagger.delay(for: position, kind: transitionKind)
+            let duration = Double(TimingConstants.animFadeMs) / 1000.0
+            withAnimation(.easeOut(duration: duration).delay(delay)) {
+                animatedVisible = true
+            }
+        }
+        .contextMenu { if !readOnly { cellContextMenu } }
         .photosPicker(
             isPresented: photosPickerBinding,
             selection: $photoItem,
@@ -143,6 +173,7 @@ struct CellView: View {
     // MARK: - Tap / commit
 
     private func handleTap() {
+        guard !readOnly else { return }
         if shouldDrillOnTap, let c = cell {
             onDrillRequest?(c)
             return

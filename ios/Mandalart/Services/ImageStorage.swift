@@ -17,6 +17,15 @@ enum ImageStorage {
     private static let maxDimension: CGFloat = 1200
     private static let jpegQuality: CGFloat = 0.7
 
+    /// メモリ cache (drill アニメ中の頻繁な remount でディスク I/O を抑える)。
+    /// Phase 6 の orbit fade-in で CellView が grid 切替ごとに remount されるので、
+    /// 同じ relPath を 1 frame 目から同期で返せるようにする (= #18 まばたき対策の iOS 版)。
+    private static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 200  // 数百枚程度なら全部 memory 上に置いても問題ない (= 1 枚 ~数百 KB)
+        return c
+    }()
+
     /// AppSupport ディレクトリを返す (= `~/Library/Application Support/`)。Sandbox 内。
     private static var appSupportDir: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -45,22 +54,32 @@ enum ImageStorage {
         guard let dir = imagesDir else { throw ImageStorageError.directoryUnavailable }
         let absURL = dir.appendingPathComponent(filename)
         try processed.write(to: absURL)
+        if let img = UIImage(data: processed) {
+            cache.setObject(img, forKey: relPath as NSString)
+        }
         return relPath
     }
 
     /// 相対パス (`images/...`) から `UIImage` を読み込む。ファイル不存在は nil。
+    /// メモリ cache hit なら同期で即返す (= drill アニメ中の remount でも 1 frame 目から表示可能)。
     static func loadImage(at relPath: String?) -> UIImage? {
-        guard let relPath, !relPath.isEmpty,
-              let appSupport = appSupportDir else { return nil }
+        guard let relPath, !relPath.isEmpty else { return nil }
+        if let cached = cache.object(forKey: relPath as NSString) {
+            return cached
+        }
+        guard let appSupport = appSupportDir else { return nil }
         let absURL = appSupport.appendingPathComponent(relPath)
-        guard let data = try? Data(contentsOf: absURL) else { return nil }
-        return UIImage(data: data)
+        guard let data = try? Data(contentsOf: absURL),
+              let img = UIImage(data: data) else { return nil }
+        cache.setObject(img, forKey: relPath as NSString)
+        return img
     }
 
     /// 相対パスのファイルを削除する (= cell から画像を外したとき)。
     static func deleteImage(at relPath: String?) {
         guard let relPath, !relPath.isEmpty,
               let appSupport = appSupportDir else { return }
+        cache.removeObject(forKey: relPath as NSString)
         let absURL = appSupport.appendingPathComponent(relPath)
         try? FileManager.default.removeItem(at: absURL)
     }

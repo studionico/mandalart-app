@@ -127,6 +127,26 @@ self.client = SupabaseClient(
 
 その後は `client.auth` / `client.from("table")` / `client.realtime` 等で各 module にアクセスできる。
 
+### #8. drill アニメ中の画像セルまばたき (= desktop 落とし穴 #18 の iOS 版)
+
+**症状**: drill / drill-up / 並列ナビ で grid 切替が起こると、`GridView3x3` が `.id("\(gridId)-\(position)-\(cellId)")` で view identity を変えるため CellView が **remount** される。新 mount は `_loadedImage = State(initialValue: ImageStorage.loadImage(...))` で同期的にディスクから読み込むが、 大量の cell を含むマンダラートでは disk I/O が積もって 1 frame ぶん画像表示が遅れ、ぴかっと白く見える。
+
+**原因**: Phase 6 の orbit fade-in stagger で grid 切替頻度が上がる + `ImageStorage.loadImage` が毎 mount で disk read する。
+
+**対処**: [`ImageStorage`](../Mandalart/Services/ImageStorage.swift) に in-memory `NSCache` 層を追加。`saveImage` 時に cache に乗せ、`loadImage` 時にまず cache lookup して hit なら disk を読まずに返す。これで 2 回目以降の remount は ~0ms で UIImage が手に入り、まばたき消失。
+
+**desktop 側との対応**: desktop CLAUDE.md 落とし穴 #18 「画像セルまばたき」も同じ思想 (`getCachedCellImageUrl` 同期 lookup → `useState(() => initialUrl)`) — そちらと一貫した実装。
+
+### #9. drill 切替時の stagger fade-in は CellView 単位で `onAppear` + `withAnimation` 駆動
+
+**症状**: matchedGeometryEffect で「drill した親 peripheral cell が中央へ吸い寄せられる」desktop 風の orbit を SwiftUI で再現しようとすると、`GridView3x3` の `.id(...)` 強制 remount と衝突して geometry が連続しない (= マッチしないので即座切替に見える)。
+
+**選んだ方針 (Phase 6a)**: matchedGeometryEffect は **使わない**。代わりに各 CellView に `@State animatedVisible` を持たせ、`onAppear` で `position` と `transitionKind` から [`AnimationStagger.delay`](../Mandalart/Utils/AnimationStagger.swift) を引いた delay 後に `withAnimation(.easeOut)` で `false → true` に補間する。これで「shutter 開く」スタイルの fade-in が実現でき、remount による text/image 状態リセットとも干渉しない。
+
+**注意**: `staggerIndex` が nil を返す position (= drill-down の中心 position=4、X=C 連続セル) は `init` で `_animatedVisible = State(initialValue: true)` にしておくこと。さもないと中心が一瞬 0 → 1 に光る (= ちらつき)。
+
+**精緻な orbit (matchedGeometry 連鎖)** は Phase 6c 以降の課題。今は遷移種別 (`drillDown` / `drillUp` / `parallel` / `initial`) ごとの sequence を [`AnimationStagger.swift`](../Mandalart/Utils/AnimationStagger.swift) に集約し、desktop の時計回り順 `[7,6,3,0,1,2,5,8]` (周辺) を踏襲。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。

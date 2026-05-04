@@ -216,6 +216,44 @@ enum GridRepository {
         return true
     }
 
+    /// 9×9 view 表示用 layout を返す。9 ブロック分の `(対応する Grid?, 9 要素 displayCells)` を
+    /// blockIndex (= 3×3 内 position) 順で配列化する。
+    ///
+    /// - **blockIndex == 4 (中心)**: `rootGrid` 自身の displayCells (= root の 9 セル)
+    /// - **blockIndex != 4 (周辺、子グリッドあり)**: 子グリッドの displayCells (X=C で中心に親 peripheral)
+    /// - **blockIndex != 4 (周辺、子グリッド未作成)**: X=C **implicit** display
+    ///   = 中心に root の対応 peripheral cell、周辺 8 cell は nil。子グリッドを作る前段階の
+    ///   "seed" を 9×9 上で見せる (= drill すると即座にこの中心が継承される)
+    /// - **blockIndex != 4 (周辺、root peripheral も空)**: 全 9 cell が nil の placeholder
+    ///
+    /// desktop の `useSubGrids` ([`../../desktop/src/components/editor/Grid9x9.tsx`](../../desktop/src/components/editor/Grid9x9.tsx) 系) と等価。
+    static func loadNineByNineLayout(
+        rootGrid: Grid,
+        in context: ModelContext
+    ) -> [(Grid?, [Cell?])] {
+        var result: [(Grid?, [Cell?])] = []
+        let rootDisplay = displayCells(for: rootGrid, in: context)
+
+        for blockIndex in 0..<GridConstants.gridCellCount {
+            if blockIndex == GridConstants.centerPosition {
+                result.append((rootGrid, rootDisplay))
+                continue
+            }
+            // 周辺 block: root grid の対応 position の cell → 子グリッド最初の 1 件
+            let parentCell = rootDisplay[blockIndex]
+            if let parentCell, let child = findChildGrid(parentCellId: parentCell.id, in: context) {
+                let childDisplay = displayCells(for: child, in: context)
+                result.append((child, childDisplay))
+            } else {
+                // implicit: 中心に親 peripheral (X=C seed)、周辺 8 は nil
+                var implicit: [Cell?] = Array(repeating: nil, count: GridConstants.gridCellCount)
+                implicit[GridConstants.centerPosition] = parentCell
+                result.append((nil, implicit))
+            }
+        }
+        return result
+    }
+
     /// 指定 grid から root grid までの ancestry を返す (root が先頭、leaf が末尾)。
     /// `mandalart.lastGridId` から起動時に breadcrumb を復元するために使う。
     /// - 途中で grid / cell が見つからない場合は nil を返す → 呼出側で root にフォールバック。
