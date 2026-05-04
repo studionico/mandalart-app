@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct MandalartApp: App {
     @State private var auth = AuthStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -29,7 +30,44 @@ struct MandalartApp: App {
             ContentView()
                 .environment(auth)
                 .task { await auth.bootstrap() }
+                // サインイン状態が変わるたびに発火 (= bootstrap で session 復元時 / 手動サインイン時)。
+                // サインイン直後の初回フル同期 (pull → push) を自動で走らせる。
+                .task(id: auth.isSignedIn) {
+                    if auth.isSignedIn {
+                        await fullSync()
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
+        // フォアグラウンド復帰 → pull (他端末の変更を取り込む)
+        // バックグラウンド遷移 → push (自分の編集を他端末へ届ける)
+        // realtime 未実装の現状ではこれが cross-device 反映の主経路 (落とし穴 #22 desktop 側と同等)
+        .onChange(of: scenePhase) { _, phase in
+            guard auth.isSignedIn else { return }
+            let context = sharedModelContainer.mainContext
+            Task { @MainActor in
+                switch phase {
+                case .active:
+                    try? await SyncEngine.shared.pullAll(into: context)
+                case .background:
+                    try? await SyncEngine.shared.pushPending(from: context)
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    /// 起動時 / サインイン直後の初回フル同期。pull → push の順で実行
+    /// (他端末の更新を先に取り込んでから自分の差分を push)。
+    @MainActor
+    private func fullSync() async {
+        let context = sharedModelContainer.mainContext
+        do {
+            _ = try await SyncEngine.shared.pullAll(into: context)
+            _ = try await SyncEngine.shared.pushPending(from: context)
+        } catch {
+            print("[auto-sync] fullSync failed:", error)
+        }
     }
 }
