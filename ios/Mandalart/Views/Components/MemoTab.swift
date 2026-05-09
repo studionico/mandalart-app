@@ -26,7 +26,8 @@ struct MemoTab: View {
     let grid: Grid
     let mandalart: Mandalart
 
-    @State private var mode: Mode = .edit
+    /// desktop と揃えた既定値: マンダラート表示中の視認性優先のためプレビューを既定にする
+    @State private var mode: Mode = .preview
     /// 全画面編集 sheet の表示制御 (Landscape キーボード覆い対策で inline 編集を撤去)。
     @State private var showEditor: Bool = false
     /// Sheet で編集中の draft text。`commitEditor` で grid.memo へ反映、cancel で破棄。
