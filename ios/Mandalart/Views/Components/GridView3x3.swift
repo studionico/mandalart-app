@@ -29,6 +29,10 @@ struct GridView3x3: View {
     /// EditorView 側で format 選択ダイアログ or fileImporter を開く。
     let onExportRequest: ((Cell) -> Void)?
     let onImportRequest: ((Cell) -> Void)?
+    /// EditorView の Floating Bar が現在編集中の cell.id (nil = 非編集中)。pass-through。
+    let editingCellId: String?
+    /// セル tap で編集要求を上位 EditorView に通知する callback。pass-through。
+    let onEditRequest: ((Cell) -> Void)?
 
     init(
         gridId: String,
@@ -41,7 +45,9 @@ struct GridView3x3: View {
         pasteMode: Bool = false,
         onPasteTargetTapped: ((Cell) -> Void)? = nil,
         onExportRequest: ((Cell) -> Void)? = nil,
-        onImportRequest: ((Cell) -> Void)? = nil
+        onImportRequest: ((Cell) -> Void)? = nil,
+        editingCellId: String? = nil,
+        onEditRequest: ((Cell) -> Void)? = nil
     ) {
         self.gridId = gridId
         self.displayCells = displayCells
@@ -54,6 +60,8 @@ struct GridView3x3: View {
         self.onPasteTargetTapped = onPasteTargetTapped
         self.onExportRequest = onExportRequest
         self.onImportRequest = onImportRequest
+        self.editingCellId = editingCellId
+        self.onEditRequest = onEditRequest
     }
 
     private func hasChild(at position: Int) -> Bool {
@@ -80,7 +88,9 @@ struct GridView3x3: View {
                     pasteMode: pasteMode,
                     onPasteTargetTapped: onPasteTargetTapped,
                     onExportRequest: onExportRequest,
-                    onImportRequest: onImportRequest
+                    onImportRequest: onImportRequest,
+                    editingCellId: editingCellId,
+                    onEditRequest: onEditRequest
                 )
                 // grid 切替時 (= drill / drill-up) に CellView の @State (`text`) が
                 // 古い grid の値を持ち越さないよう、id に gridId + cellId を含めて強制 remount。

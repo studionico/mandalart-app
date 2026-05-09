@@ -3,13 +3,18 @@ import SwiftData
 import PhotosUI
 import UIKit
 
-/// 1 セル: 表示 + tap 操作 (drill or inline edit) + commit + 長押し context menu。
+/// 1 セル: 表示 + tap 操作 (drill or 編集要求) + 長押し context menu。
 ///
 /// **タップ動作分岐**:
-/// - 中心セル (position=4) → 常に inline edit (root center は title 編集、child center は親 peripheral と X=C 共有編集)
-/// - 周辺セル (position 0-3, 5-8) で空 → inline edit
+/// - 中心セル (position=4) → 編集要求 (= EditorView の Floating Bar を開く)
+/// - 周辺セル (position 0-3, 5-8) で空 → 編集要求
 /// - 周辺セル + 非空 → `onDrillRequest` 呼び出し (drill-down)
 /// - ロック中 → 編集ブロック、ただし drill (= 閲覧 navigation) は許可
+///
+/// **編集 UI**: TextField はこの View 内には持たない。tap → `onEditRequest(cell)`
+/// で EditorView 側の `EditingTopBar` (画面最上部 floating) を起動する。
+/// 理由は iPhone Landscape で iOS 純正キーボードがエディター下半分を覆うため
+/// (`docs/pitfalls.md` 参照)。
 ///
 /// **長押し**: cell が存在 + 非ロック中なら context menu を表示
 /// (色プリセット 10 + 画像追加 / 削除 + 内容クリア)。
@@ -39,11 +44,15 @@ struct CellView: View {
     /// Export はロック中も許可 (= 読み取り専用)、Import は !isLocked かつ cell != nil の時のみ表示。
     let onExportRequest: ((Cell) -> Void)?
     let onImportRequest: ((Cell) -> Void)?
+    /// EditorView の Floating Bar が現在編集中の cell.id (nil = 非編集中)。
+    /// このセルが対象なら border を accent color + 太線にして highlight する。
+    let editingCellId: String?
+    /// セル tap で編集要求を上位 EditorView に通知する callback。空 slot の場合は
+    /// この View 側で lazy create した Cell を渡す。
+    let onEditRequest: ((Cell) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
-    @State private var text: String
-    @FocusState private var isFocused: Bool
     @State private var photoItem: PhotosPickerItem?
     @State private var loadedImage: UIImage?
     /// drill アニメ用 opacity 補間。`onAppear` で stagger delay 経過後に true に切替。
@@ -61,7 +70,9 @@ struct CellView: View {
         pasteMode: Bool = false,
         onPasteTargetTapped: ((Cell) -> Void)? = nil,
         onExportRequest: ((Cell) -> Void)? = nil,
-        onImportRequest: ((Cell) -> Void)? = nil
+        onImportRequest: ((Cell) -> Void)? = nil,
+        editingCellId: String? = nil,
+        onEditRequest: ((Cell) -> Void)? = nil
     ) {
         self.cell = cell
         self.gridId = gridId
@@ -75,7 +86,8 @@ struct CellView: View {
         self.onPasteTargetTapped = onPasteTargetTapped
         self.onExportRequest = onExportRequest
         self.onImportRequest = onImportRequest
-        _text = State(initialValue: cell?.text ?? "")
+        self.editingCellId = editingCellId
+        self.onEditRequest = onEditRequest
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
         // stagger 順序に含まれない position は X=C 連続セル (= drill-down 中心) なので
         // 最初から visible=true。fade-in 動作なし、ちらつきも防げる。
@@ -93,6 +105,15 @@ struct CellView: View {
     /// readOnly mode (= 9×9 view inner) では drill しない。
     private var shouldDrillOnTap: Bool {
         !readOnly && !isCenter && !isEmpty
+    }
+    /// EditorView の Floating Bar が現在このセルを編集中かどうか。
+    private var isEditing: Bool {
+        guard let id = cell?.id, let editing = editingCellId else { return false }
+        return id == editing
+    }
+    /// border の色。編集中は accent color で highlight。
+    private var borderColor: Color {
+        isEditing ? Color.accentColor : Color.primary.opacity(0.4)
     }
 
     /// セル背景色 (画像がない場合のみ): cell.color → preset / なければ desktop と同じ
@@ -129,7 +150,7 @@ struct CellView: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
                     // テキストありの場合は半透明黒オーバーレイで読みやすく
-                    if !text.isEmpty {
+                    if !(cell?.text ?? "").isEmpty {
                         Color.black.opacity(0.25)
                     }
                 } else {
@@ -137,27 +158,20 @@ struct CellView: View {
                 }
 
                 RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
-                    .stroke(Color.primary.opacity(0.4), lineWidth: borderLineWidth)
+                    .stroke(borderColor, lineWidth: borderLineWidth * (isEditing ? 1.5 : 1.0))
 
-                // TextField は常時 render (focus binding を機能させるため)
-                TextField("", text: $text, axis: .vertical)
+                // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)
+                Text(cell?.text ?? "")
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .font(.system(size: isCenter ? 14 : 12, weight: isCenter ? .semibold : .regular))
                     .foregroundStyle(loadedImage != nil ? Color.white : Color.primary)
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .focused($isFocused)
-                    .disabled(isLocked || readOnly)
-                    .allowsHitTesting(isFocused && !readOnly)
-                    .onSubmit { commit() }
-                    .onChange(of: isFocused) { _, nowFocused in
-                        if !nowFocused { commit() }
-                    }
 
-                // 編集モード以外では透明 overlay が全 tap を吸い、drill or focus に分岐する。
+                // 透明 overlay が全 tap を吸い、drill or 編集要求に分岐する。
                 // readOnly では tap 自体を取らず、上位 view (9×9) の操作に流す。
-                if !isFocused && !readOnly {
+                if !readOnly {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { handleTap() }
@@ -193,11 +207,6 @@ struct CellView: View {
             Task {
                 await handlePhotoSelection(newItem)
                 photoItem = nil
-            }
-        }
-        .onChange(of: cell?.text) { _, newText in
-            if !isFocused, let newText, newText != text {
-                text = newText
             }
         }
         .onChange(of: cell?.imagePath) { _, newPath in
@@ -238,33 +247,10 @@ struct CellView: View {
             return
         }
         guard !isLocked else { return }
-        isFocused = true
-    }
-
-    private func commit() {
-        guard !isLocked else { return }
-        let now = Date()
-        if let existing = cell {
-            guard existing.text != text else { return }
-            existing.text = text
-            existing.updatedAt = now
-        } else if !text.isEmpty {
-            let newCell = Cell(
-                gridId: gridId,
-                position: position,
-                text: text,
-                createdAt: now,
-                updatedAt: now
-            )
-            modelContext.insert(newCell)
-        } else {
-            return
-        }
-        if isRootCell {
-            mandalart.title = text
-            mandalart.updatedAt = now
-        }
-        try? modelContext.save()
+        // 空 slot の場合は先に Cell を lazy create してから編集要求を発火 (= EditorView 側
+        // Floating Bar で commit する経路に乗せる)。
+        let target: Cell = cell ?? lazyCreateEmptyCell()
+        onEditRequest?(target)
     }
 
     // MARK: - Context menu
@@ -404,7 +390,6 @@ struct CellView: View {
         cell.color = nil
         cell.imagePath = nil
         cell.updatedAt = Date()
-        text = ""
         loadedImage = nil
         if isRootCell {
             mandalart.title = ""

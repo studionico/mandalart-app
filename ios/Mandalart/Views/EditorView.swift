@@ -47,6 +47,14 @@ struct EditorView: View {
     /// Export / Import の結果フィードバック alert。
     @State private var transferAlert: TransferAlertState?
 
+    /// Floating 編集 Bar の対象 cell.id (nil = 非編集中)。Bar の表示 / scrim / CellView highlight に連動。
+    /// Landscape iOS 純正キーボードがエディター下半分を覆う問題への対策で、編集は CellView の inline
+    /// TextField ではなく画面最上部の Floating Bar に集約している。
+    @State private var editingCellId: String?
+    /// Floating Bar の TextField と双方向 bind する draft text。`commitEditing()` で SwiftData 反映、
+    /// `cancelEditing()` で破棄。
+    @State private var editingDraft: String = ""
+
     /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
     /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
     private var nineByNineSupported: Bool {
@@ -143,7 +151,33 @@ struct EditorView: View {
                                 .padding(.top, 20)
                                 .accessibilityLabel(viewMode == .grid3x3 ? "9×9 ビューに切替" : "3×3 ビューに戻る")
                             }
+
+                            // 編集中: grid 領域に invisible scrim を被せて誤タップを抑止 (= 安全側)。
+                            // × / 完了で Bar を閉じてから他セル操作する UX。
+                            if editingCellId != nil {
+                                Color.black.opacity(0.001)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { /* scrim でブロック */ }
+                                    .ignoresSafeArea()
+                                    .zIndex(99)
+                            }
+
+                            // 編集中: 最上部に Floating 編集バー (Landscape キーボードがエディター
+                            // 下半分を覆う対策)。zIndex で home / 9×9 toggle / scrim より上に積む。
+                            if editingCellId != nil {
+                                EditingTopBar(
+                                    text: $editingDraft,
+                                    onCancel: { cancelEditing() },
+                                    onCommit: { commitEditing() }
+                                )
+                                .frame(maxWidth: .infinity, alignment: .top)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                                .zIndex(100)
+                            }
                         }
+                        .animation(.easeInOut(duration: 0.2), value: editingCellId)
                         .onChange(of: horizontalSizeClass) { _, newClass in
                             // iPad で Split View を縮小して compact に変わった場合、
                             // 9×9 中なら 3×3 へ強制復帰 (= ボタンが消えてユーザーが戻れなくなるのを防止)
@@ -335,7 +369,9 @@ struct EditorView: View {
                             pasteMode: stockPasteTargetItemId != nil,
                             onPasteTargetTapped: { cell in handleStockPasteTarget(cell: cell) },
                             onExportRequest: { cell in cellExportTarget = cell },
-                            onImportRequest: { cell in handleCellImportRequest(cell: cell) }
+                            onImportRequest: { cell in handleCellImportRequest(cell: cell) },
+                            editingCellId: editingCellId,
+                            onEditRequest: { cell in beginEditing(cell: cell) }
                         )
                         .frame(width: gridSize, height: gridSize)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
@@ -456,6 +492,44 @@ struct EditorView: View {
         .accessibilityLabel(accessibilityLabel)
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
+    }
+
+    // MARK: - Inline editing (Floating Bar)
+
+    /// 編集要求を受け取って Floating Bar を表示状態にする。CellView 側で空 slot は
+    /// lazy create 済の Cell を渡してくる前提なので、ここでは draft セットのみ。
+    private func beginEditing(cell: Cell) {
+        guard let m = mandalart, !m.locked else { return }
+        editingDraft = cell.text
+        editingCellId = cell.id
+    }
+
+    /// Floating Bar の draft を SwiftData の cell.text に commit。root center の場合は
+    /// mandalart.title も同期 (= ダッシュボードのタイトル表示と整合)。
+    private func commitEditing() {
+        defer {
+            editingCellId = nil
+            editingDraft = ""
+        }
+        guard let m = mandalart, !m.locked else { return }
+        guard let id = editingCellId else { return }
+        let descriptor = FetchDescriptor<Cell>(predicate: #Predicate<Cell> { $0.id == id })
+        guard let target = (try? modelContext.fetch(descriptor))?.first else { return }
+        guard target.text != editingDraft else { return }
+        let now = Date()
+        target.text = editingDraft
+        target.updatedAt = now
+        if target.id == m.rootCellId {
+            m.title = editingDraft
+            m.updatedAt = now
+        }
+        try? modelContext.save()
+    }
+
+    /// 編集を破棄。SwiftData は触らない (= cell.text は変更前のまま)。
+    private func cancelEditing() {
+        editingCellId = nil
+        editingDraft = ""
     }
 
     // MARK: - Navigation
