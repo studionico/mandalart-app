@@ -39,8 +39,6 @@ struct DashboardView: View {
 
     let onOpenMandalart: (String) -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
-
     /// 並び順: Inbox (isSystem) を先頭に固定 → sortOrder ASC → createdAt ASC
     private var sortedFolders: [Folder] {
         foldersRaw.sorted { lhs, rhs in
@@ -241,18 +239,29 @@ struct DashboardView: View {
     // MARK: - Main grid
 
     private var mainGrid: some View {
-        ScrollView {
-            if visibleMandalarts.isEmpty {
-                emptyState
-            } else {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(visibleMandalarts) { m in
-                        MandalartCard(mandalart: m)
-                            .onTapGesture { onOpenMandalart(m.id) }
-                            .contextMenu { mandalartContextMenu(for: m) }
+        // GeometryReader は ScrollView の外側に置く (内側だと content の高さしか取れない)。
+        // geo.size.height = タブ + 検索バーを除いた content viewport の高さ。
+        GeometryReader { geo in
+            ScrollView {
+                if visibleMandalarts.isEmpty {
+                    emptyState
+                } else {
+                    // viewport の縦に 2 行が収まる正方形辺長を逆算 (= 絶対値 pt ではなく相対サイズ)。
+                    // 1 row VStack: RoundedRectangle (square) + spacing(8) + 日時 caption(.caption2 ~14pt)
+                    // 2 row 分 + row 間 spacing(12) + 上下 padding(12 * 2)
+                    let captionAndSpacing: CGFloat = 8 + 14
+                    let verticalChrome: CGFloat = 12 + 12 + 12
+                    let cardSquareSize = max(80, (geo.size.height - verticalChrome - captionAndSpacing * 2) / 2)
+                    let columns = [GridItem(.adaptive(minimum: cardSquareSize), spacing: 12)]
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(visibleMandalarts) { m in
+                            MandalartCard(mandalart: m)
+                                .onTapGesture { onOpenMandalart(m.id) }
+                                .contextMenu { mandalartContextMenu(for: m) }
+                        }
                     }
+                    .padding(12)
                 }
-                .padding(12)
             }
         }
     }
