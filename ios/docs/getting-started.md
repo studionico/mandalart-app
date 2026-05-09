@@ -95,11 +95,19 @@ open Mandalart.xcodeproj
    - **Bundle Identifier** が `jp.mandalart.app.ios` のままだと「他のユーザーが先に登録済」エラーになる可能性あり。その場合は **末尾に自分の suffix を付ける** (例: `jp.mandalart.app.ios.<あなたのハンドル>`)。この変更は [`project.yml`](../project.yml) の `PRODUCT_BUNDLE_IDENTIFIER` を編集 → `xcodegen generate` 再実行で反映するのが推奨 (= xcodeproj 側を直接編集すると次回の xcodegen で消える)
 4. **destination で実機を選択**: 上部 toolbar で「Mandalart > iPhone 17 Pro Simulator」と表示されている部分をクリック → 接続した iPhone の実機名 (= USB 接続時に「**接続デバイス**」セクションに出る) に切替
 5. **Cmd+R で Build & Run** (= 初回は数分。SPM resolve + 署名 + iPhone へのインストール)
-6. **iPhone 側で「信頼」設定** (= 初回のみ)
+6. **(iOS 16+ 初回のみ) iPhone で Developer Mode を ON にする**
+   - 手順 5 で **「Developer Mode disabled — To use <iPhone 名> for development, enable Developer Mode in Settings → Privacy & Security」** という Xcode エラーが出るはず (iPhone 側には何も表示されない)
+   - **このエラーが trigger** になって iPhone 側に menu が現れる仕様。iPhone をロック解除した状態で:
+     - **設定 → プライバシーとセキュリティ → 一番下までスクロール → 「デベロッパモード」** をタップ → トグル ON
+     - 「再起動が必要」 → **再起動**
+     - 再起動後、ロック解除前に「**デベロッパモードを有効にしますか？**」alert → **オン** → パスコード入力で確定
+   - 設定 → プライバシーとセキュリティ → デベロッパモード が ON になっていることを確認したら Xcode に戻って **Cmd+R を再実行**
+   - **なぜ default OFF か**: iOS 16+ から「ユーザーが意図せず開発者向けアプリを実機 install されない」ためのガード。一度 ON にすれば iPhone を初期化するまで保持されるので、Free signing 7 日 expire の再ビルドサイクルでは再操作不要
+7. **iPhone 側で「信頼」設定** (= 初回のみ)
    - 起動時に「**信頼されていない開発元**」alert が出る (アプリは起動しない)
    - iPhone の **設定 → 一般 → VPN とデバイス管理 → デベロッパAPP → <Apple ID>** を開く
    - 「**<Apple ID> を信頼**」をタップ → 確認
-7. **アプリ起動** → サインイン → 同期検証 (= desktop で作ったマンダラートが pull されるか)
+8. **アプリ起動** → サインイン → 同期検証 (= desktop で作ったマンダラートが pull されるか)
 
 #### 7 日経過後の再ビルド
 
