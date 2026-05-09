@@ -158,6 +158,94 @@ enum MandalartFactory {
         return newMandalart
     }
 
+    /// Soft delete: マンダラート + 配下の grids / cells に `deletedAt = now()` をセットする。
+    /// desktop の [`deleteMandalart`](../../../../desktop/src/lib/api/mandalarts.ts) と同等の挙動で、
+    /// 削除されたマンダラートは「ゴミ箱」(TrashView) に表示され、復元 / 完全削除のいずれかを
+    /// 選択できる。`deletedAt` の値は SyncEngine が `deleted_at` として cloud に push する。
+    ///
+    /// **`updatedAt` も同時に更新** することが必須: cloud 側の last-write-wins (= updated_at 比較)
+    /// で「より新しい削除状態」として優先される必要がある (落とし穴 #12 / desktop 側 `deleteMandalart`
+    /// 参照)。
+    ///
+    /// `synced_at IS NULL` (= まだ cloud に push されたことがない行) でも soft delete に統一する。
+    /// 旧仕様の「未同期は hard delete」は zombie cleanup でカバー済 (= [`SyncEngine.sanitizeZombies`](SyncEngine.swift)
+    /// が orphan grid / cell を hard delete) なので soft 統一しても zombie 復活は起きない (落とし穴 #12)。
+    ///
+    /// ロック中は `permanentDelete` と同様にスキップ (UI 層で「削除」メニュー非表示なので通常到達しない)。
+    static func softDelete(
+        _ mandalart: Mandalart,
+        in context: ModelContext
+    ) throws {
+        guard !mandalart.locked else { return }
+        if mandalart.deletedAt != nil { return }
+        let now = Date()
+        let mandalartId = mandalart.id
+
+        let gridFetch = FetchDescriptor<Grid>(
+            predicate: #Predicate<Grid> { $0.mandalartId == mandalartId && $0.deletedAt == nil }
+        )
+        let grids = try context.fetch(gridFetch)
+        let gridIds = grids.map { $0.id }
+        let gridIdSet = Set(gridIds)
+        let cellFetch = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> { gridIdSet.contains($0.gridId) && $0.deletedAt == nil }
+        )
+        let cells = try context.fetch(cellFetch)
+
+        // cells → grids → mandalart の順に deletedAt をセット (desktop と順序を揃える)。
+        for cell in cells {
+            cell.deletedAt = now
+            cell.updatedAt = now
+        }
+        for grid in grids {
+            grid.deletedAt = now
+            grid.updatedAt = now
+        }
+        mandalart.deletedAt = now
+        mandalart.updatedAt = now
+        try context.save()
+    }
+
+    /// ゴミ箱からの復元: マンダラート + 配下の grids / cells の `deletedAt` を nil に戻す。
+    /// desktop の [`restoreMandalart`](../../../../desktop/src/lib/api/mandalarts.ts) と同等。
+    ///
+    /// `updatedAt` も更新して cloud に「復元状態」を push する (= last-write-wins で他デバイスにも反映)。
+    /// 復元対象は **同 mandalart に属する全 grids / cells** (= soft delete されているもの全て)。
+    /// 注意: もしユーザーが mandalart 削除前に個別の cell / grid を別経路で soft delete していた場合、
+    /// それも復元される (= desktop と同じ挙動、現状 cell / grid 単位の soft delete API は存在しないので
+    /// 実質的に問題は起きない)。
+    static func restore(
+        _ mandalart: Mandalart,
+        in context: ModelContext
+    ) throws {
+        guard mandalart.deletedAt != nil else { return }
+        let now = Date()
+        let mandalartId = mandalart.id
+
+        let gridFetch = FetchDescriptor<Grid>(
+            predicate: #Predicate<Grid> { $0.mandalartId == mandalartId }
+        )
+        let grids = try context.fetch(gridFetch)
+        let gridIds = grids.map { $0.id }
+        let gridIdSet = Set(gridIds)
+        let cellFetch = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> { gridIdSet.contains($0.gridId) }
+        )
+        let cells = try context.fetch(cellFetch)
+
+        for cell in cells {
+            cell.deletedAt = nil
+            cell.updatedAt = now
+        }
+        for grid in grids {
+            grid.deletedAt = nil
+            grid.updatedAt = now
+        }
+        mandalart.deletedAt = nil
+        mandalart.updatedAt = now
+        try context.save()
+    }
+
     /// Permanent delete: cascade local + cloud。
     ///
     /// 削除順序 (desktop の `permanentDeleteMandalart` と同等):

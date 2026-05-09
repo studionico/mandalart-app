@@ -21,6 +21,8 @@ struct DashboardView: View {
     @State private var renameTarget: Folder?
     @State private var renameInput: String = ""
 
+    @State private var showTrash = false
+
     let onOpenMandalart: (String) -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
@@ -79,19 +81,27 @@ struct DashboardView: View {
                     folderTabBar
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        try? MandalartFactory.create(
-                            title: "新規マンダラート",
-                            folderId: selectedFolderId,
-                            in: modelContext
-                        )
-                    } label: {
-                        Image(systemName: "plus")
+                    HStack(spacing: 8) {
+                        Button { showTrash = true } label: {
+                            Image(systemName: "trash")
+                        }
+                        Button {
+                            try? MandalartFactory.create(
+                                title: "新規マンダラート",
+                                folderId: selectedFolderId,
+                                in: modelContext
+                            )
+                        } label: {
+                            Image(systemName: "plus")
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView().environment(auth)
+            }
+            .sheet(isPresented: $showTrash) {
+                TrashView()
             }
             .sheet(isPresented: $showAddFolder) {
                 FolderNameSheet(
@@ -260,14 +270,15 @@ struct DashboardView: View {
 
         // ロック中マンダラートは削除できない (誤操作防止のため context menu から削除項目を非表示)。
         // ロック解除すると削除メニューが復活する。defensive ガードは
-        // `MandalartFactory.permanentDelete` 冒頭に同等の locked check あり。
+        // `MandalartFactory.softDelete` 冒頭に同等の locked check あり。
+        // 「削除」はゴミ箱に移動 (= soft delete)。完全削除はゴミ箱画面 (TrashView) から行う。
         if !m.locked {
             Divider()
 
             Button(role: .destructive) {
-                Task { try? await MandalartFactory.permanentDelete(m, in: modelContext) }
+                try? MandalartFactory.softDelete(m, in: modelContext)
             } label: {
-                Label("削除", systemImage: "trash")
+                Label("ゴミ箱へ移動", systemImage: "trash")
             }
         }
     }
