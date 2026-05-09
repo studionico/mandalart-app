@@ -93,6 +93,7 @@ Views → ViewModels (@Observable) → Services → SwiftData (local) / supabase
 3. **SwiftData モデル変更後の起動クラッシュ** → Simulator のアプリを削除 (or VersionedSchema migration)
 4. **Cell.text / Grid.sortOrder / Folder.isSystem は desktop schema と完全一致**
 5. **umbrella `Supabase` product を使う** (個別 module 直 init は API が頻繁に変わる)
+6. **SwiftUI deeply-chained modifier が SourceKit を timeout させる** → Live Issues に偽の `Cannot find type` 連鎖が出るが Build (`xcodebuild`) は通る。ViewModifier 化 + 別ファイル切り出しで解消 ([`docs/pitfalls.md`](docs/pitfalls.md) #12)
 
 **desktop と共通する落とし穴**: [`../desktop/CLAUDE.md`](../desktop/CLAUDE.md) #2 (FK 制約) / #10 (中心セル 3 パターン) / #12 (zombie cleanup) / #17 (PGRST204 thrash) は iOS 側でも同等の対策が必要。
 

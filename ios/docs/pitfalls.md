@@ -198,6 +198,47 @@ self.client = SupabaseClient(
 | iPad Split View 1/3 | .compact | 非表示 (open 中なら 3×3 強制復帰) |
 | iPad Split View 1/2 | .regular | 表示 |
 
+### #12. SwiftUI deeply-chained modifier が SourceKit (= Live Issues) を timeout させる
+
+**症状**: Xcode の Live Issues / Clean Build Folder 後の解析で、1 つのファイル (例: [`DashboardView.swift`](../Mandalart/Views/DashboardView.swift)) に対して以下のような **複数の偽陽性エラー** が連鎖表示される:
+
+```
+Cannot find type 'MandalartExportDocument' in scope    (@State property 宣言行)
+Cannot find 'TrashView' in scope                       (sheet content の参照)
+Cannot find type 'ExportFormat' in scope               (関数シグネチャ)
+Cannot find 'TransferService' in scope                 (helper 関数内)
+Cannot find type 'GridSnapshot' in scope               (型 annotation)
+Generic parameter 'D' could not be inferred            (.fileExporter の document:)
+The compiler is unable to type-check this expression in reasonable time;
+  try breaking up the expression into distinct sub-expressions
+```
+
+**重要**: `xcodebuild build` は **BUILD SUCCEEDED** で実コンパイルは正常。型は本当に存在しており、エラーは Live Issues (= SourceKit の IDE 用 type-checker) のみ。Build (Cmd+B) も成功する。
+
+**原因**: SourceKit は swiftc 本体より厳しい timeout を持っており、SwiftUI の `sheet` / `confirmationDialog` / `fileExporter` / `fileImporter` / `alert` を **同じ View body に多数 chain** すると、特に `presenting:` のような generic 推論を含む modifier が複数あると諦めて type-check を打ち切る。打ち切りの cascade で **同ファイルの他の symbol resolution まで「Cannot find」が連鎖表示** される。
+
+**切り分け手順**: まず本当のコンパイルエラーか SourceKit cascade かを確認:
+
+```bash
+cd /Users/maro02/20_アプリ開発/mandalart/ios
+xcodebuild -project Mandalart.xcodeproj -scheme Mandalart \
+    -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath /tmp/mandalart-build build 2>&1 | grep -E "error:|BUILD"
+```
+
+- **BUILD SUCCEEDED** → 偽陽性 (= 下記対処)
+- **BUILD FAILED + error: ...** → 本物の問題 (Live Issues に従って修正)
+
+**対処**: 1 ファイルあたりの SourceKit 解析負荷を下げる。複数の手段を組み合わせる:
+
+1. **ViewModifier 化 + 2-modifier ずつに分割**: 4 連鎖 modifier を 2 つの ViewModifier (= 各 2 modifier) に分け、`.modifier(_:)` で繋ぐ。1 つの ViewModifier に集約しても内部 chain 長は同じなので **物理的に分けることが必須**
+2. **別ファイルへ切り出し**: ViewModifier 定義 + `TransferAlertState` のような関連型を別ファイルへ移動して 1 ファイルあたりの SwiftUI コードを減らす (= [`DashboardTransferSupport.swift`](../Mandalart/Views/DashboardTransferSupport.swift) が前例)
+3. **`presenting:` ジェネリックを同じ body 内に複数入れない**: `confirmationDialog(presenting:)` と `alert(presenting:)` を 1 つの body に置くと推論コストが乗算される。別の ViewModifier に分散
+
+**前例**: 2026-05-09 commit `4209210` で DashboardView.swift (632 行) が `Phase 8` 実装後に上記症状を起こし、Transfer 系 ViewModifier 79 行を [`DashboardTransferSupport.swift`](../Mandalart/Views/DashboardTransferSupport.swift) に切り出して解消。Build (= swiftc) 自体は最初から成功していた。
+
+**予防**: 新しい sheet / alert / confirmationDialog / fileExporter / fileImporter を既存 View に追加するとき、すでに同じ body に **3 個以上の同種 modifier** がある場合は最初から ViewModifier 化 + 別ファイル切り出しを検討する。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。
