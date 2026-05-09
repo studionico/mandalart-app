@@ -33,6 +33,8 @@ struct GridView3x3: View {
     let editingCellId: String?
     /// セル tap で編集要求を上位 EditorView に通知する callback。pass-through。
     let onEditRequest: ((Cell) -> Void)?
+    /// 入力済み中心セル tap で drill-up / home navigation を起動する callback。pass-through。
+    let onCenterTapRequest: (() -> Void)?
 
     init(
         gridId: String,
@@ -47,7 +49,8 @@ struct GridView3x3: View {
         onExportRequest: ((Cell) -> Void)? = nil,
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
-        onEditRequest: ((Cell) -> Void)? = nil
+        onEditRequest: ((Cell) -> Void)? = nil,
+        onCenterTapRequest: (() -> Void)? = nil
     ) {
         self.gridId = gridId
         self.displayCells = displayCells
@@ -62,6 +65,7 @@ struct GridView3x3: View {
         self.onImportRequest = onImportRequest
         self.editingCellId = editingCellId
         self.onEditRequest = onEditRequest
+        self.onCenterTapRequest = onCenterTapRequest
     }
 
     private func hasChild(at position: Int) -> Bool {
@@ -90,7 +94,8 @@ struct GridView3x3: View {
                     onExportRequest: onExportRequest,
                     onImportRequest: onImportRequest,
                     editingCellId: editingCellId,
-                    onEditRequest: onEditRequest
+                    onEditRequest: onEditRequest,
+                    onCenterTapRequest: onCenterTapRequest
                 )
                 // grid 切替時 (= drill / drill-up) に CellView の @State (`text`) が
                 // 古い grid の値を持ち越さないよう、id に gridId + cellId を含めて強制 remount。

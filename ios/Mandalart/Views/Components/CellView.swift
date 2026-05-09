@@ -50,6 +50,10 @@ struct CellView: View {
     /// セル tap で編集要求を上位 EditorView に通知する callback。空 slot の場合は
     /// この View 側で lazy create した Cell を渡す。
     let onEditRequest: ((Cell) -> Void)?
+    /// 入力済み中心セル tap で「親階層へ戻る」or「ホームへ戻る」を上位に通知。
+    /// 中心 + 非空のときに発火 (ロック中も閲覧 navigation として許可)。
+    /// 空中心 / 周辺セルでは未使用。
+    let onCenterTapRequest: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -72,7 +76,8 @@ struct CellView: View {
         onExportRequest: ((Cell) -> Void)? = nil,
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
-        onEditRequest: ((Cell) -> Void)? = nil
+        onEditRequest: ((Cell) -> Void)? = nil,
+        onCenterTapRequest: (() -> Void)? = nil
     ) {
         self.cell = cell
         self.gridId = gridId
@@ -88,6 +93,7 @@ struct CellView: View {
         self.onImportRequest = onImportRequest
         self.editingCellId = editingCellId
         self.onEditRequest = onEditRequest
+        self.onCenterTapRequest = onCenterTapRequest
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
         // stagger 順序に含まれない position は X=C 連続セル (= drill-down 中心) なので
         // 最初から visible=true。fade-in 動作なし、ちらつきも防げる。
@@ -171,10 +177,12 @@ struct CellView: View {
 
                 // 透明 overlay が全 tap を吸い、drill or 編集要求に分岐する。
                 // readOnly では tap 自体を取らず、上位 view (9×9) の操作に流す。
+                // count: 2 を先に宣言して double-tap → 入力済みセル編集を優先判定。
                 if !readOnly {
                     Color.clear
                         .contentShape(Rectangle())
-                        .onTapGesture { handleTap() }
+                        .onTapGesture(count: 2) { handleDoubleTap() }
+                        .onTapGesture(count: 1) { handleTap() }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -242,15 +250,29 @@ struct CellView: View {
             onPasteTargetTapped?(target)
             return
         }
+        // 周辺 + 非空: drill-down (既存)
         if shouldDrillOnTap, let c = cell {
             onDrillRequest?(c)
             return
         }
+        // 中心 + 非空: drill-up (子グリッド) or ホームへ戻る (root)。desktop と同じ挙動。
+        // ロック中も閲覧 navigation として許可。
+        if isCenter && !isEmpty {
+            onCenterTapRequest?()
+            return
+        }
+        // ここまで来るのは「中心 + 空」or「周辺 + 空」 → 新規入力なので編集 sheet 起動。
         guard !isLocked else { return }
-        // 空 slot の場合は先に Cell を lazy create してから編集要求を発火 (= EditorView 側
-        // Floating Bar で commit する経路に乗せる)。
         let target: Cell = cell ?? lazyCreateEmptyCell()
         onEditRequest?(target)
+    }
+
+    /// double-tap: 入力済みセル (中心 / 周辺両方) の編集 sheet 起動。
+    /// desktop の double-click parity。空セルは single tap で既に編集に入るので no-op。
+    private func handleDoubleTap() {
+        guard !readOnly, !isLocked else { return }
+        guard !isEmpty, let c = cell else { return }
+        onEditRequest?(c)
     }
 
     // MARK: - Context menu
@@ -262,6 +284,16 @@ struct CellView: View {
 
     @ViewBuilder
     private var cellContextMenu: some View {
+        // 編集 (= double-tap と同等の経路)。入力済み + 非ロックのとき最上部に表示。
+        // 空セルは context menu 自体ほぼ出ないが念のため !isEmpty ガード。
+        if !isLocked, let cell, !isEmpty {
+            Button {
+                onEditRequest?(cell)
+            } label: {
+                Label("編集", systemImage: "pencil")
+            }
+            Divider()
+        }
         // Export は読み取り専用なのでロック中も許可。cell != nil の時に表示。
         // Import は !isLocked のときのみ。
         if let cell {

@@ -360,7 +360,8 @@ struct EditorView: View {
                             onExportRequest: { cell in cellExportTarget = cell },
                             onImportRequest: { cell in handleCellImportRequest(cell: cell) },
                             editingCellId: editingCellId,
-                            onEditRequest: { cell in beginEditing(cell: cell) }
+                            onEditRequest: { cell in beginEditing(cell: cell) },
+                            onCenterTapRequest: { handleCenterTap() }
                         )
                         .frame(width: gridSize, height: gridSize)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
@@ -519,6 +520,20 @@ struct EditorView: View {
     private func cancelEditing() {
         editingCellId = nil
         editingDraft = ""
+    }
+
+    /// 入力済み中心セル tap → desktop 同等の drill-up / home navigation。
+    /// - root grid (breadcrumb 長 ≤ 1): `onBack()` でダッシュボードへ
+    /// - 子グリッド: 親 breadcrumb (= count - 2) へ navigate (drill-up animation)
+    /// ロック中も呼ばれる (= 閲覧 navigation として許可) が、navigateToBreadcrumb 内で
+    /// 書き込みは locked ガード済。
+    private func handleCenterTap() {
+        guard let m = mandalart else { return }
+        if breadcrumb.count <= 1 {
+            onBack()
+        } else {
+            navigateToBreadcrumb(breadcrumb.count - 2, mandalart: m)
+        }
     }
 
     // MARK: - Navigation
