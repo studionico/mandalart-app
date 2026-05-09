@@ -168,12 +168,11 @@ struct CellView: View {
 
                 // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)
                 Text(cell?.text ?? "")
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
                     .font(.system(size: isCenter ? 14 : 12, weight: isCenter ? .semibold : .regular))
                     .foregroundStyle(loadedImage != nil ? Color.white : Color.primary)
                     .padding(6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 // 透明 overlay が全 tap を吸い、drill or 編集要求に分岐する。
                 // readOnly では tap 自体を取らず、上位 view (9×9) の操作に流す。
