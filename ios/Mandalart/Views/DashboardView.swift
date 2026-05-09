@@ -12,6 +12,24 @@ struct DashboardView: View {
     @Query(filter: #Predicate<Folder> { $0.deletedAt == nil })
     private var foldersRaw: [Folder]
 
+    /// mandalart.rootCellId から root center cell の text を引くための索引 (= カード表示用)。
+    /// 空 cell は lazy create policy で DB に無く、通常 mandalart 数 × 9 以下で十分小さい。
+    /// @Query で reactive に追従するため cell.text 編集が即時カードに反映される。
+    @Query(filter: #Predicate<Cell> { $0.deletedAt == nil })
+    private var allCellsForRoot: [Cell]
+
+    /// 各 mandalart の primary root grid (= parentCellId == nil で sortOrder 最小) を引くための索引。
+    /// mandalart.rootCellId が並列 grid の中心セルを指してしまうデータ不整合があっても、
+    /// ここで「実 root grid」を直接特定するため表示が乱れない。
+    /// **sort は `\Grid.sortOrder` 単一 KeyPath に絞る** (`[SortDescriptor(...), SortDescriptor(...)]` の配列リテラルは
+    /// SwiftData @Query で型推論 timeout になる落とし穴。pitfalls.md #12 派生)。MandalartFactory.create は 0、
+    /// createParallelGrid は 1, 2, ... を採番するので createdAt タイブレーカーなしでも一意に判別できる。
+    @Query(
+        filter: #Predicate<Grid> { $0.parentCellId == nil && $0.deletedAt == nil },
+        sort: \Grid.sortOrder
+    )
+    private var rootGrids: [Grid]
+
     @State private var selectedFolderId: String?
     @State private var query: String = ""
     @State private var showSettings = false
@@ -253,9 +271,25 @@ struct DashboardView: View {
                     let verticalChrome: CGFloat = 12 + 12 + 12
                     let cardSquareSize = max(80, (geo.size.height - verticalChrome - captionAndSpacing * 2) / 2)
                     let columns = [GridItem(.adaptive(minimum: cardSquareSize), spacing: 12)]
+                    // mandalartId → primary root grid (sortOrder ASC で最初の 1 件)。
+                    // mandalart.rootCellId が並列 grid の中心セルを指す異常データがあっても、
+                    // 実 root grid (parentCellId == nil) の centerCellId 経由で確実に root 中心セルを引く。
+                    let primaryRootByMandalart: [String: Grid] = rootGrids.reduce(into: [:]) { dict, g in
+                        if dict[g.mandalartId] == nil { dict[g.mandalartId] = g }
+                    }
+                    let textByCellId = Dictionary(uniqueKeysWithValues: allCellsForRoot.map { ($0.id, $0.text) })
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(visibleMandalarts) { m in
-                            MandalartCard(mandalart: m)
+                            // 1) primary root grid の centerCellId 経由 (= 並列 grid の cell を絶対に拾わない)
+                            // 2) fallback: mandalart.rootCellId (root grid が一時的に @Query 未反映の異常系)
+                            // 3) 最終 fallback: mandalart.title
+                            let displayText: String = {
+                                if let g = primaryRootByMandalart[m.id], let t = textByCellId[g.centerCellId] {
+                                    return t
+                                }
+                                return textByCellId[m.rootCellId] ?? m.title
+                            }()
+                            MandalartCard(mandalart: m, displayText: displayText)
                                 .onTapGesture { onOpenMandalart(m.id) }
                                 .contextMenu { mandalartContextMenu(for: m) }
                         }
@@ -544,6 +578,9 @@ private struct FolderNameSheet: View {
 
 private struct MandalartCard: View {
     let mandalart: Mandalart
+    /// root center cell (= `mandalart.rootCellId`) の text。並列マンダラ有無に関わらず確実に root の中心セル内容を出すため、
+    /// 親 (DashboardView) の @Query lookup から渡される。mandalart.title (mirror) は fallback として親側で適用済み。
+    let displayText: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -566,7 +603,7 @@ private struct MandalartCard: View {
                     .padding(6)
                 }
                 .overlay(
-                    Text(mandalart.title)
+                    Text(displayText)
                         .font(.system(size: 14, weight: .medium))
                         .multilineTextAlignment(.center)
                         .padding(8)
