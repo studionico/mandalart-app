@@ -26,7 +26,7 @@ struct DashboardView: View {
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
 
     /// 並び順: Inbox (isSystem) を先頭に固定 → sortOrder ASC → createdAt ASC
-    private var sortedFolders: [Folder] {
+    private var sortedFolders: [Folder] {x
         foldersRaw.sorted { lhs, rhs in
             if lhs.isSystem != rhs.isSystem { return lhs.isSystem }
             if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
