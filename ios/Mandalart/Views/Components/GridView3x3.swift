@@ -21,6 +21,10 @@ struct GridView3x3: View {
     /// 空配列を渡すと全位置 false 扱い (= 9×9 内 inner / 旧呼び出し互換)。
     let hasChildAtPosition: [Bool]
     let onDrillRequest: ((Cell) -> Void)?
+    /// ストックペースト先選択モード中かどうか。`true` のとき CellView は drill / focus 抑制し
+    /// `onPasteTargetTapped` を発火する。
+    let pasteMode: Bool
+    let onPasteTargetTapped: ((Cell) -> Void)?
 
     init(
         gridId: String,
@@ -29,7 +33,9 @@ struct GridView3x3: View {
         transitionKind: DrillTransitionKind = .initial,
         readOnly: Bool = false,
         hasChildAtPosition: [Bool] = [],
-        onDrillRequest: ((Cell) -> Void)? = nil
+        onDrillRequest: ((Cell) -> Void)? = nil,
+        pasteMode: Bool = false,
+        onPasteTargetTapped: ((Cell) -> Void)? = nil
     ) {
         self.gridId = gridId
         self.displayCells = displayCells
@@ -38,6 +44,8 @@ struct GridView3x3: View {
         self.readOnly = readOnly
         self.hasChildAtPosition = hasChildAtPosition
         self.onDrillRequest = onDrillRequest
+        self.pasteMode = pasteMode
+        self.onPasteTargetTapped = onPasteTargetTapped
     }
 
     private func hasChild(at position: Int) -> Bool {
@@ -60,7 +68,9 @@ struct GridView3x3: View {
                     transitionKind: transitionKind,
                     readOnly: readOnly,
                     hasChild: hasChild(at: position),
-                    onDrillRequest: onDrillRequest
+                    onDrillRequest: onDrillRequest,
+                    pasteMode: pasteMode,
+                    onPasteTargetTapped: onPasteTargetTapped
                 )
                 // grid 切替時 (= drill / drill-up) に CellView の @State (`text`) が
                 // 古い grid の値を持ち越さないよう、id に gridId + cellId を含めて強制 remount。

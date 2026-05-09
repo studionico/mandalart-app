@@ -28,6 +28,10 @@ struct EditorView: View {
     @State private var lastTransitionKind: DrillTransitionKind = .initial
     /// 3×3 編集モード / 9×9 俯瞰モード。toggle ボタンで切替。9×9 中は edit / drill 全 NOOP。
     @State private var viewMode: EditorViewMode = .grid3x3
+    /// 右ペインのタブ (= メモ / ストック)。
+    @State private var rightPaneTab: RightPaneTab = .memo
+    /// ストックペースト先選択モード中の対象 stock item id。nil = 通常モード。
+    @State private var stockPasteTargetItemId: String?
 
     /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
     /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
@@ -77,6 +81,9 @@ struct EditorView: View {
                     VStack(spacing: 0) {
                         if m.locked {
                             lockBanner
+                        }
+                        if stockPasteTargetItemId != nil {
+                            stockPasteBanner
                         }
                         ZStack(alignment: .topLeading) {
                             content(
@@ -148,6 +155,28 @@ struct EditorView: View {
         // editor 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` トーンに揃える。
         // safe area 外まで塗りつぶして status bar / home indicator 周辺の透過を防止。
         .background(NeutralPalette.rootBackground.ignoresSafeArea())
+    }
+
+    /// 上部全幅 stock paste banner。ペースト先選択モード中に表示し、tap (or キャンセル) でモード解除。
+    private var stockPasteBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "tray.and.arrow.down")
+            Text("ペースト先のセルをタップ")
+                .lineLimit(1)
+            Spacer()
+            Button("キャンセル") {
+                stockPasteTargetItemId = nil
+            }
+            .font(.caption2)
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        .font(.callout)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
     }
 
     /// 上部全幅 lock banner。tap で詳細 alert を表示。
@@ -245,7 +274,9 @@ struct EditorView: View {
                                 displayCells: cells,
                                 in: modelContext
                             ),
-                            onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) }
+                            onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) },
+                            pasteMode: stockPasteTargetItemId != nil,
+                            onPasteTargetTapped: { cell in handleStockPasteTarget(cell: cell) }
                         )
                         .frame(width: gridSize, height: gridSize)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
@@ -265,15 +296,39 @@ struct EditorView: View {
                 }
                 .padding(.leading, leadingPad)
 
-                // 右ペイン: breadcrumb / divider / memo。高さ = grid と同じ (bottom 揃え)
+                // 右ペイン: breadcrumb / tab picker / memo or stock。高さ = grid と同じ (bottom 揃え)
                 VStack(alignment: .leading, spacing: 8) {
                     Breadcrumb(items: breadcrumb) { index in
                         navigateToBreadcrumb(index, mandalart: mandalart)
                     }
                     Divider()
-                    MemoTab(grid: grid, mandalart: mandalart)
-                        .id(grid.id)  // grid 切替時に MemoTab の @State を再初期化
-                        .frame(maxHeight: .infinity)  // 残り縦領域を memo が吸収
+                    // memo / stock 切替 segmented picker
+                    Picker("タブ", selection: $rightPaneTab) {
+                        ForEach(RightPaneTab.allCases) { tab in
+                            Text(tab.label).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    switch rightPaneTab {
+                    case .memo:
+                        MemoTab(grid: grid, mandalart: mandalart)
+                            .id(grid.id)  // grid 切替時に MemoTab の @State を再初期化
+                            .frame(maxHeight: .infinity)  // 残り縦領域を memo が吸収
+                    case .stock:
+                        StockTab(
+                            onPasteRequest: { item in
+                                // stock タブで「ペースト」ボタンを押したら paste-target 選択モードに入る。
+                                // 同じ item を再度押した場合はキャンセル扱い (toggle)。
+                                if stockPasteTargetItemId == item.id {
+                                    stockPasteTargetItemId = nil
+                                } else {
+                                    stockPasteTargetItemId = item.id
+                                }
+                            },
+                            pasteRequestedItemId: stockPasteTargetItemId
+                        )
+                        .frame(maxHeight: .infinity)
+                    }
                 }
                 .frame(width: memoW, height: gridSize)
                 .padding(.trailing, trailingPad)
@@ -548,5 +603,45 @@ struct EditorView: View {
             return parent.text.isEmpty ? "(無題)" : parent.text
         }
         return "(無題)"
+    }
+
+    // MARK: - Stock paste
+
+    /// stock paste-target 選択モードの cell tap ハンドラ。
+    /// 1. 選択中の stock item id を modelContext から取り直して `pasteFromStock` を実行
+    /// 2. 成功 / 失敗いずれもモード解除 (= banner を消す、再選択は stock タブから)
+    /// 3. paste 後に right pane を memo に切り替え (= ユーザーが結果を grid で確認しやすい)
+    /// 4. mandalart の `lastGridId` 更新は不要 (= 現在の grid に paste しただけ、navigation 不変)
+    private func handleStockPasteTarget(cell: Cell) {
+        guard let itemId = stockPasteTargetItemId else { return }
+        let descriptor = FetchDescriptor<StockItem>(
+            predicate: #Predicate<StockItem> { $0.id == itemId }
+        )
+        guard let item = (try? modelContext.fetch(descriptor))?.first else {
+            stockPasteTargetItemId = nil
+            return
+        }
+        do {
+            try StockService.pasteFromStock(item, targetCellId: cell.id, in: modelContext)
+        } catch {
+            print("[EditorView] paste failed:", error)
+        }
+        stockPasteTargetItemId = nil
+    }
+}
+
+// MARK: - RightPaneTab
+
+/// 右ペインのタブ種別。Picker(.segmented) + switch rightPaneTab で出し分ける。
+enum RightPaneTab: String, CaseIterable, Identifiable {
+    case memo
+    case stock
+
+    var id: Self { self }
+    var label: String {
+        switch self {
+        case .memo: return "メモ"
+        case .stock: return "ストック"
+        }
     }
 }

@@ -234,6 +234,83 @@ enum GridRepository {
         return true
     }
 
+    /// セルの content をクリア + 配下 sub-grid 群を再帰削除する (= cut / 「ストックに移動」用)。
+    ///
+    /// desktop の `shredCellSubtree` ([`../../desktop/src/lib/api/cells.ts`](../../desktop/src/lib/api/cells.ts)) と同等:
+    /// 1. 引数の cell の text / imagePath / color を空にし、done=false に戻す
+    /// 2. `parentCellId == cellId` の grid (= primary drilled + 並列) を BFS で全部集めて、
+    ///    各 grid 内の cells と更に孫 grids を再帰的に物理削除
+    /// 3. X=C 統一モデルでは子グリッドの中心は親 peripheral cell と共有なので、削除時に
+    ///    親 peripheral cell 自体は残す (= step 1 の content クリアだけにとどめる)
+    ///
+    /// 非中心セルの cut でも中心セルの cut でも安全に動く:
+    /// - 中心セル (= position=4) の場合: `centerCellId == cellId` の grid 群 (= root / レガシー並列)
+    ///   は **削除しない** (= grid 自体を消すと mandalart が壊れる)。content だけクリアして子グリッド経路は
+    ///   parentCellId 経由で別途辿る (実質的に中心セルからの直接 child grid は無いので影響なし)
+    static func shredCellSubtree(
+        cellId: String,
+        in context: ModelContext
+    ) throws {
+        // 1) source cell の content をクリア
+        let cellFetch = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> { $0.id == cellId && $0.deletedAt == nil }
+        )
+        if let cell = try context.fetch(cellFetch).first {
+            let now = Date()
+            cell.text = ""
+            cell.imagePath = nil
+            cell.color = nil
+            cell.done = false
+            cell.updatedAt = now
+        }
+
+        // 2) parentCellId == cellId の grid 群を起点に BFS で配下 grid id を全収集
+        var gridIdsToDelete: [String] = []
+        var queue: [String] = [cellId]
+        var visited = Set<String>()
+
+        while let parentId = queue.popLast() {
+            let descriptor = FetchDescriptor<Grid>(
+                predicate: #Predicate<Grid> {
+                    $0.parentCellId == parentId && $0.deletedAt == nil
+                }
+            )
+            let childGrids = try context.fetch(descriptor)
+            for g in childGrids {
+                if visited.contains(g.id) { continue }
+                visited.insert(g.id)
+                gridIdsToDelete.append(g.id)
+
+                // この grid 内の cells を queue に追加 (孫 grid 探索用)
+                let gid = g.id
+                let cFetch = FetchDescriptor<Cell>(
+                    predicate: #Predicate<Cell> { $0.gridId == gid && $0.deletedAt == nil }
+                )
+                let inner = try context.fetch(cFetch)
+                for ic in inner {
+                    queue.append(ic.id)
+                }
+            }
+        }
+
+        // 3) 収集した grid 群を物理削除 (= cells 先 → grids 後)
+        for gid in gridIdsToDelete {
+            let cFetch = FetchDescriptor<Cell>(
+                predicate: #Predicate<Cell> { $0.gridId == gid }
+            )
+            let cells = try context.fetch(cFetch)
+            for c in cells { context.delete(c) }
+
+            let gFetch = FetchDescriptor<Grid>(
+                predicate: #Predicate<Grid> { $0.id == gid }
+            )
+            if let grid = try context.fetch(gFetch).first {
+                context.delete(grid)
+            }
+        }
+        try context.save()
+    }
+
     /// 9×9 view 表示用 layout を返す。9 ブロック分の `(対応する Grid?, 9 要素 displayCells)` を
     /// blockIndex (= 3×3 内 position) 順で配列化する。
     ///

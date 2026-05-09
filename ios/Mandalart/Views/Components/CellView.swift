@@ -31,6 +31,10 @@ struct CellView: View {
     /// このセルが drill 元として子グリッドを持つか (= peripheral で既に drill 済)。border 太さ出し分けに使用。
     /// 中心セル / 空セル / readOnly では未使用。
     let hasChild: Bool
+    /// ストックペースト先選択モード中かどうか。`true` のとき tap は drill / focus せず
+    /// `onPasteTargetTapped` を発火する。
+    let pasteMode: Bool
+    let onPasteTargetTapped: ((Cell) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -49,7 +53,9 @@ struct CellView: View {
         transitionKind: DrillTransitionKind = .initial,
         readOnly: Bool = false,
         hasChild: Bool = false,
-        onDrillRequest: ((Cell) -> Void)? = nil
+        onDrillRequest: ((Cell) -> Void)? = nil,
+        pasteMode: Bool = false,
+        onPasteTargetTapped: ((Cell) -> Void)? = nil
     ) {
         self.cell = cell
         self.gridId = gridId
@@ -59,6 +65,8 @@ struct CellView: View {
         self.readOnly = readOnly
         self.hasChild = hasChild
         self.onDrillRequest = onDrillRequest
+        self.pasteMode = pasteMode
+        self.onPasteTargetTapped = onPasteTargetTapped
         _text = State(initialValue: cell?.text ?? "")
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
         // stagger 順序に含まれない position は X=C 連続セル (= drill-down 中心) なので
@@ -194,6 +202,29 @@ struct CellView: View {
 
     private func handleTap() {
         guard !readOnly else { return }
+        // ペースト先選択モード中: cell が無ければ lazy create で Cell 行を作成してから渡す。
+        // 新規作成直後の mandalart では周辺セルは空 slot (= cell == nil) のため、
+        // この lazy create が無いと「周辺セルに paste できない」(中心セルだけ paste できる) 症状になる。
+        if pasteMode {
+            let target: Cell
+            if let existing = cell {
+                target = existing
+            } else {
+                let now = Date()
+                let newCell = Cell(
+                    gridId: gridId,
+                    position: position,
+                    text: "",
+                    createdAt: now,
+                    updatedAt: now
+                )
+                modelContext.insert(newCell)
+                try? modelContext.save()
+                target = newCell
+            }
+            onPasteTargetTapped?(target)
+            return
+        }
         if shouldDrillOnTap, let c = cell {
             onDrillRequest?(c)
             return
@@ -274,6 +305,25 @@ struct CellView: View {
                     Label("画像を削除", systemImage: "photo.badge.xmark")
                 }
             }
+
+            Divider()
+
+            // ストック追加: 非破壊なので空セル以外で常に有効。中心セルなら grid 全体 snapshot。
+            Button {
+                try? StockService.addToStock(cellId: cell.id, in: modelContext)
+            } label: {
+                Label("ストックに追加", systemImage: "tray.and.arrow.down")
+            }
+            .disabled(isEmpty)
+
+            // ストックに移動 (cut): 元セル content クリア + 配下 sub-grids 削除を伴う破壊操作。
+            // ロック中は context menu 自体が出ないので追加ガードは不要だが、空セル時は意味がないので disable。
+            Button(role: .destructive) {
+                try? StockService.moveCellToStock(cellId: cell.id, in: modelContext)
+            } label: {
+                Label("ストックに移動", systemImage: "tray.and.arrow.up")
+            }
+            .disabled(isEmpty)
 
             Divider()
 
