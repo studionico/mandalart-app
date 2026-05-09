@@ -2,7 +2,6 @@ import { query, execute, generateId, now } from '../db'
 import { supabase, isSupabaseConfigured } from '../supabase/client'
 import { CENTER_POSITION } from '@/constants/grid'
 import { pasteFromStock } from './stock'
-import { syncAwareDelete } from './_softDelete'
 import type { Mandalart, Cell } from '../../types'
 
 // ルート中心セル (= mandalarts.root_cell_id が指す cell) の image_path を取得する共通式。
@@ -248,19 +247,35 @@ export async function updateMandalartLastGridId(
 }
 
 /**
- * マンダラートとその配下 (grids / cells) を削除する。
+ * マンダラートとその配下 (grids / cells) をゴミ箱に入れる (= soft delete)。
  *
- * - **未同期行 (synced_at IS NULL)**: hard delete (物理削除)。cloud に存在しないので
- *   soft-delete で残すと push で RLS 403 を誘発する orphan 行になる
- * - **同期済み行 (synced_at IS NOT NULL)**: soft-delete。push で cloud に deleted_at を伝播
- *   (別デバイスがこれらを参照したときに見えないように)
+ * **常に soft delete**: `deleted_at` をセットし、`updated_at` を更新する。
+ * 未同期 (= `synced_at IS NULL`) の行も含めて soft delete することで、ユーザーが「削除した
+ * マンダラートをゴミ箱から復元できる」一貫した体験を提供する。
+ *
+ * 過去には未同期行を hard delete していた (落とし穴 #12 対策、cloud に存在しない行を soft で
+ * 残すと push のたびに RLS 403 を誘発する orphan になるという問題) が、ユーザー視点では
+ * 「削除したのにゴミ箱に入らない」という不整合になっていた。
+ * 現在は orphan 防止を [`pushAll`](../sync/push.ts) 冒頭の zombie cleanup
+ * (`grids NOT IN mandalarts` / `cells NOT IN grids` を hard delete) でカバーしているので、
+ * soft delete に統一しても zombie 復活は起きない。push 時は `INSERT ... deleted_at = ts` の
+ * 形で cloud に伝播する。
  */
 export async function deleteMandalart(id: string): Promise<void> {
   const ts = now()
   // cascade 順序が critical: cells → grids → mandalart の順 (子が先、親が後)
-  await syncAwareDelete('cells', 'grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)', [id], ts)
-  await syncAwareDelete('grids', 'mandalart_id = ?', [id], ts)
-  await syncAwareDelete('mandalarts', 'id = ?', [id], ts)
+  await execute(
+    'UPDATE cells SET deleted_at = ?, updated_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?) AND deleted_at IS NULL',
+    [ts, ts, id],
+  )
+  await execute(
+    'UPDATE grids SET deleted_at = ?, updated_at = ? WHERE mandalart_id = ? AND deleted_at IS NULL',
+    [ts, ts, id],
+  )
+  await execute(
+    'UPDATE mandalarts SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL',
+    [ts, ts, id],
+  )
 }
 
 /**

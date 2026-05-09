@@ -71,16 +71,20 @@ describe('updateMandalartTitle', () => {
   })
 })
 
-describe('deleteMandalart (落とし穴 #12: synced_at で hard / soft 分岐)', () => {
-  it('未同期 (synced_at IS NULL) は cells / grids / mandalart 全部 hard delete', async () => {
+describe('deleteMandalart (常に soft delete でゴミ箱に入る)', () => {
+  it('未同期 (synced_at IS NULL) でも cells / grids / mandalart 全部 soft delete', async () => {
     const m = await createMandalart('unsynced')
     await deleteMandalart(m.id)
-    expect(db.prepare('SELECT COUNT(*) AS n FROM mandalarts WHERE id = ?').get(m.id)).toEqual({ n: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS n FROM grids WHERE mandalart_id = ?').get(m.id)).toEqual({ n: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS n FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)').get(m.id)).toEqual({ n: 0 })
+    // 全部 deleted_at セット (= ゴミ箱に入る)、行は残る
+    const mRow = db.prepare('SELECT deleted_at FROM mandalarts WHERE id = ?').get(m.id) as { deleted_at: string | null }
+    const gRow = db.prepare('SELECT deleted_at FROM grids WHERE mandalart_id = ?').get(m.id) as { deleted_at: string | null }
+    const cRow = db.prepare('SELECT deleted_at FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)').get(m.id) as { deleted_at: string | null }
+    expect(mRow?.deleted_at).toBeTruthy()
+    expect(gRow?.deleted_at).toBeTruthy()
+    expect(cRow?.deleted_at).toBeTruthy()
   })
 
-  it('同期済み (synced_at IS NOT NULL) は cells / grids / mandalart 全部 soft delete', async () => {
+  it('同期済み (synced_at IS NOT NULL) も cells / grids / mandalart 全部 soft delete', async () => {
     const m = await createMandalart('synced')
     db.prepare('UPDATE cells SET synced_at = ? WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)').run(now(), m.id)
     db.prepare('UPDATE grids SET synced_at = ? WHERE mandalart_id = ?').run(now(), m.id)
@@ -92,18 +96,6 @@ describe('deleteMandalart (落とし穴 #12: synced_at で hard / soft 分岐)',
     expect(mRow?.deleted_at).toBeTruthy()
     expect(gRow?.deleted_at).toBeTruthy()
     expect(cRow?.deleted_at).toBeTruthy()
-  })
-
-  it('mixed (一部 synced) は同期済みのみ soft、未同期は hard で残らない', async () => {
-    const m = await createMandalart('mixed')
-    // mandalart 本体は同期済み、cells / grids は未同期
-    db.prepare('UPDATE mandalarts SET synced_at = ? WHERE id = ?').run(now(), m.id)
-    await deleteMandalart(m.id)
-    // mandalart は soft 残る
-    expect(db.prepare('SELECT deleted_at FROM mandalarts WHERE id = ?').get(m.id)).toMatchObject({ deleted_at: expect.any(String) })
-    // cells / grids は hard で消える
-    expect(db.prepare('SELECT COUNT(*) AS n FROM grids WHERE mandalart_id = ?').get(m.id)).toEqual({ n: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS n FROM cells').get()).toEqual({ n: 0 })
   })
 })
 
