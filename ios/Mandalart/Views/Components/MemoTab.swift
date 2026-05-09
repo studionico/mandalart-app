@@ -27,7 +27,10 @@ struct MemoTab: View {
     let mandalart: Mandalart
 
     @State private var mode: Mode = .edit
-    @FocusState private var isEditing: Bool
+    /// 全画面編集 sheet の表示制御 (Landscape キーボード覆い対策で inline 編集を撤去)。
+    @State private var showEditor: Bool = false
+    /// Sheet で編集中の draft text。`commitEditor` で grid.memo へ反映、cancel で破棄。
+    @State private var editingDraft: String = ""
 
     enum Mode: String, CaseIterable, Identifiable {
         case edit = "編集"
@@ -35,21 +38,24 @@ struct MemoTab: View {
         var id: String { rawValue }
     }
 
-    /// `grid.memo` の `String?` を `String` 双方向 Binding に変換 (TextEditor 用)。
-    /// 空文字は nil 化して保存。SwiftData の `@Model` プロパティ直接 set なので
-    /// realtime / auto-push の sync 経路で自然に反映される。
-    private var memoBinding: Binding<String> {
-        Binding(
-            get: { grid.memo ?? "" },
-            set: { newValue in
-                guard !mandalart.locked else { return }
-                let normalized: String? = newValue.isEmpty ? nil : newValue
-                if grid.memo != normalized {
-                    grid.memo = normalized
-                    grid.updatedAt = Date()
-                }
-            }
-        )
+    private func openEditor() {
+        guard !mandalart.locked else { return }
+        editingDraft = grid.memo ?? ""
+        showEditor = true
+    }
+
+    private func commitEditor() {
+        defer { showEditor = false }
+        guard !mandalart.locked else { return }
+        let normalized: String? = editingDraft.isEmpty ? nil : editingDraft
+        if grid.memo != normalized {
+            grid.memo = normalized
+            grid.updatedAt = Date()
+        }
+    }
+
+    private func cancelEditor() {
+        showEditor = false
     }
 
     var body: some View {
@@ -66,17 +72,41 @@ struct MemoTab: View {
                 preview
             }
         }
+        .fullScreenCover(isPresented: $showEditor) {
+            EditingSheet(
+                title: "メモを編集",
+                text: $editingDraft,
+                multiline: true,
+                onCancel: { cancelEditor() },
+                onCommit: { commitEditor() }
+            )
+        }
     }
 
+    /// 編集 mode は **表示専用** (= 現在の memo を読み取り表示)。tap で全画面 sheet に遷移。
+    /// ロック解除中は右上に pencil アイコンを出し「ここを tap で編集」と視覚的に示す。
     private var editor: some View {
-        TextEditor(text: memoBinding)
+        TextEditor(text: .constant(grid.memo ?? ""))
             .font(.callout)
             .scrollContentBackground(.hidden)
             .padding(8)
             .background(NeutralPalette.surfaceBackground)
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .focused($isEditing)
-            .disabled(mandalart.locked)
+            .disabled(true)
+            .overlay(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { openEditor() }
+            )
+            .overlay(alignment: .topTrailing) {
+                if !mandalart.locked {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
+            }
     }
 
     private var preview: some View {

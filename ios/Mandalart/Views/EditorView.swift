@@ -152,32 +152,7 @@ struct EditorView: View {
                                 .accessibilityLabel(viewMode == .grid3x3 ? "9×9 ビューに切替" : "3×3 ビューに戻る")
                             }
 
-                            // 編集中: grid 領域に invisible scrim を被せて誤タップを抑止 (= 安全側)。
-                            // × / 完了で Bar を閉じてから他セル操作する UX。
-                            if editingCellId != nil {
-                                Color.black.opacity(0.001)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { /* scrim でブロック */ }
-                                    .ignoresSafeArea()
-                                    .zIndex(99)
-                            }
-
-                            // 編集中: 最上部に Floating 編集バー (Landscape キーボードがエディター
-                            // 下半分を覆う対策)。zIndex で home / 9×9 toggle / scrim より上に積む。
-                            if editingCellId != nil {
-                                EditingTopBar(
-                                    text: $editingDraft,
-                                    onCancel: { cancelEditing() },
-                                    onCommit: { commitEditing() }
-                                )
-                                .frame(maxWidth: .infinity, alignment: .top)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 8)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                                .zIndex(100)
-                            }
                         }
-                        .animation(.easeInOut(duration: 0.2), value: editingCellId)
                         .onChange(of: horizontalSizeClass) { _, newClass in
                             // iPad で Split View を縮小して compact に変わった場合、
                             // 9×9 中なら 3×3 へ強制復帰 (= ボタンが消えてユーザーが戻れなくなるのを防止)
@@ -242,6 +217,20 @@ struct EditorView: View {
             Button("OK", role: .cancel) { transferAlert = nil }
         } message: { state in
             Text(state.message)
+        }
+        // セル編集の全画面 sheet (Landscape キーボード覆い対策)。
+        // NavigationStack + TextField の中で iOS 自動 keyboard avoidance が効く。
+        .fullScreenCover(isPresented: Binding(
+            get: { editingCellId != nil },
+            set: { if !$0 { editingCellId = nil; editingDraft = "" } }
+        )) {
+            EditingSheet(
+                title: "セルを編集",
+                text: $editingDraft,
+                multiline: false,
+                onCancel: { cancelEditing() },
+                onCommit: { commitEditing() }
+            )
         }
         // editor 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` トーンに揃える。
         // safe area 外まで塗りつぶして status bar / home indicator 周辺の透過を防止。

@@ -12,7 +12,7 @@ import UIKit
 /// - ロック中 → 編集ブロック、ただし drill (= 閲覧 navigation) は許可
 ///
 /// **編集 UI**: TextField はこの View 内には持たない。tap → `onEditRequest(cell)`
-/// で EditorView 側の `EditingTopBar` (画面最上部 floating) を起動する。
+/// で EditorView 側の全画面 sheet (`EditingSheet` を `.fullScreenCover` で表示) を起動する。
 /// 理由は iPhone Landscape で iOS 純正キーボードがエディター下半分を覆うため
 /// (`docs/pitfalls.md` 参照)。
 ///
