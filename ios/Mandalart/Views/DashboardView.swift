@@ -26,7 +26,7 @@ struct DashboardView: View {
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
 
     /// 並び順: Inbox (isSystem) を先頭に固定 → sortOrder ASC → createdAt ASC
-    private var sortedFolders: [Folder] {x
+    private var sortedFolders: [Folder] {
         foldersRaw.sorted { lhs, rhs in
             if lhs.isSystem != rhs.isSystem { return lhs.isSystem }
             if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
@@ -258,12 +258,17 @@ struct DashboardView: View {
             Label("フォルダ移動", systemImage: "folder")
         }
 
-        Divider()
+        // ロック中マンダラートは削除できない (誤操作防止のため context menu から削除項目を非表示)。
+        // ロック解除すると削除メニューが復活する。defensive ガードは
+        // `MandalartFactory.permanentDelete` 冒頭に同等の locked check あり。
+        if !m.locked {
+            Divider()
 
-        Button(role: .destructive) {
-            Task { try? await MandalartFactory.permanentDelete(m, in: modelContext) }
-        } label: {
-            Label("削除", systemImage: "trash")
+            Button(role: .destructive) {
+                Task { try? await MandalartFactory.permanentDelete(m, in: modelContext) }
+            } label: {
+                Label("削除", systemImage: "trash")
+            }
         }
     }
 

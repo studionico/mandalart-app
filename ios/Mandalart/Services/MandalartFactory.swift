@@ -172,6 +172,10 @@ enum MandalartFactory {
         _ mandalart: Mandalart,
         in context: ModelContext
     ) async throws {
+        // ロック中マンダラートは削除しない (誤操作防止)。UI 層 (DashboardView の context menu)
+        // で削除メニュー自体を非表示にしているので通常はこの経路に到達しないが、cloud sync 経由
+        // / 異常系のため defensive ガードを入れる。silent skip で UI を壊さない。
+        guard !mandalart.locked else { return }
         let mandalartId = mandalart.id
 
         // 1. クラウド削除用に grid id を先に集める (local delete 後だと参照できない)

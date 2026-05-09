@@ -302,6 +302,19 @@ export async function restoreMandalart(id: string): Promise<void> {
  * ゴミ箱に復活してしまう（「完全削除したはずが同期で戻ってきた」問題の原因）。
  */
 export async function permanentDeleteMandalart(id: string): Promise<void> {
+  // 0. ロック中マンダラートは削除しない (誤操作防止)。UI 層 (DashboardPage の
+  // HoverActionButtons) で削除アイコン自体を非表示にしているので通常はこの経路に到達
+  // しないが、cloud sync 経由 / 異常系のため defensive ガードを入れる。
+  // silent skip で UI を壊さない (= UI 層と一貫した挙動)。
+  const lockedRows = await query<{ locked: number }>(
+    'SELECT locked FROM mandalarts WHERE id = ?',
+    [id],
+  )
+  if (lockedRows[0]?.locked) {
+    console.warn('[permanentDelete] skipped: mandalart is locked', id)
+    return
+  }
+
   // 1. ローカル
   await execute(
     'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',

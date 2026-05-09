@@ -974,8 +974,9 @@ function MandalartCard({
             title: m.pinned ? 'ピン留めを外す' : 'ピン留め',
           },
           { icon: <CopyIcon />, onClick: onDuplicate, title: '複製' },
-          // 削除アクションも色は neutral、形 (XMarkIcon) で識別。
-          { icon: <XMarkIcon />, onClick: onDelete, title: '削除' },
+          // 削除アクション: ロック中は誤操作防止のため非表示 (= ロック解除すると復活)。
+          // defensive ガードとして API 層の `permanentDeleteMandalart` 冒頭にも locked check あり。
+          ...(!m.locked ? [{ icon: <XMarkIcon />, onClick: onDelete, title: '削除' }] : []),
         ]}
       />
     </div>
