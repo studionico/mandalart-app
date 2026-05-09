@@ -35,6 +35,10 @@ struct CellView: View {
     /// `onPasteTargetTapped` を発火する。
     let pasteMode: Bool
     let onPasteTargetTapped: ((Cell) -> Void)?
+    /// セル単位の Export / Import を EditorView 側に通知する callback。
+    /// Export はロック中も許可 (= 読み取り専用)、Import は !isLocked かつ cell != nil の時のみ表示。
+    let onExportRequest: ((Cell) -> Void)?
+    let onImportRequest: ((Cell) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -55,7 +59,9 @@ struct CellView: View {
         hasChild: Bool = false,
         onDrillRequest: ((Cell) -> Void)? = nil,
         pasteMode: Bool = false,
-        onPasteTargetTapped: ((Cell) -> Void)? = nil
+        onPasteTargetTapped: ((Cell) -> Void)? = nil,
+        onExportRequest: ((Cell) -> Void)? = nil,
+        onImportRequest: ((Cell) -> Void)? = nil
     ) {
         self.cell = cell
         self.gridId = gridId
@@ -67,6 +73,8 @@ struct CellView: View {
         self.onDrillRequest = onDrillRequest
         self.pasteMode = pasteMode
         self.onPasteTargetTapped = onPasteTargetTapped
+        self.onExportRequest = onExportRequest
+        self.onImportRequest = onImportRequest
         _text = State(initialValue: cell?.text ?? "")
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
         // stagger 順序に含まれない position は X=C 連続セル (= drill-down 中心) なので
@@ -268,6 +276,23 @@ struct CellView: View {
 
     @ViewBuilder
     private var cellContextMenu: some View {
+        // Export は読み取り専用なのでロック中も許可。cell != nil の時に表示。
+        // Import は !isLocked のときのみ。
+        if let cell {
+            Button {
+                onExportRequest?(cell)
+            } label: {
+                Label("エクスポート", systemImage: "square.and.arrow.up")
+            }
+            if !isLocked {
+                Button {
+                    onImportRequest?(cell)
+                } label: {
+                    Label("ここにインポート", systemImage: "square.and.arrow.down")
+                }
+                Divider()
+            }
+        }
         if !isLocked, let cell {
             Menu {
                 ForEach(PresetColors.all) { preset in
@@ -333,13 +358,36 @@ struct CellView: View {
                 Label("内容をクリア", systemImage: "eraser")
             }
         } else if !isLocked, cell == nil {
-            // 空 slot でも画像追加だけは出す (lazy create で cell を生成)
+            // 空 slot: 画像追加 + ここにインポート (= lazy create で Cell を生成してから対応 callback)。
+            // PhotosPicker は cell.imagePath への lazy 経路が既存実装にあるので showImagePicker で OK。
+            // インポートは新規 Cell を save してから onImportRequest に渡す (= 空 slot にも paste 経路が通るように)。
             Button {
                 showImagePicker = true
             } label: {
                 Label("画像を追加", systemImage: "photo.badge.plus")
             }
+            Button {
+                let target = lazyCreateEmptyCell()
+                onImportRequest?(target)
+            } label: {
+                Label("ここにインポート", systemImage: "square.and.arrow.down")
+            }
         }
+    }
+
+    /// 空 slot 用に Cell 行を lazy create + save。stock paste mode の handleTap 内ロジックと同等。
+    private func lazyCreateEmptyCell() -> Cell {
+        let now = Date()
+        let newCell = Cell(
+            gridId: gridId,
+            position: position,
+            text: "",
+            createdAt: now,
+            updatedAt: now
+        )
+        modelContext.insert(newCell)
+        try? modelContext.save()
+        return newCell
     }
 
     private func applyColor(_ key: String?, to cell: Cell) {

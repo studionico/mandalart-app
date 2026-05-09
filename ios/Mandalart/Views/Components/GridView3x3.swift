@@ -25,6 +25,10 @@ struct GridView3x3: View {
     /// `onPasteTargetTapped` を発火する。
     let pasteMode: Bool
     let onPasteTargetTapped: ((Cell) -> Void)?
+    /// セル単位の Export / Import を起動する callback (= cell context menu から呼ばれる)。
+    /// EditorView 側で format 選択ダイアログ or fileImporter を開く。
+    let onExportRequest: ((Cell) -> Void)?
+    let onImportRequest: ((Cell) -> Void)?
 
     init(
         gridId: String,
@@ -35,7 +39,9 @@ struct GridView3x3: View {
         hasChildAtPosition: [Bool] = [],
         onDrillRequest: ((Cell) -> Void)? = nil,
         pasteMode: Bool = false,
-        onPasteTargetTapped: ((Cell) -> Void)? = nil
+        onPasteTargetTapped: ((Cell) -> Void)? = nil,
+        onExportRequest: ((Cell) -> Void)? = nil,
+        onImportRequest: ((Cell) -> Void)? = nil
     ) {
         self.gridId = gridId
         self.displayCells = displayCells
@@ -46,6 +52,8 @@ struct GridView3x3: View {
         self.onDrillRequest = onDrillRequest
         self.pasteMode = pasteMode
         self.onPasteTargetTapped = onPasteTargetTapped
+        self.onExportRequest = onExportRequest
+        self.onImportRequest = onImportRequest
     }
 
     private func hasChild(at position: Int) -> Bool {
@@ -70,7 +78,9 @@ struct GridView3x3: View {
                     hasChild: hasChild(at: position),
                     onDrillRequest: onDrillRequest,
                     pasteMode: pasteMode,
-                    onPasteTargetTapped: onPasteTargetTapped
+                    onPasteTargetTapped: onPasteTargetTapped,
+                    onExportRequest: onExportRequest,
+                    onImportRequest: onImportRequest
                 )
                 // grid 切替時 (= drill / drill-up) に CellView の @State (`text`) が
                 // 古い grid の値を持ち越さないよう、id に gridId + cellId を含めて強制 remount。

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
@@ -22,6 +23,19 @@ struct DashboardView: View {
     @State private var renameInput: String = ""
 
     @State private var showTrash = false
+
+    // Export 状態
+    @State private var exportTarget: Mandalart?
+    @State private var showExportFormatDialog = false
+    @State private var exportDocument: MandalartExportDocument?
+    @State private var exportFilename: String = ""
+    @State private var exportContentType: UTType = .json
+    @State private var showFileExporter = false
+
+    // Import 状態
+    @State private var showFileImporter = false
+    /// Import 結果のフィードバックを 1 行で出すための簡易 toast (= alert で表示)。
+    @State private var transferAlert: TransferAlertState?
 
     let onOpenMandalart: (String) -> Void
 
@@ -82,6 +96,10 @@ struct DashboardView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 8) {
+                        Button { showFileImporter = true } label: {
+                            Image(systemName: "square.and.arrow.down")
+                        }
+                        .accessibilityLabel("インポート")
                         Button { showTrash = true } label: {
                             Image(systemName: "trash")
                         }
@@ -102,6 +120,45 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showTrash) {
                 TrashView()
+            }
+            .confirmationDialog(
+                "エクスポート形式",
+                isPresented: $showExportFormatDialog,
+                presenting: exportTarget
+            ) { m in
+                Button(ExportFormat.json.label) { startExport(m, format: .json) }
+                Button(ExportFormat.markdown.label) { startExport(m, format: .markdown) }
+                Button(ExportFormat.indentText.label) { startExport(m, format: .indentText) }
+                Button("キャンセル", role: .cancel) { }
+            } message: { m in
+                Text("「\(m.title.isEmpty ? "(無題)" : m.title)」をエクスポート")
+            }
+            .fileExporter(
+                isPresented: $showFileExporter,
+                document: exportDocument,
+                contentType: exportContentType,
+                defaultFilename: exportFilename
+            ) { result in
+                handleExportResult(result)
+            }
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.json, .plainText, UTType(filenameExtension: "md") ?? .plainText],
+                allowsMultipleSelection: false
+            ) { result in
+                handleImportResult(result)
+            }
+            .alert(
+                transferAlert?.title ?? "",
+                isPresented: Binding(
+                    get: { transferAlert != nil },
+                    set: { if !$0 { transferAlert = nil } }
+                ),
+                presenting: transferAlert
+            ) { _ in
+                Button("OK", role: .cancel) { transferAlert = nil }
+            } message: { state in
+                Text(state.message)
             }
             .sheet(isPresented: $showAddFolder) {
                 FolderNameSheet(
@@ -268,6 +325,13 @@ struct DashboardView: View {
             Label("フォルダ移動", systemImage: "folder")
         }
 
+        Button {
+            exportTarget = m
+            showExportFormatDialog = true
+        } label: {
+            Label("エクスポート", systemImage: "square.and.arrow.up")
+        }
+
         // ロック中マンダラートは削除できない (誤操作防止のため context menu から削除項目を非表示)。
         // ロック解除すると削除メニューが復活する。defensive ガードは
         // `MandalartFactory.softDelete` 冒頭に同等の locked check あり。
@@ -350,6 +414,103 @@ struct DashboardView: View {
         renameTarget = nil
         renameInput = ""
     }
+
+    // MARK: - Export / Import handlers
+
+    /// 選択された `format` で payload を構築し、`.fileExporter` を起動する。
+    private func startExport(_ m: Mandalart, format: ExportFormat) {
+        do {
+            let payload = try TransferService.buildExportPayload(for: m, format: format, in: modelContext)
+            exportDocument = payload.document
+            exportFilename = payload.filename
+            exportContentType = payload.contentType
+            showFileExporter = true
+        } catch {
+            transferAlert = TransferAlertState(
+                title: "エクスポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// `.fileExporter` の完了結果をハンドル。成功で確認 alert、失敗で error alert。
+    private func handleExportResult(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            transferAlert = TransferAlertState(
+                title: "保存しました",
+                message: url.lastPathComponent
+            )
+        case .failure(let error):
+            // ユーザーキャンセルは alert を出さない (= cancellationError 系)
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
+                return
+            }
+            transferAlert = TransferAlertState(
+                title: "エクスポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// `.fileImporter` の完了結果をハンドル。
+    /// 1. URL を security-scoped でアクセスして読み込み
+    /// 2. .json なら `JSONDecoder` で `GridSnapshot` にデコード、それ以外は `parseTextToSnapshot`
+    /// 3. `TransferService.importFromJSON` で新規マンダラート作成
+    /// 4. 成功 / 失敗を alert で通知
+    private func handleImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let started = url.startAccessingSecurityScopedResource()
+            defer { if started { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let snapshot: GridSnapshot
+                let ext = url.pathExtension.lowercased()
+                if ext == "json" {
+                    snapshot = try JSONDecoder().decode(GridSnapshot.self, from: data)
+                } else {
+                    let text = String(data: data, encoding: .utf8) ?? ""
+                    snapshot = TransferService.parseTextToSnapshot(text)
+                }
+                if snapshot.cells.isEmpty && snapshot.children.isEmpty {
+                    throw TransferService.TransferError.parseEmpty
+                }
+                let mandalart = try TransferService.importFromJSON(
+                    snapshot: snapshot,
+                    targetFolderId: selectedFolderId,
+                    in: modelContext
+                )
+                transferAlert = TransferAlertState(
+                    title: "インポート完了",
+                    message: "「\(mandalart.title.isEmpty ? "(無題)" : mandalart.title)」を作成しました"
+                )
+            } catch {
+                transferAlert = TransferAlertState(
+                    title: "インポート失敗",
+                    message: error.localizedDescription
+                )
+            }
+        case .failure(let error):
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
+                return
+            }
+            transferAlert = TransferAlertState(
+                title: "インポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
+}
+
+/// Export / Import の結果を表示する alert state。
+struct TransferAlertState: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 // MARK: - FolderNameSheet (日本語 IME 動作のため alert ではなく sheet ベース)

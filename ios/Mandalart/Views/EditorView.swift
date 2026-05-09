@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Landscape 2-pane editor (NavigationStack なし、floating control overlay でスペース最大化):
 /// - 左ペイン: 3×3 グリッド (正方形、垂直中央)
@@ -32,6 +33,19 @@ struct EditorView: View {
     @State private var rightPaneTab: RightPaneTab = .memo
     /// ストックペースト先選択モード中の対象 stock item id。nil = 通常モード。
     @State private var stockPasteTargetItemId: String?
+
+    // Cell 単位の Export 状態 (= cell context menu → format dialog → .fileExporter)
+    /// Format 選択ダイアログの対象 cell。`presenting:` に渡す。
+    @State private var cellExportTarget: Cell?
+    @State private var exportDocument: MandalartExportDocument?
+    @State private var exportFilename: String = ""
+    @State private var exportContentType: UTType = .json
+    @State private var showFileExporter = false
+    // Cell 単位の Import 状態 (= cell context menu → fileImporter → importIntoCell)
+    @State private var pendingImportCellId: String?
+    @State private var showCellFileImporter = false
+    /// Export / Import の結果フィードバック alert。
+    @State private var transferAlert: TransferAlertState?
 
     /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
     /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
@@ -107,6 +121,7 @@ struct EditorView: View {
                             .padding(.leading, 32)
                             .padding(.top, 20)
 
+
                             // 右上 floating 9×9 / 3×3 toggle ボタン。iPad regular のみ表示。
                             // iPhone / iPad compact (Split View 1/3 等) では grid セルが小さすぎる
                             // ため非表示 + viewMode は .grid3x3 固定。
@@ -151,6 +166,48 @@ struct EditorView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("編集するにはダッシュボードに戻り、カードを長押しして「ロックを外す」を選んでください。")
+        }
+        .confirmationDialog(
+            "エクスポート形式",
+            isPresented: Binding(
+                get: { cellExportTarget != nil },
+                set: { if !$0 { cellExportTarget = nil } }
+            ),
+            presenting: cellExportTarget
+        ) { c in
+            Button(ExportFormat.json.label) { startCellExport(cell: c, format: .json) }
+            Button(ExportFormat.markdown.label) { startCellExport(cell: c, format: .markdown) }
+            Button(ExportFormat.indentText.label) { startCellExport(cell: c, format: .indentText) }
+            Button("キャンセル", role: .cancel) { cellExportTarget = nil }
+        } message: { c in
+            Text("「\(c.text.isEmpty ? "(空)" : c.text)」配下をエクスポート")
+        }
+        .fileExporter(
+            isPresented: $showFileExporter,
+            document: exportDocument,
+            contentType: exportContentType,
+            defaultFilename: exportFilename
+        ) { result in
+            handleExportResult(result)
+        }
+        .fileImporter(
+            isPresented: $showCellFileImporter,
+            allowedContentTypes: [.json, .plainText, UTType(filenameExtension: "md") ?? .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            handleCellImportResult(result)
+        }
+        .alert(
+            transferAlert?.title ?? "",
+            isPresented: Binding(
+                get: { transferAlert != nil },
+                set: { if !$0 { transferAlert = nil } }
+            ),
+            presenting: transferAlert
+        ) { _ in
+            Button("OK", role: .cancel) { transferAlert = nil }
+        } message: { state in
+            Text(state.message)
         }
         // editor 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` トーンに揃える。
         // safe area 外まで塗りつぶして status bar / home indicator 周辺の透過を防止。
@@ -276,7 +333,9 @@ struct EditorView: View {
                             ),
                             onDrillRequest: { cell in handleDrill(cell: cell, mandalart: mandalart) },
                             pasteMode: stockPasteTargetItemId != nil,
-                            onPasteTargetTapped: { cell in handleStockPasteTarget(cell: cell) }
+                            onPasteTargetTapped: { cell in handleStockPasteTarget(cell: cell) },
+                            onExportRequest: { cell in cellExportTarget = cell },
+                            onImportRequest: { cell in handleCellImportRequest(cell: cell) }
                         )
                         .frame(width: gridSize, height: gridSize)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
@@ -606,6 +665,102 @@ struct EditorView: View {
     }
 
     // MARK: - Stock paste
+
+    // MARK: - Cell-level Export / Import
+
+    /// 選択された format で cell 単位の payload を構築し `.fileExporter` を起動する。
+    /// confirmationDialog の各 format ボタンから呼ばれる。
+    private func startCellExport(cell: Cell, format: ExportFormat) {
+        do {
+            let payload = try TransferService.buildCellExportPayload(
+                cell: cell,
+                format: format,
+                in: modelContext
+            )
+            exportDocument = payload.document
+            exportFilename = payload.filename
+            exportContentType = payload.contentType
+            cellExportTarget = nil
+            showFileExporter = true
+        } catch {
+            cellExportTarget = nil
+            transferAlert = TransferAlertState(
+                title: "エクスポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// CellView の context menu「ここにインポート」から呼ばれる。
+    /// pending cell id を保持してから fileImporter を起動する。
+    private func handleCellImportRequest(cell: Cell) {
+        pendingImportCellId = cell.id
+        showCellFileImporter = true
+    }
+
+    /// `.fileImporter` の完了結果をハンドル。pendingImportCellId のセルに snapshot を import する。
+    private func handleCellImportResult(_ result: Result<[URL], Error>) {
+        defer { pendingImportCellId = nil }
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first, let cellId = pendingImportCellId else { return }
+            let started = url.startAccessingSecurityScopedResource()
+            defer { if started { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let snapshot: GridSnapshot
+                let ext = url.pathExtension.lowercased()
+                if ext == "json" {
+                    snapshot = try JSONDecoder().decode(GridSnapshot.self, from: data)
+                } else {
+                    let text = String(data: data, encoding: .utf8) ?? ""
+                    snapshot = TransferService.parseTextToSnapshot(text)
+                }
+                if snapshot.cells.isEmpty && snapshot.children.isEmpty {
+                    throw TransferService.TransferError.parseEmpty
+                }
+                try TransferService.importIntoCell(snapshot: snapshot, cellId: cellId, in: modelContext)
+                transferAlert = TransferAlertState(
+                    title: "インポート完了",
+                    message: "セル配下にインポートしました"
+                )
+            } catch {
+                transferAlert = TransferAlertState(
+                    title: "インポート失敗",
+                    message: error.localizedDescription
+                )
+            }
+        case .failure(let error):
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
+                return
+            }
+            transferAlert = TransferAlertState(
+                title: "インポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// `.fileExporter` の完了結果をハンドル。ユーザーキャンセルは alert を出さない。
+    private func handleExportResult(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            transferAlert = TransferAlertState(
+                title: "保存しました",
+                message: url.lastPathComponent
+            )
+        case .failure(let error):
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
+                return
+            }
+            transferAlert = TransferAlertState(
+                title: "エクスポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
 
     /// stock paste-target 選択モードの cell tap ハンドラ。
     /// 1. 選択中の stock item id を modelContext から取り直して `pasteFromStock` を実行

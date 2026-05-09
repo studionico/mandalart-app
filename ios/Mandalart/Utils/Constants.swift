@@ -8,6 +8,13 @@ enum GridConstants {
     /// 中心セルの position (= 4)。
     static let centerPosition: Int = 4
     static let orbitOrder: [Int] = [0, 1, 2, 5, 8, 7, 6, 3]
+    /// Tab 移動順 (中央 → 周辺時計回り)。desktop の [`TAB_ORDER`](../../../desktop/src/constants/tabOrder.ts) と同じ。
+    /// 中心 4 から始まり時計回りに外周を一周。export / import の周辺セル配置順 (= 中心を除いた配列) も
+    /// この順を使い、エクスポート → インポートの round-trip でセル位置が保たれる。
+    static let tabOrder: [Int] = [4, 7, 6, 3, 0, 1, 2, 5, 8]
+    /// `tabOrder` から中心を除いた配列 (= 7, 6, 3, 0, 1, 2, 5, 8)。
+    /// インポート時に Markdown / IndentText の子ノードをこの順で周辺セルに配置する。
+    static let peripheralPositionsByTab: [Int] = [7, 6, 3, 0, 1, 2, 5, 8]
 }
 
 enum LayoutConstants {
