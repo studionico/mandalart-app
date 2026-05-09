@@ -121,45 +121,22 @@ struct DashboardView: View {
             .sheet(isPresented: $showTrash) {
                 TrashView()
             }
-            .confirmationDialog(
-                "エクスポート形式",
-                isPresented: $showExportFormatDialog,
-                presenting: exportTarget
-            ) { m in
-                Button(ExportFormat.json.label) { startExport(m, format: .json) }
-                Button(ExportFormat.markdown.label) { startExport(m, format: .markdown) }
-                Button(ExportFormat.indentText.label) { startExport(m, format: .indentText) }
-                Button("キャンセル", role: .cancel) { }
-            } message: { m in
-                Text("「\(m.title.isEmpty ? "(無題)" : m.title)」をエクスポート")
-            }
-            .fileExporter(
-                isPresented: $showFileExporter,
-                document: exportDocument,
-                contentType: exportContentType,
-                defaultFilename: exportFilename
-            ) { result in
-                handleExportResult(result)
-            }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.json, .plainText, UTType(filenameExtension: "md") ?? .plainText],
-                allowsMultipleSelection: false
-            ) { result in
-                handleImportResult(result)
-            }
-            .alert(
-                transferAlert?.title ?? "",
-                isPresented: Binding(
-                    get: { transferAlert != nil },
-                    set: { if !$0 { transferAlert = nil } }
-                ),
-                presenting: transferAlert
-            ) { _ in
-                Button("OK", role: .cancel) { transferAlert = nil }
-            } message: { state in
-                Text(state.message)
-            }
+            .modifier(DashboardExportModifier(
+                exportTarget: exportTarget,
+                showExportFormatDialog: $showExportFormatDialog,
+                exportDocument: exportDocument,
+                exportContentType: exportContentType,
+                exportFilename: exportFilename,
+                showFileExporter: $showFileExporter,
+                onPickFormat: { m, fmt in startExport(m, format: fmt) },
+                onCancelFormat: { exportTarget = nil },
+                onExportResult: { handleExportResult($0) }
+            ))
+            .modifier(DashboardImportAlertModifier(
+                showFileImporter: $showFileImporter,
+                transferAlert: $transferAlert,
+                onImportResult: { handleImportResult($0) }
+            ))
             .sheet(isPresented: $showAddFolder) {
                 FolderNameSheet(
                     title: "新規フォルダ",
@@ -506,12 +483,9 @@ struct DashboardView: View {
     }
 }
 
-/// Export / Import の結果を表示する alert state。
-struct TransferAlertState: Identifiable {
-    let id = UUID()
-    let title: String
-    let message: String
-}
+// TransferAlertState / DashboardExportModifier / DashboardImportAlertModifier
+// は SourceKit (= Live Issues 用 type-checker) の閾値を下げるため、
+// `DashboardTransferSupport.swift` に切り出してある。
 
 // MARK: - FolderNameSheet (日本語 IME 動作のため alert ではなく sheet ベース)
 
