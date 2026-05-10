@@ -25,7 +25,10 @@ enum LayoutConstants {
     /// desktop の 28px font に対して中心 6px border (= 0.21 ratio) を、iOS の 14pt 中心 font で同 ratio に維持。
     /// 詳細: [`/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md`](../../../.claude/plans/ios-swift-glistening-thacker.md) Plan A。
     static let cellCornerRadius: CGFloat = 8
-    static let cellCenterBorder: CGFloat = 3
+    /// `.strokeBorder` (= 内側塗り) に渡す中心セル枠の visible 太さ。
+    /// 旧 `.stroke + clipShape` で外側半分が clip されて visible 1.5pt だった見た目を維持するため、
+    /// 描画方式を `.strokeBorder` に切替えるのに合わせて値も 3 → 1.5 に半減 (= clip で削られる分を最初から描かない)。
+    static let cellCenterBorder: CGFloat = 1.5
     static let cellPeripheralBorder: CGFloat = 0.5
     /// 周辺セル + 子グリッドあり (= drill 元として既に展開済) の border 太さ。子の存在を視覚提示。
     static let cellPeripheralWithChildBorder: CGFloat = 1.5

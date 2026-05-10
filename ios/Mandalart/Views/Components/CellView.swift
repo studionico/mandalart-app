@@ -54,6 +54,14 @@ struct CellView: View {
     /// 中心 + 非空のときに発火 (ロック中も閲覧 navigation として許可)。
     /// 空中心 / 周辺セルでは未使用。
     let onCenterTapRequest: (() -> Void)?
+    /// Dashboard → Editor 遷移時に渡される morph 完了までの待機時間 (ms)。
+    /// この値分だけ全 cell の delay を後ろにずらすことで、morph 中は周辺セルが opacity 0 を維持。
+    /// drill / drill-up / 並列ナビでは 0 が渡され、既存挙動と完全一致。
+    let initialDelayMs: Int
+    /// 中心セル (position=4) の外枠と Dashboard MandalartCard の外枠を matchedGeometryEffect で
+    /// 紐付けるための Namespace。`nil` なら付与しない (= drill 後の grid 表示等で不要)。
+    /// 中心以外の position では未使用。
+    let convergeNamespace: Namespace.ID?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -77,7 +85,9 @@ struct CellView: View {
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
-        onCenterTapRequest: (() -> Void)? = nil
+        onCenterTapRequest: (() -> Void)? = nil,
+        initialDelayMs: Int = 0,
+        convergeNamespace: Namespace.ID? = nil
     ) {
         self.cell = cell
         self.gridId = gridId
@@ -94,6 +104,8 @@ struct CellView: View {
         self.editingCellId = editingCellId
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
+        self.initialDelayMs = initialDelayMs
+        self.convergeNamespace = convergeNamespace
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
         // stagger 順序に含まれない position は X=C 連続セル (= drill-down 中心) なので
         // 最初から visible=true。fade-in 動作なし、ちらつきも防げる。
@@ -163,8 +175,11 @@ struct CellView: View {
                     cellBackground
                 }
 
+                // `.strokeBorder` (= 内側塗り) で clipShape の影響を受けず borderLineWidth が visible 太さと一致する。
+                // 旧 `.stroke + clipShape` だと外側半分が clip されて visible が半分になり、Dashboard card との対比で
+                // 見た目が約 2 倍ズレていた (= clip なしの card と整合しなかった)。Constants 側で値も 3 → 1.5 に半減済み。
                 RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
-                    .stroke(borderColor, lineWidth: borderLineWidth * (isEditing ? 1.5 : 1.0))
+                    .strokeBorder(borderColor, lineWidth: borderLineWidth * (isEditing ? 1.5 : 1.0))
 
                 // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)
                 Text(cell?.text ?? "")
@@ -190,6 +205,13 @@ struct CellView: View {
         // GeometryReader 内で `.frame()` + `.clipped()` で Image を正確に枠内サイズに固定済だが、
         // 念のため外側でも `.clipShape` を適用して角丸を確保。
         .clipShape(RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius))
+        // Dashboard MandalartCard 外枠 ↔ Editor 中心セル外枠の morph (= desktop の Converge Overlay と同等)。
+        // position=4 かつ namespace 提供時のみ付与。drill / parallel ナビでは namespace=nil で no-op。
+        .matchedGeometryEffectIfAvailable(
+            id: "card-\(mandalart.id)",
+            in: convergeNamespace,
+            condition: position == GridConstants.centerPosition
+        )
         // drill / drill-up / 並列ナビ / 初回表示で stagger fade-in。
         // remount (= GridView3x3 が `.id(...)` で view identity を変える) ごとに onAppear が
         // 発火し、position と transitionKind から計算した delay 後に visible=true に補間。
@@ -197,8 +219,11 @@ struct CellView: View {
         .opacity(animatedVisible ? 1 : 0)
         .onAppear {
             guard !animatedVisible else { return }
-            let delay = AnimationStagger.delay(for: position, kind: transitionKind)
-            let duration = Double(TimingConstants.animFadeMs) / 1000.0
+            let delay = AnimationStagger.delay(for: position, kind: transitionKind, initialDelayMs: initialDelayMs)
+            // Dashboard 由来 (initialDelayMs > 0) かつ中心セルは 1ms snap で morph 完了の同フレームに opacity 1。
+            // desktop の `animation: orbit-fade-in 1ms ease-out CONVERGE_DURATION_MS both` と同等。
+            let isCenterFromConverge = (initialDelayMs > 0) && (position == GridConstants.centerPosition)
+            let duration = isCenterFromConverge ? 0.001 : Double(TimingConstants.animFadeMs) / 1000.0
             withAnimation(.easeOut(duration: duration).delay(delay)) {
                 animatedVisible = true
             }
@@ -479,6 +504,23 @@ struct CellView: View {
             loadedImage = ImageStorage.loadImage(at: relPath)
         } catch {
             print("[cell] image save failed:", error)
+        }
+    }
+}
+
+private extension View {
+    /// `condition` が true かつ `namespace` が非 nil のときだけ `matchedGeometryEffect` を付与する。
+    /// SwiftUI で nil ガードする標準形 (Namespace.ID は optional だと直接渡せないため)。
+    @ViewBuilder
+    func matchedGeometryEffectIfAvailable(
+        id: String,
+        in namespace: Namespace.ID?,
+        condition: Bool
+    ) -> some View {
+        if condition, let ns = namespace {
+            self.matchedGeometryEffect(id: id, in: ns, anchor: .center)
+        } else {
+            self
         }
     }
 }

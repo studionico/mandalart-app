@@ -35,6 +35,12 @@ struct GridView3x3: View {
     let onEditRequest: ((Cell) -> Void)?
     /// 入力済み中心セル tap で drill-up / home navigation を起動する callback。pass-through。
     let onCenterTapRequest: (() -> Void)?
+    /// Dashboard → Editor 遷移時に渡す morph 完了までの待機時間 (ms)。CellView へ pass-through。
+    /// drill / drill-up / 並列ナビでは 0 が渡され、既存挙動と完全一致。
+    let initialDelayMs: Int
+    /// 中心セル (position=4) と Dashboard MandalartCard の matchedGeometryEffect 用 Namespace。
+    /// CellView へ pass-through。中心以外では未使用。
+    let convergeNamespace: Namespace.ID?
 
     init(
         gridId: String,
@@ -50,7 +56,9 @@ struct GridView3x3: View {
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
-        onCenterTapRequest: (() -> Void)? = nil
+        onCenterTapRequest: (() -> Void)? = nil,
+        initialDelayMs: Int = 0,
+        convergeNamespace: Namespace.ID? = nil
     ) {
         self.gridId = gridId
         self.displayCells = displayCells
@@ -66,6 +74,8 @@ struct GridView3x3: View {
         self.editingCellId = editingCellId
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
+        self.initialDelayMs = initialDelayMs
+        self.convergeNamespace = convergeNamespace
     }
 
     private func hasChild(at position: Int) -> Bool {
@@ -95,7 +105,9 @@ struct GridView3x3: View {
                     onImportRequest: onImportRequest,
                     editingCellId: editingCellId,
                     onEditRequest: onEditRequest,
-                    onCenterTapRequest: onCenterTapRequest
+                    onCenterTapRequest: onCenterTapRequest,
+                    initialDelayMs: initialDelayMs,
+                    convergeNamespace: convergeNamespace
                 )
                 // grid 切替時 (= drill / drill-up) に CellView の @State (`text`) が
                 // 古い grid の値を持ち越さないよう、id に gridId + cellId を含めて強制 remount。

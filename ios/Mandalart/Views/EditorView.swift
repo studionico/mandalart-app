@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 /// - 左上 floating: home (ダッシュボードへ戻る) + ロック indicator (ロック時のみ)
 struct EditorView: View {
     let mandalartId: String
+    /// Dashboard ↔ Editor 遷移の morph 用 Namespace (= ContentView 共有)。
+    /// grid 容器に `id: "card-\(mandalartId)"` で matchedGeometryEffect を付与し、
+    /// MandalartCard 矩形と双方向 morph (= expand on open / converge on home) させる。
+    let namespace: Namespace.ID
     let onBack: () -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -61,8 +65,9 @@ struct EditorView: View {
         horizontalSizeClass == .regular
     }
 
-    init(mandalartId: String, onBack: @escaping () -> Void) {
+    init(mandalartId: String, namespace: Namespace.ID, onBack: @escaping () -> Void) {
         self.mandalartId = mandalartId
+        self.namespace = namespace
         self.onBack = onBack
         _mandalarts = Query(filter: #Predicate<Mandalart> { $0.id == mandalartId })
         _grids = Query(
@@ -361,7 +366,12 @@ struct EditorView: View {
                             onImportRequest: { cell in handleCellImportRequest(cell: cell) },
                             editingCellId: editingCellId,
                             onEditRequest: { cell in beginEditing(cell: cell) },
-                            onCenterTapRequest: { handleCenterTap() }
+                            onCenterTapRequest: { handleCenterTap() },
+                            // Dashboard 由来の初回表示時のみ converge 完了まで cell stagger を遅延 (= morph 中 opacity 0 維持)。
+                            // drill / drill-up / 並列ナビでは lastTransitionKind が変化するので 0 になり既存挙動維持。
+                            initialDelayMs: lastTransitionKind == .initial ? TimingConstants.convergeDurationMs : 0,
+                            // 中心セル (position=4) の外枠と Dashboard MandalartCard の matchedGeometryEffect 用。
+                            convergeNamespace: namespace
                         )
                         .frame(width: gridSize, height: gridSize)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))

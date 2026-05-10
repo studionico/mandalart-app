@@ -24,10 +24,21 @@ enum AnimationStagger {
     }
 
     /// position (0-8) と transition から、`onAppear` 時 `.delay(...)` に渡す秒数を計算する。
-    /// `staggerIndex` が nil (= drill-down 中心など) の場合は 0 を返す (即座表示)。
-    static func delay(for position: Int, kind: DrillTransitionKind) -> Double {
-        guard let idx = staggerIndex(for: position, kind: kind) else { return 0 }
-        return Double(idx) * Double(TimingConstants.animStaggerMs) / 1000.0
+    /// `staggerIndex` が nil (= drill-down 中心など) の場合は `initialDelayMs` のみ反映 (= 周辺と同期)。
+    ///
+    /// `initialDelayMs` は Dashboard → Editor 遷移時に渡す morph 完了までの待機時間。
+    /// この値分だけ全 cell の delay を後ろにずらすことで、morph 中は周辺セルが opacity 0 を維持し、
+    /// morph 完了後に中心 → 周辺 stagger が始まる (= desktop の Converge Overlay と同じ動き)。
+    static func delay(
+        for position: Int,
+        kind: DrillTransitionKind,
+        initialDelayMs: Int = 0
+    ) -> Double {
+        let baseMs = initialDelayMs
+        guard let idx = staggerIndex(for: position, kind: kind) else {
+            return Double(baseMs) / 1000.0
+        }
+        return Double(baseMs + idx * TimingConstants.animStaggerMs) / 1000.0
     }
 
     /// transition 種別ごとの fade-in 順序。先頭から `animStaggerMs` 間隔で順次 visible=true に切替。

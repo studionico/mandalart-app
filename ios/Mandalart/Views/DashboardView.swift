@@ -56,6 +56,9 @@ struct DashboardView: View {
     @State private var transferAlert: TransferAlertState?
 
     let onOpenMandalart: (String) -> Void
+    /// ContentView から渡される morph Namespace。MandalartCard の外枠 ↔ EditorView の grid 容器を
+    /// matchedGeometryEffect でマッチさせ、Dashboard ↔ Editor 遷移時の expand / converge を駆動する。
+    let namespace: Namespace.ID
 
     /// 並び順: Inbox (isSystem) を先頭に固定 → sortOrder ASC → createdAt ASC
     private var sortedFolders: [Folder] {
@@ -289,7 +292,7 @@ struct DashboardView: View {
                                 }
                                 return textByCellId[m.rootCellId] ?? m.title
                             }()
-                            MandalartCard(mandalart: m, displayText: displayText)
+                            MandalartCard(mandalart: m, displayText: displayText, namespace: namespace)
                                 .onTapGesture { onOpenMandalart(m.id) }
                                 .contextMenu { mandalartContextMenu(for: m) }
                         }
@@ -581,12 +584,27 @@ private struct MandalartCard: View {
     /// root center cell (= `mandalart.rootCellId`) の text。並列マンダラ有無に関わらず確実に root の中心セル内容を出すため、
     /// 親 (DashboardView) の @Query lookup から渡される。mandalart.title (mirror) は fallback として親側で適用済み。
     let displayText: String
+    /// Dashboard ↔ Editor 遷移の expand/converge 用 morph namespace。
+    /// `id: "card-\(mandalart.id)"` で EditorView の grid 容器と matched され、tap → grid morph が走る。
+    let namespace: Namespace.ID
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: LayoutConstants.cardCornerRadius)
+            // 枠 / 角丸 / 描画方式を Editor 中心セル ([CellView.swift] body) と完全一致させる。
+            // - cornerRadius: `cellCornerRadius` (= 8pt、card 専用 4pt は使わない)
+            // - 描画方式: `.strokeBorder` (= 内側塗り)。`.stroke` だと clipShape 有無で visible 太さが変わるため、
+            //   card (clip なし) と cell (clip あり) で見た目が約 2 倍ズレる。`.strokeBorder` は必ず shape 内側に
+            //   描画するので両者で一致する
+            // - 色 / 太さ: `Color.primary.opacity(0.4)` × `cellCenterBorder` (1.5pt = visible)
+            // この一致が無いと matchedGeometryEffect の morph 中に shape が snap して別物に見える。
+            RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
                 .fill(NeutralPalette.cardBackground)
                 .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
+                        .strokeBorder(Color.primary.opacity(0.4), lineWidth: LayoutConstants.cellCenterBorder)
+                }
+                .matchedGeometryEffect(id: "card-\(mandalart.id)", in: namespace, anchor: .center)
                 .overlay(alignment: .topTrailing) {
                     HStack(spacing: 4) {
                         if mandalart.pinned {
