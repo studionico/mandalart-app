@@ -23,20 +23,38 @@ type Props = {
   hoveredAction?: ActionDropType | null
   /** 各タイル用 drop handlers ファクトリー。未指定なら drop targets として機能しない (テスト用) */
   getActionDropProps?: (action: ActionDropType) => DropHandlers
+  /**
+   * true のとき shred (シュレッダー) tile を render しない。ダッシュボードでロック中
+   * マンダラートをドラッグ中に立てて、誤削除を物理的に不可能にする (DOM に存在しなければ
+   * drop target にも hit しない、落とし穴 #15 の "禁止アクションは drop target を出さない"
+   * 方針)。copy / export は影響を受けない。既定 false。editor 側 (SidePanel) は
+   * Cell.tsx 側でロック中はセル自体が drag できないため不要。
+   */
+  hideShredTile?: boolean
+  /**
+   * true のとき move (ストックへ移動 = cut to stock) tile を render しない。move は
+   * 内部で `permanentDeleteMandalart` を呼ぶ destructive 操作なので、ロック中マンダラート
+   * を drag 中に hideShredTile と同条件で立てる。既定 false。
+   */
+  hideMoveTile?: boolean
 }
 
 const ICON_SIZE = 40
 const TILE_SIZE = 96
 
-export default function DragActionPanel({ hoveredAction, getActionDropProps }: Props) {
+export default function DragActionPanel({ hoveredAction, getActionDropProps, hideShredTile = false, hideMoveTile = false }: Props) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 h-full select-none">
-      <ActionTile action="shred" label="シュレッダー" hovered={hoveredAction === 'shred'} dropProps={getActionDropProps?.('shred')}>
-        <ShredderIcon />
-      </ActionTile>
-      <ActionTile action="move" label="移動" hovered={hoveredAction === 'move'} dropProps={getActionDropProps?.('move')}>
-        <MoveIcon />
-      </ActionTile>
+      {!hideShredTile && (
+        <ActionTile action="shred" label="シュレッダー" hovered={hoveredAction === 'shred'} dropProps={getActionDropProps?.('shred')}>
+          <ShredderIcon />
+        </ActionTile>
+      )}
+      {!hideMoveTile && (
+        <ActionTile action="move" label="移動" hovered={hoveredAction === 'move'} dropProps={getActionDropProps?.('move')}>
+          <MoveIcon />
+        </ActionTile>
+      )}
       <ActionTile action="copy" label="コピー" hovered={hoveredAction === 'copy'} dropProps={getActionDropProps?.('copy')}>
         <CopyIcon />
       </ActionTile>

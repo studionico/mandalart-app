@@ -112,7 +112,7 @@ src/
 │   │   ├── Breadcrumb.tsx        # パンくずリスト (階層ナビゲーション)
 │   │   ├── ParallelNav.tsx       # 並列グリッド ← → ナビゲーション
 │   │   ├── SidePanel.tsx         # 右サイドパネル (メモ・ストック タブ + ドラッグ中の DragActionPanel オーバーレイ)
-│   │   ├── DragActionPanel.tsx   # D&D 中の右パネル 4 アクションアイコン (シュレッダー / 移動 / コピー / エクスポート)
+│   │   ├── DragActionPanel.tsx   # D&D 中の右パネル アクションアイコン (シュレッダー / 移動 / コピー / エクスポート、ロック中は destructive 2 つ非表示)
 │   │   ├── MemoTab.tsx           # メモタブ (Markdown エディタ)
 │   │   ├── StockTab.tsx          # ストックタブ (保管セル一覧 + ConvergeOverlay polling target)
 │   │   └── ImportDialog.tsx      # インポートダイアログ (新規 / 既存セル配下)

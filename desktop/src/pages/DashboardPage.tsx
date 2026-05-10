@@ -394,9 +394,24 @@ export default function DashboardPage() {
     const titleLabel = target.title || '無題'
     switch (action.action) {
       case 'shred':
+        // defensive: UI 層 (DragActionPanel.hideShredTile) でロック中は tile を出さないので
+        // 通常はこの case に到達しないが、drag 中に realtime push でロック状態が変わるなどの
+        // race 対策で early-return + toast。SQLite から locked=0/1 (number) が返るが
+        // if 文の truthy 評価で 0 = false / 1 = true として正しく判定される (落とし穴 #16)。
+        if (target.locked) {
+          setToast({ message: 'ロック中のマンダラートは削除できません', type: 'info' })
+          return
+        }
         setCardShredConfirm({ mandalartId: target.id, title: titleLabel })
         return
       case 'move':
+        // defensive: UI 層 (DragActionPanel.hideMoveTile) でロック中は tile を出さないので
+        // 通常はこの case に到達しないが、drag 中に realtime push でロック状態が変わるなどの
+        // race 対策で early-return + toast (move は内部で permanentDeleteMandalart を呼ぶ destructive 操作)。
+        if (target.locked) {
+          setToast({ message: 'ロック中のマンダラートは移動できません', type: 'info' })
+          return
+        }
         try {
           // card 削除前に source 値を計測 (DOM 削除後は計測不可)
           const source = captureCardSource(target.id, target)
@@ -781,6 +796,11 @@ export default function DashboardPage() {
                 <DragActionPanel
                   hoveredAction={dnd.hoveredAction}
                   getActionDropProps={dnd.getActionDropProps}
+                  // ロック中マンダラートを drag 中は destructive tile (シュレッダー / 移動) を出さない。
+                  // 移動 (cut to stock) は内部で permanentDeleteMandalart を呼ぶので shred と同等扱い。
+                  // SQLite から locked=0/1 (number) が返ることがあるため `!!` で boolean 化 (落とし穴 #16 同パターン)。
+                  hideShredTile={!!mandalarts.find((m) => m.id === dnd.dragSourceId)?.locked}
+                  hideMoveTile={!!mandalarts.find((m) => m.id === dnd.dragSourceId)?.locked}
                 />
               </div>
             )}

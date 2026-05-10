@@ -245,10 +245,11 @@ Shift+Tab は逆順
 - **ロック中も通る操作 (閲覧 / マンダラート操作)**:
   - drill / drill-up / 9×9 切替 / parallel switch / breadcrumb / home navigation
   - `⌘C` (copy)、context menu の copy / stock 追加 (= 元 cell 不変)
-  - D&D の 4 アクション `copy` / `export` (読み取り操作)、ダッシュボードカード経由の copy / export / pin / 複製 / フォルダ移動 / ゴミ箱 / 完全削除 (ロックは「中身を編集させない」目的、削除権は別)
+  - D&D の 4 アクション `copy` / `export` (読み取り操作)、ダッシュボードカード経由の copy / export / pin / 複製 / フォルダ移動 / ゴミ箱 (ロックは「中身を編集させない」目的)
+  - **ダッシュボードのカード drag 中、destructive な 2 アクション (シュレッダー / 移動) はロック中マンダラートに対しては `DragActionPanel` から tile が描画されない** (`hideShredTile` / `hideMoveTile` が立つ)。drop target として DOM 自体が存在しないので drop 不可。defensive ガードは `handleDashboardDrop` の `'shred'` / `'move'` case と `permanentDeleteMandalart` API 層の 3 重で構成 (落とし穴 #15「禁止アクションは drop target を出さない」方針)
 - **複製時の継承**: `pinned` は継承しないが、`locked` は **継承する** (テンプレートとしてロック済みマンダラートを複製する用途を想定。新コピーもロック状態で渡る)
 - **クロスタブ / クロスデバイス即時反映**: editorStore の `currentMandalart` を realtime の `applyMandalartChange` で同期する。1 つの端末でロック切替 → 別タブで開いているエディタの banner / mutation 状態が即時更新される
-- **ロック ≠ 削除制限**: ロック中マンダラートも `deleteMandalart` (ゴミ箱) / `permanentDeleteMandalart` (完全削除) は許可する。ピン / 複製 / フォルダ移動 / インポート / エクスポートも同様
+- **ロックの削除セマンティクス**: ロック中マンダラートは `deleteMandalart` (ゴミ箱、復元可) は許可するが、**`permanentDeleteMandalart` (完全削除、復元不可) は不許可** (API 層で defensive skip + UI 層で削除アイコン / シュレッダー tile / 移動 tile を非表示)。ピン / 複製 / フォルダ移動 / インポート / エクスポート / カード並び替えは許可
 - **将来 out of scope**: per-cell や per-grid のロック (部分ロック) / PIN 認証 / エディタヘッダーへのロックトグル配置 (= エディタ内で気軽に解除できると誤操作防止意味が薄れるため意図的に外す)
 
 ---
