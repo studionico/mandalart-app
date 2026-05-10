@@ -36,6 +36,24 @@ Landscape 2 ペイン構成 (`HStack` ベース):
 - 左 sidebar: フォルダタブ (Landscape の余白を活かす、iPhone 横向きでも展開できる)
 - 右メイン: カードグリッド (`LazyVGrid(columns: .adaptive(minimum: 140))`) + `searchable`
 - カードの長押しで context menu (ピン留め / ロック / 複製 / 削除 / フォルダ移動) — desktop の HoverActionButtons 相当
+- **新規作成カード**: グリッド先頭に dashed-border + "+" のカードを置く (検索中は非表示)。tap で空タイトルの mandalart を作成して即 Editor を開く。toolbar 右上の "+" ボタンは廃止 (= desktop の `NewMandalartCard` と同等)
+
+## マンダラート不変条件
+
+- **中心セル空のときは周辺セルを編集できない**: 中心セル (position=4) が text 空 かつ imagePath nil の状態で、周辺セル (position ≠ 4) の新規入力は alert で拒否する
+- **周辺セルに入力があるときは中心セルを空にできない**: 周辺セルのいずれかに text または imagePath がある状態で、中心セル text を空 (and imagePath nil) に変更しようとすると alert で拒否する
+- 上記 2 つにより「中心空 AND 周辺入力済」状態はユーザー操作経路では発生しないことが保証される
+- 実装: [`EditorView.beginEditing`](../Mandalart/Views/EditorView.swift) (周辺 tap のガード) + [`EditorView.commitEditing`](../Mandalart/Views/EditorView.swift) (中心 clear のガード) で `validationAlert` 経由 SwiftUI alert を出す
+- desktop 版と完全同等 (`desktop/docs/requirements.md`、[`EditorLayout.tsx:1551-1557 / 1627-1632`](../../desktop/src/components/editor/EditorLayout.tsx))
+- 既知の未ガード経路: ストックからの paste (Phase 11+ で対応予定)
+
+## 空マンダラートの自動破棄 (hard delete)
+
+- Dashboard の「新規作成」カード tap で生成され、ユーザーが Editor で何も入力せずに戻った場合 (= 中心セル text trim 空 かつ imagePath nil、root grid 単一) は **自動 hard delete** (ローカル物理削除 + cloud cascade DELETE)。ゴミ箱には入らない
+- 判定は中心セルのみ。上記の不変条件 enforcement により「中心空 AND 周辺入力済」が発生しない前提
+- 実装: [`EditorView.performBackWithCleanup`](../Mandalart/Views/EditorView.swift) → [`MandalartFactory.permanentDelete`](../Mandalart/Services/MandalartFactory.swift)
+- desktop も同等 ([`EditorLayout.handleNavigateHome`](../../desktop/src/components/editor/EditorLayout.tsx) → `permanentDeleteMandalart`)
+- ユーザーが意図的にゴミ箱へ送る経路 (Dashboard カード長押し → 「ゴミ箱へ移動」) は引き続き soft delete + 復元可能
 
 ## ジェスチャ / インタラクション
 

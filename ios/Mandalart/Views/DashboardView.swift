@@ -122,15 +122,6 @@ struct DashboardView: View {
                         Button { showTrash = true } label: {
                             Image(systemName: "trash")
                         }
-                        Button {
-                            try? MandalartFactory.create(
-                                title: "新規マンダラート",
-                                folderId: selectedFolderId,
-                                in: modelContext
-                            )
-                        } label: {
-                            Image(systemName: "plus")
-                        }
                     }
                 }
             }
@@ -282,6 +273,12 @@ struct DashboardView: View {
                     }
                     let textByCellId = Dictionary(uniqueKeysWithValues: allCellsForRoot.map { ($0.id, $0.text) })
                     LazyVGrid(columns: columns, spacing: 12) {
+                        // 検索中以外は常に grid 先頭に「新規作成」カードを並べる (desktop の NewMandalartCard 移植)
+                        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                            NewMandalartCard(squareSize: cardSquareSize) {
+                                handleCreateNewMandalart()
+                            }
+                        }
                         ForEach(visibleMandalarts) { m in
                             // 1) primary root grid の centerCellId 経由 (= 並列 grid の cell を絶対に拾わない)
                             // 2) fallback: mandalart.rootCellId (root grid が一時的に @Query 未反映の異常系)
@@ -383,11 +380,7 @@ struct DashboardView: View {
                 Text("\(folder.name) は空です")
                     .foregroundStyle(.secondary)
                 Button("新規作成") {
-                    try? MandalartFactory.create(
-                        title: "新規マンダラート",
-                        folderId: selectedFolderId,
-                        in: modelContext
-                    )
+                    handleCreateNewMandalart()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.primary)
@@ -436,6 +429,23 @@ struct DashboardView: View {
         }
         renameTarget = nil
         renameInput = ""
+    }
+
+    /// dashed-border カード or emptyState ボタン tap → 空タイトルで mandalart を作成し
+    /// そのまま Editor を開く。Editor 側で何も入力せず戻ると `EditorView.performBackWithCleanup()`
+    /// で hard delete されるので、空カードが Dashboard に残ることはない (desktop の
+    /// `DashboardPage.handleCreate` と同等の挙動)。
+    private func handleCreateNewMandalart() {
+        do {
+            let m = try MandalartFactory.create(
+                title: "",
+                folderId: selectedFolderId,
+                in: modelContext
+            )
+            onOpenMandalart(m.id)
+        } catch {
+            print("[dashboard] create mandalart failed:", error)
+        }
     }
 
     // MARK: - Export / Import handlers
@@ -630,6 +640,42 @@ private struct MandalartCard: View {
             Text(mandalart.updatedAt.formatted(.relative(presentation: .named)))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// グリッド先頭に並ぶ「新規作成」用の dashed-border カード。tap で `handleCreateNewMandalart`
+/// を呼ぶ。desktop の [`NewMandalartCard`](../../desktop/src/pages/DashboardPage.tsx) を移植。
+/// - 既存 `MandalartCard` と同じ corner radius / 同じ caption スロット高さで整列する
+///   (LazyVGrid の adaptive column が `MandalartCard` と同じ幅を割当てる)
+/// - matchedGeometryEffect は **付けない** (morph 元が無いので default cross-dissolve で
+///   Editor へ遷移する。desktop も同等)
+/// - `squareSize` は + アイコンを viewport 比でスケールさせるためだけに使う
+private struct NewMandalartCard: View {
+    let squareSize: CGFloat
+    let onTap: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
+                .strokeBorder(
+                    Color.primary.opacity(0.25),
+                    style: StrokeStyle(lineWidth: LayoutConstants.cellCenterBorder, dash: [6, 4])
+                )
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    Image(systemName: "plus")
+                        .font(.system(size: max(24, squareSize * 0.25), weight: .light))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius))
+                .onTapGesture { onTap() }
+                .accessibilityLabel("新規マンダラートを作成")
+                .accessibilityAddTraits(.isButton)
+            // MandalartCard の updatedAt caption と縦位置を揃えるための透明 placeholder。
+            Text(" ")
+                .font(.caption2)
+                .accessibilityHidden(true)
         }
     }
 }

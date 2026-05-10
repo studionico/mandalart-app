@@ -58,6 +58,11 @@ struct EditorView: View {
     /// `cancelEditing()` で破棄。
     @State private var editingDraft: String = ""
 
+    /// マンダラート不変条件 (中心セル空 ↔ 周辺入力なし) 違反時の alert メッセージ。
+    /// nil でない間 `.alert` を表示し、user が OK を押すと nil に戻る。desktop の toast 拒否
+    /// (`EditorLayout.tsx:1551-1557 / 1627-1632`) と同等の防御。
+    @State private var validationAlert: String?
+
     /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
     /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
     private var nineByNineSupported: Bool {
@@ -121,7 +126,7 @@ struct EditorView: View {
                             // 左上 floating home button: ZStack 拡張領域 (= 物理画面左端付近) に
                             // 配置。padding 8pt で物理端から少し内側、top 20pt で grid 上端と
                             // 視覚的に被らない位置。
-                            Button(action: onBack) {
+                            Button(action: { performBackWithCleanup() }) {
                                 Image(systemName: "house.fill")
                                     .font(.system(size: 18))
                                     .foregroundStyle(.primary)
@@ -215,6 +220,18 @@ struct EditorView: View {
             Button("OK", role: .cancel) { transferAlert = nil }
         } message: { state in
             Text(state.message)
+        }
+        // 不変条件 violation の通知 alert (= desktop の toast 拒否相当)。
+        .alert(
+            "操作できません",
+            isPresented: Binding(
+                get: { validationAlert != nil },
+                set: { if !$0 { validationAlert = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { validationAlert = nil }
+        } message: {
+            Text(validationAlert ?? "")
         }
         // セル編集の全画面 sheet (Landscape キーボード覆い対策)。
         // NavigationStack + TextField の中で iOS 自動 keyboard avoidance が効く。
@@ -465,14 +482,22 @@ struct EditorView: View {
 
     /// 編集要求を受け取って Floating Bar を表示状態にする。CellView 側で空 slot は
     /// lazy create 済の Cell を渡してくる前提なので、ここでは draft セットのみ。
+    /// 不変条件: 中心セルが空のときは周辺セルを編集できない (desktop EditorLayout.tsx:1551-1557 と同等)。
     private func beginEditing(cell: Cell) {
         guard let m = mandalart, !m.locked else { return }
+        if cell.position != GridConstants.centerPosition,
+           let grid = currentGrid,
+           isCenterEmpty(in: grid) {
+            validationAlert = "中心セルが空のときは周辺セルを編集できません"
+            return
+        }
         editingDraft = cell.text
         editingCellId = cell.id
     }
 
     /// Floating Bar の draft を SwiftData の cell.text に commit。root center の場合は
     /// mandalart.title も同期 (= ダッシュボードのタイトル表示と整合)。
+    /// 不変条件: 周辺セルに入力があるときは中心セルを空にできない (desktop EditorLayout.tsx:1627-1632 と同等)。
     private func commitEditing() {
         defer {
             editingCellId = nil
@@ -483,6 +508,17 @@ struct EditorView: View {
         let descriptor = FetchDescriptor<Cell>(predicate: #Predicate<Cell> { $0.id == id })
         guard let target = (try? modelContext.fetch(descriptor))?.first else { return }
         guard target.text != editingDraft else { return }
+
+        let trimmed = editingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if target.position == GridConstants.centerPosition,
+           trimmed.isEmpty,
+           target.imagePath == nil,
+           let grid = currentGrid,
+           hasPeripheralContent(in: grid) {
+            validationAlert = "周辺セルに入力がある場合、中心セルを空にできません"
+            return
+        }
+
         let now = Date()
         target.text = editingDraft
         target.updatedAt = now
@@ -499,15 +535,71 @@ struct EditorView: View {
         editingDraft = ""
     }
 
+    /// 与えられた grid の中心セル (= `displayCells[centerPosition]`) が「空」(text trim 空 AND imagePath nil)
+    /// かどうか。落とし穴 #10: `mandalart.rootCellId` は denormalized で並列 grid の中心を指す不整合があるため
+    /// 使わず、`GridRepository.displayCells` 経由で実際に display される 9 セルの中心を引く。
+    private func isCenterEmpty(in grid: Grid) -> Bool {
+        let cells = GridRepository.displayCells(for: grid, in: modelContext)
+        guard let center = cells[GridConstants.centerPosition] else { return true }
+        let textEmpty = center.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return textEmpty && center.imagePath == nil
+    }
+
+    /// 与えられた grid の周辺セル (position != centerPosition) のいずれかに text または imagePath があるか。
+    private func hasPeripheralContent(in grid: Grid) -> Bool {
+        let cells = GridRepository.displayCells(for: grid, in: modelContext)
+        for (pos, optCell) in cells.enumerated() where pos != GridConstants.centerPosition {
+            guard let cell = optCell else { continue }
+            let textNonEmpty = !cell.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if textNonEmpty || cell.imagePath != nil { return true }
+        }
+        return false
+    }
+
+    // MARK: - Back / cleanup
+
+    /// Dashboard 戻り直前に空マンダラートを hard delete すべきかを判定。
+    /// desktop `EditorLayout.handleNavigateHome` (`isCellEmpty(center) && isSoleRoot`) をミラー。
+    /// 中心セルのみで判定する (= 不変条件 enforcement により周辺入力ありの場合は中心非空が保証される)。
+    private func shouldHardDeleteOnExit(grid: Grid) -> Bool {
+        guard breadcrumb.count == 1 else { return false }
+        guard parallelGrids.count == 1 else { return false }
+        return isCenterEmpty(in: grid)
+    }
+
+    /// 戻るボタン / 中心セル tap (root) 共通の出口。空マンダラートなら hard delete してから onBack。
+    /// `MandalartFactory.permanentDelete` は async throws + cloud cascade DELETE まで含む。失敗しても
+    /// onBack は必ず呼んで戻れなくなる事態を防ぐ defensive 設計。
+    private func performBackWithCleanup() {
+        guard let m = mandalart, let grid = currentGrid else {
+            onBack()
+            return
+        }
+        if shouldHardDeleteOnExit(grid: grid) {
+            let target = m
+            Task { @MainActor in
+                do {
+                    try await MandalartFactory.permanentDelete(target, in: modelContext)
+                } catch {
+                    print("[editor] empty mandalart hard delete failed:", error)
+                }
+                onBack()
+            }
+        } else {
+            onBack()
+        }
+    }
+
     /// 入力済み中心セル tap → desktop 同等の drill-up / home navigation。
-    /// - root grid (breadcrumb 長 ≤ 1): `onBack()` でダッシュボードへ
+    /// - root grid (breadcrumb 長 ≤ 1): `performBackWithCleanup()` でダッシュボードへ
+    ///   (= 空マンダラートなら自動 hard delete)
     /// - 子グリッド: 親 breadcrumb (= count - 2) へ navigate (drill-up animation)
     /// ロック中も呼ばれる (= 閲覧 navigation として許可) が、navigateToBreadcrumb 内で
     /// 書き込みは locked ガード済。
     private func handleCenterTap() {
         guard let m = mandalart else { return }
         if breadcrumb.count <= 1 {
-            onBack()
+            performBackWithCleanup()
         } else {
             navigateToBreadcrumb(breadcrumb.count - 2, mandalart: m)
         }

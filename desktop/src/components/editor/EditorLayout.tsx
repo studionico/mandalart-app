@@ -26,7 +26,7 @@ import Button from '@/components/ui/Button'
 import { WarningIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
-import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
+import { getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
 import { uploadCellImage } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
@@ -1716,8 +1716,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       navigate('/dashboard')
       return
     }
-    // 唯一の root grid + 中心空 → マンダラート全体を削除する特殊パス。
+    // 唯一の root grid + 中心空 → マンダラート全体をハード削除する特殊パス。
     // "self-centered な root" は center_cell_id が自グリッドに属する cell を指す。
+    // ユーザーが新規作成カード tap で開いて何も入力せず戻った場合に、ゴミ箱に積まずに
+    // 完全削除する (= "誤タップで作った空マンダラートはゴミ箱から復元するものではない"
+    // という UX 判断、iOS 版と挙動を揃える)。意図的な削除 (DashboardPage の delete アイコン
+    // 経由) は別経路 `deleteMandalart` でゴミ箱送りのままなので影響なし。
     const center = gridData.cells.find((c) => c.position === CENTER_POSITION)
     const centerEmpty = !center || isCellEmpty(center)
     const isSoleRoot =
@@ -1726,7 +1730,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       gridData.center_cell_id === center?.id
     const willDelete = centerEmpty && isSoleRoot
     if (willDelete) {
-      await deleteMandalart(mandalartId)
+      await permanentDeleteMandalart(mandalartId)
     } else {
       // それ以外の "empty" は cleanupGridIfEmpty に判定を委譲
       await cleanupGridIfEmpty(gridData.id)
