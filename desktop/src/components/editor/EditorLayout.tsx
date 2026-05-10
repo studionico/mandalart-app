@@ -452,7 +452,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   // コンテキストメニュー
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; cell: Cell } | null>(null)
+  // context menu は (a) 既存 cell に対する 5 項目メニュー (kind: 'cell') と
+  // (b) 空 slot (DB row 不在) に対する import / paste のみのメニュー (kind: 'slot') の 2 形態。
+  // 'slot' クリック時は handleContextAction 内で upsertCellAt を呼んで実 row を遅延作成し、
+  // 既存の importIntoCell / handlePaste 経路に合流する。
+  type ContextMenuState =
+    | { x: number; y: number; kind: 'cell'; cell: Cell }
+    | { x: number; y: number; kind: 'slot'; gridId: string; position: number }
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   // トースト
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'error' | 'success'; action?: { label: string; onClick: () => void } } | null>(null)
@@ -1928,14 +1935,49 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   // コンテキストメニュー
   function handleContextMenu(e: React.MouseEvent, cell: Cell) {
-    setContextMenu({ x: e.clientX, y: e.clientY, cell })
+    setContextMenu({ x: e.clientX, y: e.clientY, kind: 'cell', cell })
+  }
+
+  // 空 slot (DB row 不在) 右クリック。
+  // 「中心セル空グリッドの周辺は disabled」「ロック中は不可」のガードは GridView3x3 内部
+  // の `isDisabled || isReadOnly` 判定 ([GridView3x3.tsx](./GridView3x3.tsx)) で先回り
+  // して preventDefault される。EditorLayout 側で再度 grid_id 一致で中心セルを引こうとすると、
+  // 子グリッド (X=C primary drilled、落とし穴 #10) では merge 済 center cell の grid_id が
+  // 親 grid の id のため見つからず誤って return してしまう。判定は呼出側 (= GridView3x3) に
+  // 一本化し、ここでは isLocked の保険のみ残す。
+  function handleContextMenuEmptySlot(e: React.MouseEvent, gridId: string, position: number) {
+    e.preventDefault()
+    if (isLocked) return
+    setContextMenu({ x: e.clientX, y: e.clientY, kind: 'slot', gridId, position })
   }
 
   async function handleContextAction(action: string) {
     if (!contextMenu) return
-    const cell = contextMenu.cell
+    const menu = contextMenu
     setContextMenu(null)
 
+    if (menu.kind === 'slot') {
+      // 空 slot は import / paste のみ受付
+      if (action !== 'import' && action !== 'paste') return
+      if (isLocked) return
+      try {
+        const newCell = await upsertCellAt(menu.gridId, menu.position, {})
+        refreshCell(newCell)
+        if (action === 'import') {
+          setImportTarget({
+            cellId: newCell.id,
+            cellLabel: newCell.text || `セル ${newCell.position + 1}`,
+          })
+        } else {
+          await handlePaste(newCell)
+        }
+      } catch (err) {
+        setToast({ message: `操作失敗: ${(err as Error).message}`, type: 'error' })
+      }
+      return
+    }
+
+    const cell = menu.cell
     switch (action) {
       case 'copy':
         clipboard.set('copy', cell.id)
@@ -2586,6 +2628,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           onInlineNavigate={handleCellInlineNavigate}
                           onDrill={handleCellDrill}
                           onContextMenu={handleContextMenu}
+                          onContextMenuEmptySlot={handleContextMenuEmptySlot}
                           // スライド中も checkbox を表示するため onToggleDone を渡す
                           // (pointer-events: none で click は飛ばない)
                           onToggleDone={showCheckbox ? handleToggleDone : undefined}
@@ -2959,6 +3002,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onDragEnd={handleDragEnd}
                       dropProps={cellOrSlotDropProps}
                       onContextMenu={handleContextMenu}
+                      onContextMenuEmptySlot={handleContextMenuEmptySlot}
                       onToggleDone={showCheckbox ? handleToggleDone : undefined}
                       isReadOnly={isLocked}
                     />
@@ -3064,25 +3108,43 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseLeave={() => setContextMenu(null)}
         >
-          <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between">
-            カット <span className="text-neutral-400 dark:text-neutral-500">⌘X</span>
-          </button>
-          <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between">
-            コピー <span className="text-neutral-400 dark:text-neutral-500">⌘C</span>
-          </button>
-          <button
-            onClick={() => handleContextAction('paste')}
-            disabled={!clipboard.sourceCellId}
-            className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
-          </button>
-          <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800">
-            ストックに追加
-          </button>
-          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-b-xl">
-            ここにインポート
-          </button>
+          {contextMenu.kind === 'cell' && (
+            <>
+              <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between">
+                カット <span className="text-neutral-400 dark:text-neutral-500">⌘X</span>
+              </button>
+              <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between">
+                コピー <span className="text-neutral-400 dark:text-neutral-500">⌘C</span>
+              </button>
+              <button
+                onClick={() => handleContextAction('paste')}
+                disabled={!clipboard.sourceCellId}
+                className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
+              </button>
+              <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800">
+                ストックに追加
+              </button>
+              <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-b-xl">
+                ここにインポート
+              </button>
+            </>
+          )}
+          {contextMenu.kind === 'slot' && (
+            <>
+              <button
+                onClick={() => handleContextAction('paste')}
+                disabled={!clipboard.sourceCellId}
+                className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
+              </button>
+              <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-b-xl">
+                ここにインポート
+              </button>
+            </>
+          )}
         </div>
       )}
 

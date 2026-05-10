@@ -38,6 +38,12 @@ type Props = {
     onDrop: (e: React.DragEvent) => void
   }
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
+  /**
+   * 空 slot (cell 行が DB に無い) の右クリックハンドラ。
+   * cell オブジェクトが存在しないため (gridId, position) を渡す。
+   * 受け取り側で context menu を開き、メニュー項目クリック時に upsertCellAt で実 row を遅延作成する。
+   */
+  onContextMenuEmptySlot?: (e: React.MouseEvent, gridId: string, position: number) => void
   onToggleDone?: (cell: Cell) => void
   /** ロック中 (migration 011)。true なら Cell の編集 / drag / 空 slot click 起動を抑止する。 */
   isReadOnly?: boolean
@@ -48,7 +54,7 @@ export default function GridView3x3({
   fontScale, inlineEditingCellId,
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate, onStartEmptySlotEdit,
-  onDrill, onDragStart, onDragEnd, dropProps, onContextMenu, onToggleDone,
+  onDrill, onDragStart, onDragEnd, dropProps, onContextMenu, onContextMenuEmptySlot, onToggleDone,
   isReadOnly = false,
 }: Props) {
   const center = getCenterCell(cells)
@@ -85,6 +91,13 @@ export default function GridView3x3({
               onClick={() => {
                 if (isDisabled || isReadOnly) return
                 onStartEmptySlotEdit?.(gridId, i)
+              }}
+              onContextMenu={(e) => {
+                if (isDisabled || isReadOnly) {
+                  e.preventDefault()
+                  return
+                }
+                onContextMenuEmptySlot?.(e, gridId, i)
               }}
               onDragEnter={dropProps?.onDragEnter}
               onDragOver={dropProps?.onDragOver}
