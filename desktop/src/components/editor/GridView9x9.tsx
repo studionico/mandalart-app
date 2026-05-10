@@ -37,6 +37,8 @@ type Props = {
   onContextMenu?: (e: React.MouseEvent, cell: Cell) => void
   /** ロック中 (migration 011)。Cell の編集 / drag を抑止する。 */
   isReadOnly?: boolean
+  /** マンダラート locked 状態。true なら Cell + サブグリッド外枠を muted gray に変える (視覚的ロック表示)。 */
+  isLocked?: boolean
 }
 
 export default function GridView9x9({
@@ -46,6 +48,7 @@ export default function GridView9x9({
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
   onDrill, onDragStart, onDragEnd, dropProps, onContextMenu,
   isReadOnly = false,
+  isLocked = false,
 }: Props) {
   const rootCellMap = new Map(rootCells.map((c) => [c.position, c]))
   const rootCenter = getCenterCell(rootCells)
@@ -67,7 +70,7 @@ export default function GridView9x9({
             <div
               key={outerPos}
               data-grid-container
-              className={`${wrapperBase} border-[6px] border-black dark:border-white`}
+              className={`${wrapperBase} border-[6px] ${isLocked ? 'border-neutral-400 dark:border-neutral-600' : 'border-black dark:border-white'}`}
             >
               {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
                 const cell = rootCellMap.get(innerPos)
@@ -100,6 +103,7 @@ export default function GridView9x9({
                     onContextMenu={onContextMenu}
                     size="small"
                     isReadOnly={isReadOnly}
+                    isLocked={isLocked}
                   />
                 )
               })}
@@ -119,8 +123,8 @@ export default function GridView9x9({
           ? (childCounts.get(rootCell.id) ?? 0) > 0
           : false
         const borderClass = hasMeaningfulSub
-          ? 'border-2 border-black dark:border-neutral-300'
-          : 'border-2 border-neutral-300 dark:border-neutral-700'
+          ? `border-2 ${isLocked ? 'border-neutral-400 dark:border-neutral-600' : 'border-black dark:border-neutral-300'}`
+          : `border-2 ${isLocked ? 'border-neutral-200 dark:border-neutral-800' : 'border-neutral-300 dark:border-neutral-700'}`
 
         return (
           <div key={outerPos} data-grid-container className={`${wrapperBase} ${borderClass}`}>
@@ -156,6 +160,7 @@ export default function GridView9x9({
                     onContextMenu={onContextMenu}
                     size="small"
                     isReadOnly={isReadOnly}
+                    isLocked={isLocked}
                   />
                 )
               }
@@ -187,6 +192,7 @@ export default function GridView9x9({
                     onContextMenu={onContextMenu}
                     size="small"
                     isReadOnly={isReadOnly}
+                    isLocked={isLocked}
                   />
                 )
               }

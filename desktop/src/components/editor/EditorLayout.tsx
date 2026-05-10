@@ -23,7 +23,7 @@ import type { ActionDropType } from '@/hooks/useDragAndDrop'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
-import { LockClosedIcon, WarningIcon } from '@/components/ui/icons'
+import { WarningIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
 import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
 import { deleteMandalart, getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
@@ -2219,15 +2219,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         </div>
       </header>
 
-      {/* ロックバナー (migration 011): マンダラートがロック中のみ表示。
-          編集経路は EditorLayout 全 mutation handler が isLocked early-return ガード済み。
-          解除はダッシュボードカードのロック解除アイコン経由 (エディタ内では切替できない仕様)。 */}
-      {isLocked && (
-        <div className="shrink-0 bg-neutral-100 dark:bg-neutral-800 border-b border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-          <LockClosedIcon className="w-4 h-4 shrink-0" />
-          <span>このマンダラートはロックされています — 編集するにはダッシュボードでロックを解除してください</span>
-        </div>
-      )}
+      {/* ロックバナーは廃止 (画面を広く使うため)。ロック状態は Cell の枠線色 (薄いグレー) で表現する。
+          編集経路は EditorLayout 全 mutation handler が isLocked early-return ガード済みで挙動は不変。 */}
 
       {/* メインエリア */}
       <div className="flex flex-1 overflow-hidden">
@@ -3005,6 +2998,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onContextMenuEmptySlot={handleContextMenuEmptySlot}
                       onToggleDone={showCheckbox ? handleToggleDone : undefined}
                       isReadOnly={isLocked}
+                      isLocked={isLocked}
                     />
                   )}
                   {gridData && viewMode === '9x9' && gridSize > 0 && (
@@ -3034,6 +3028,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       onDrill={handleCellDrill}
                       onContextMenu={PREVENT_CONTEXT_MENU}
                       isReadOnly={isLocked}
+                      isLocked={isLocked}
                     />
                   )}
                 </>

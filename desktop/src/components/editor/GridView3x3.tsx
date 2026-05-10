@@ -47,6 +47,8 @@ type Props = {
   onToggleDone?: (cell: Cell) => void
   /** ロック中 (migration 011)。true なら Cell の編集 / drag / 空 slot click 起動を抑止する。 */
   isReadOnly?: boolean
+  /** マンダラート locked 状態。true なら Cell / 空 slot の枠線を muted gray に変える (視覚的ロック表示)。 */
+  isLocked?: boolean
 }
 
 export default function GridView3x3({
@@ -56,6 +58,7 @@ export default function GridView3x3({
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate, onStartEmptySlotEdit,
   onDrill, onDragStart, onDragEnd, dropProps, onContextMenu, onContextMenuEmptySlot, onToggleDone,
   isReadOnly = false,
+  isLocked = false,
 }: Props) {
   const center = getCenterCell(cells)
   const centerEmpty = !center || isCellEmpty(center)
@@ -83,8 +86,8 @@ export default function GridView3x3({
               className={`
                 rounded-lg shadow-sm bg-white dark:bg-neutral-900
                 ${isCenter
-                  ? 'border-[6px] border-black dark:border-white shadow-md'
-                  : 'border border-neutral-300 dark:border-neutral-700'}
+                  ? `border-[6px] ${isLocked ? 'border-neutral-400 dark:border-neutral-600' : 'border-black dark:border-white'} shadow-md`
+                  : `border ${isLocked ? 'border-neutral-200 dark:border-neutral-800' : 'border-neutral-300 dark:border-neutral-700'}`}
                 ${isDisabled || isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
                 ${isDragOver && !isDisabled ? 'ring-2 ring-neutral-500 dark:ring-neutral-400 ring-offset-1' : ''}
               `}
@@ -135,6 +138,7 @@ export default function GridView3x3({
             onContextMenu={onContextMenu}
             onToggleDone={onToggleDone}
             isReadOnly={isReadOnly}
+            isLocked={isLocked}
           />
         )
       })}

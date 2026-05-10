@@ -129,9 +129,14 @@ struct CellView: View {
         guard let id = cell?.id, let editing = editingCellId else { return false }
         return id == editing
     }
-    /// border の色。編集中は accent color で highlight。
+    /// border の色。
+    /// - 編集中: accent color で highlight
+    /// - locked: ロック中バナー廃止 (2026-05-10) に伴い、枠線を muted gray にしてロック状態を視覚化
+    /// - 通常: `Color.primary.opacity(0.4)`
     private var borderColor: Color {
-        isEditing ? Color.accentColor : Color.primary.opacity(0.4)
+        if isEditing { return Color.accentColor }
+        if isLocked { return Color.primary.opacity(0.15) }
+        return Color.primary.opacity(0.4)
     }
 
     /// セル背景色 (画像がない場合のみ): cell.color → preset / なければ desktop と同じ

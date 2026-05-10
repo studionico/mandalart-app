@@ -25,7 +25,6 @@ struct EditorView: View {
     @State private var currentGridId: String?
     @State private var breadcrumb: [BreadcrumbItem] = []
     @State private var didBootstrap: Bool = false
-    @State private var showLockHint: Bool = false
     @State private var parallelGrids: [Grid] = []
     @State private var parallelIndex: Int = 0
     /// 直近の grid 遷移種別。drill / drill-up / 並列ナビ / 初回表示で stagger 順序を
@@ -106,9 +105,8 @@ struct EditorView: View {
                 GeometryReader { rootGeo in
                     let capturedLeadingInset = rootGeo.safeAreaInsets.leading
                     VStack(spacing: 0) {
-                        if m.locked {
-                            lockBanner
-                        }
+                        // ロックバナーは廃止 (2026-05-10): 画面を広く使うため。
+                        // ロック状態は CellView の枠線色 (`Color.primary.opacity(0.15)`) で視覚化される。
                         if stockPasteTargetItemId != nil {
                             stockPasteBanner
                         }
@@ -175,11 +173,6 @@ struct EditorView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }
-        .alert("ロック中のマンダラート", isPresented: $showLockHint) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("編集するにはダッシュボードに戻り、カードを長押しして「ロックを外す」を選んでください。")
         }
         .confirmationDialog(
             "エクスポート形式",
@@ -262,32 +255,6 @@ struct EditorView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
-    }
-
-    /// 上部全幅 lock banner。tap で詳細 alert を表示。
-    private var lockBanner: some View {
-        Button {
-            showLockHint = true
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "lock.fill")
-                Text("ロック中 — 編集できません")
-                    .lineLimit(1)
-                Spacer()
-                Text("解除はダッシュボードから")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-            }
-            .font(.callout)
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial)
-        }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder

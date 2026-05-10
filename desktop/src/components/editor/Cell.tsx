@@ -52,6 +52,11 @@ type Props = {
    * **drill (シングルクリック) は通す** (閲覧操作なので)。
    */
   isReadOnly?: boolean
+  /**
+   * マンダラートが locked のときのみ true。枠線色を muted gray に切り替えてロック状態を視覚化する。
+   * `isReadOnly` とは独立 (9×9 overview の readonly では枠線は薄くしない)。
+   */
+  isLocked?: boolean
 }
 
 const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
@@ -65,6 +70,7 @@ export default function Cell({
   size = 'normal',
   wrapperStyle,
   isReadOnly = false,
+  isLocked = false,
 }: Props) {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didDrag    = useRef(false)
@@ -356,13 +362,13 @@ export default function Cell({
         ${bg}
         ${isCenter
           ? size === 'small'
-            ? 'rounded-md border-2 border-black dark:border-white -m-px z-10'
-            : 'rounded-lg border-[6px] border-black dark:border-white shadow-md'
+            ? `rounded-md border-2 ${isLocked ? 'border-neutral-400 dark:border-neutral-600' : 'border-black dark:border-white'} -m-px z-10`
+            : `rounded-lg border-[6px] ${isLocked ? 'border-neutral-400 dark:border-neutral-600' : 'border-black dark:border-white'} shadow-md`
           : size === 'small'
             ? ''
             : childCount > 0
-              ? 'rounded-lg border-2 border-black dark:border-neutral-300 shadow-sm'
-              : 'rounded-lg border border-neutral-300 dark:border-neutral-700 shadow-sm'
+              ? `rounded-lg border-2 ${isLocked ? 'border-neutral-400 dark:border-neutral-600' : 'border-black dark:border-neutral-300'} shadow-sm`
+              : `rounded-lg border ${isLocked ? 'border-neutral-200 dark:border-neutral-800' : 'border-neutral-300 dark:border-neutral-700'} shadow-sm`
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
         ${isCut || isDragSource ? 'opacity-40' : ''}
