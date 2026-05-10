@@ -22,7 +22,6 @@ import AuthDialog from '@/components/AuthDialog'
 import TrashDialog from '@/components/dashboard/TrashDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
-import { HoverActionButtons } from '@/components/ui/HoverActionButtons'
 import {
   LockClosedIcon, LockOpenIcon, StarFilledIcon, StarOutlineIcon, CopyIcon, XMarkIcon,
   WarningIcon, SpinnerIcon,
@@ -899,87 +898,123 @@ function MandalartCard({
   }
 
   return (
+    // 外側ラッパ: 「上部ツールバー → カード本体」を縦に積む。grid item として width 固定。
     <div
-      ref={cardRef}
-      // ConvergeOverlay の polling target (direction='home' = エディタ → ダッシュボード収束時の着地点)。
-      // 中心セル (3×3 normal) を ~0.47 縮小した姿として設計: border-[3px] / shadow-md /
-      // dark:bg-neutral-950 はすべて Cell.tsx 中心セルの class と揃えており、太さ・余白・font サイズは
-      // layout.ts の DASHBOARD_CARD_* 定数で proportional に縮小。
-      // 角丸は中心セルの `rounded-lg (8px)` をスケール 0.47 した ~3.76px に対応する `rounded (4px)` を採用。
-      data-converge-card={m.id}
-      data-dashboard-card-index={index}
-      className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer group overflow-hidden select-none"
-      style={{
-        width: DASHBOARD_CARD_SIZE_PX,
-        height: DASHBOARD_CARD_SIZE_PX,
-        // drag 中の slide。方向は呼出側 (DashboardPage) が src vs target の位置関係で決定する。
-        transform:
-          shift === 'right' ? 'translateX(calc(100% + 12px))'
-          : shift === 'left' ? 'translateX(calc(-100% - 12px))'
-          : undefined,
-        transition: 'transform 200ms ease-out',
-        // 自身が card-source として drag 中なら半透明 (見た目で source 識別)
-        opacity: isDragSource ? 0.4 : undefined,
-        ...(isConvergeTarget
-          ? {
-              animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
-              willChange: 'opacity',
-            }
-          : {}),
-      }}
-      draggable
-      onDragStart={(e) => onCardDragStart(m.id, e)}
-      onDragEnd={onCardDragEnd}
-      onClick={handleClick}
-      title={m.title || '無題'}
+      className="flex flex-col items-stretch select-none"
+      style={{ width: DASHBOARD_CARD_SIZE_PX }}
     >
-      {!titleFirstLine && imageUrl ? (
-        // `<img>` の native drag 抑止は index.css の global `img` rule で一括対応。
-        <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
-      ) : (
-        // 共通 <CardLikeText>: ConvergeOverlay polling 互換構造を統一
-        <CardLikeText
-          text={m.title || '無題'}
-          fontPx={DASHBOARD_CARD_FONT_PX}
-          sideInsetPx={DASHBOARD_CARD_INSET_PX}
-        />
-      )}
-      {/* 更新日: hover 時のみ下部にうっすら表示 */}
-      <div className="absolute bottom-1 left-2 right-2 text-[9px] text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-center">
-        {new Date(m.updated_at).toLocaleDateString('ja-JP')}
-      </div>
-      {/* ロック中の常時 badge (hover に依存せず識別できるよう card 左下に固定表示)。
-          pointer-events-none でクリックは下のカード本体に通す (= タップでエディタを開ける)。
-          解除は hover アクションの ロック解除アイコンから。
-          NOTE: `{m.locked && ...}` だと SQLite から locked が number 0 で返ったとき React が
-          "0" を描画する罠 (落とし穴 #16 と同パターン) なので `!!` で boolean 化。 */}
-      {!!m.locked && (
-        <div className="absolute bottom-1 left-1 text-neutral-900 dark:text-neutral-100 pointer-events-none select-none" aria-label="locked">
-          <LockClosedIcon className="w-3.5 h-3.5" />
+      {/* === 上部アクションツールバー (常時表示)。左: 状態系 (ロック/ピン)、右: 操作系 (複製/削除)。
+          状態 ON/OFF はアイコン形状 (closed/open, filled/outline) で識別。
+          カード本体 (draggable) の sibling として配置するため drag 干渉なし。 === */}
+      <div className="flex items-center justify-between mb-1 h-5 text-neutral-900 dark:text-neutral-100">
+        <div className="flex gap-1">
+          <ToolbarIconButton
+            onClick={onToggleLock}
+            title={m.locked ? 'ロックを解除' : 'ロック (編集不可にする)'}
+            ariaPressed={!!m.locked}
+          >
+            {m.locked ? <LockClosedIcon /> : <LockOpenIcon />}
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            onClick={onTogglePin}
+            title={m.pinned ? 'ピン留めを外す' : 'ピン留め'}
+            ariaPressed={!!m.pinned}
+          >
+            {m.pinned ? <StarFilledIcon /> : <StarOutlineIcon />}
+          </ToolbarIconButton>
         </div>
-      )}
-      <HoverActionButtons
-        size="md"
-        actions={[
-          {
-            // 形 (closed shackle vs open shackle) で on/off を識別。色は黒/白単色。
-            icon: m.locked ? <LockClosedIcon /> : <LockOpenIcon />,
-            onClick: onToggleLock,
-            title: m.locked ? 'ロックを解除' : 'ロック (編集不可にする)',
-          },
-          {
-            // 形 (filled vs outline) で on/off を識別。色は黒/白単色。
-            icon: m.pinned ? <StarFilledIcon /> : <StarOutlineIcon />,
-            onClick: onTogglePin,
-            title: m.pinned ? 'ピン留めを外す' : 'ピン留め',
-          },
-          { icon: <CopyIcon />, onClick: onDuplicate, title: '複製' },
-          // 削除アクション: ロック中は誤操作防止のため非表示 (= ロック解除すると復活)。
-          // defensive ガードとして API 層の `permanentDeleteMandalart` 冒頭にも locked check あり。
-          ...(!m.locked ? [{ icon: <XMarkIcon />, onClick: onDelete, title: '削除' }] : []),
-        ]}
-      />
+        <div className="flex gap-1">
+          <ToolbarIconButton onClick={onDuplicate} title="複製">
+            <CopyIcon />
+          </ToolbarIconButton>
+          {/* ロック中は削除アイコン非表示 (誤操作防止)。defensive ガードは API 層 permanentDeleteMandalart にもあり。
+              SQLite から locked=0 (number) が返るので `!!` で boolean 化 (落とし穴 #16 同パターン)。 */}
+          {!m.locked && (
+            <ToolbarIconButton onClick={onDelete} title="削除">
+              <XMarkIcon />
+            </ToolbarIconButton>
+          )}
+        </div>
+      </div>
+      <div
+        ref={cardRef}
+        // ConvergeOverlay の polling target (direction='home' = エディタ → ダッシュボード収束時の着地点)。
+        // 中心セル (3×3 normal) を ~0.47 縮小した姿として設計: border-[3px] / shadow-md /
+        // dark:bg-neutral-950 はすべて Cell.tsx 中心セルの class と揃えており、太さ・余白・font サイズは
+        // layout.ts の DASHBOARD_CARD_* 定数で proportional に縮小。
+        // 角丸は中心セルの `rounded-lg (8px)` をスケール 0.47 した ~3.76px に対応する `rounded (4px)` を採用。
+        data-converge-card={m.id}
+        data-dashboard-card-index={index}
+        className="relative bg-white dark:bg-neutral-950 border-[3px] border-black dark:border-white rounded shadow-md hover:shadow-lg transition-shadow cursor-pointer overflow-hidden select-none"
+        style={{
+          width: DASHBOARD_CARD_SIZE_PX,
+          height: DASHBOARD_CARD_SIZE_PX,
+          // drag 中の slide。方向は呼出側 (DashboardPage) が src vs target の位置関係で決定する。
+          transform:
+            shift === 'right' ? 'translateX(calc(100% + 12px))'
+            : shift === 'left' ? 'translateX(calc(-100% - 12px))'
+            : undefined,
+          transition: 'transform 200ms ease-out',
+          // 自身が card-source として drag 中なら半透明 (見た目で source 識別)
+          opacity: isDragSource ? 0.4 : undefined,
+          ...(isConvergeTarget
+            ? {
+                animation: `orbit-fade-in 1ms ease-out ${CONVERGE_DURATION_MS}ms both`,
+                willChange: 'opacity',
+              }
+            : {}),
+        }}
+        draggable
+        onDragStart={(e) => onCardDragStart(m.id, e)}
+        onDragEnd={onCardDragEnd}
+        onClick={handleClick}
+        title={m.title || '無題'}
+      >
+        {!titleFirstLine && imageUrl ? (
+          // `<img>` の native drag 抑止は index.css の global `img` rule で一括対応。
+          <img src={imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          // 共通 <CardLikeText>: ConvergeOverlay polling 互換構造を統一
+          <CardLikeText
+            text={m.title || '無題'}
+            fontPx={DASHBOARD_CARD_FONT_PX}
+            sideInsetPx={DASHBOARD_CARD_INSET_PX}
+          />
+        )}
+      </div>
     </div>
+  )
+}
+
+/**
+ * カード上部ツールバー専用の icon button。
+ * - 常時表示 (hover 依存なし)。背景透明 + hover で薄いハイライト。
+ * - カード本体 (draggable) の sibling 配置だが念のため click/mousedown stopPropagation。
+ * - ON/OFF 区別は children 側のアイコン形状で行い、ここでは aria-pressed のみ提供。
+ */
+function ToolbarIconButton({
+  children,
+  onClick,
+  title,
+  ariaPressed,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  title: string
+  ariaPressed?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      onMouseDown={(e) => e.stopPropagation()}
+      className="w-5 h-5 text-[10px] rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-900 dark:text-neutral-100 flex items-center justify-center transition-colors"
+      title={title}
+      aria-label={title}
+      aria-pressed={ariaPressed}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -990,18 +1025,23 @@ function MandalartCard({
  */
 function NewMandalartCard({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="新規マンダラートを作成"
-      className="relative bg-transparent border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded shadow-none hover:border-neutral-400 dark:hover:border-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors flex items-center justify-center select-none"
-      style={{
-        width: DASHBOARD_CARD_SIZE_PX,
-        height: DASHBOARD_CARD_SIZE_PX,
-      }}
-    >
-      <span className="text-3xl text-neutral-400 dark:text-neutral-500 font-light leading-none">+</span>
-    </button>
+    // MandalartCard のラッパと同構造 (上部ツールバー高さ + mb-1 ぶんの透明 spacer + カード)。
+    // grid 内で実カードと上端ベースラインを揃えるため。
+    <div className="flex flex-col items-stretch" style={{ width: DASHBOARD_CARD_SIZE_PX }}>
+      <div className="h-5 mb-1" aria-hidden />
+      <button
+        type="button"
+        onClick={onClick}
+        title="新規マンダラートを作成"
+        className="relative bg-transparent border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded shadow-none hover:border-neutral-400 dark:hover:border-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors flex items-center justify-center select-none"
+        style={{
+          width: DASHBOARD_CARD_SIZE_PX,
+          height: DASHBOARD_CARD_SIZE_PX,
+        }}
+      >
+        <span className="text-3xl text-neutral-400 dark:text-neutral-500 font-light leading-none">+</span>
+      </button>
+    </div>
   )
 }
 
