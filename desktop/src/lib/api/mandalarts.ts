@@ -361,7 +361,8 @@ export async function permanentDeleteMandalart(id: string): Promise<void> {
 }
 
 /**
- * タイトルおよびセル本文を対象とした全文検索。
+ * タイトル・セル本文・グリッドメモを対象とした全文検索 (部分一致 OR、LIKE %query%)。
+ * soft-deleted な grid / cell は LEFT JOIN 条件で除外される。
  */
 export async function searchMandalarts(q: string): Promise<Mandalart[]> {
   const trimmed = q.trim()
@@ -379,9 +380,9 @@ export async function searchMandalarts(q: string): Promise<Mandalart[]> {
      LEFT JOIN grids g ON g.mandalart_id = m.id AND g.deleted_at IS NULL
      LEFT JOIN cells c ON c.grid_id = g.id AND c.deleted_at IS NULL
      WHERE m.deleted_at IS NULL
-       AND (m.title LIKE ? ESCAPE '\\' OR c.text LIKE ? ESCAPE '\\')
+       AND (m.title LIKE ? ESCAPE '\\' OR c.text LIKE ? ESCAPE '\\' OR g.memo LIKE ? ESCAPE '\\')
      ORDER BY m.updated_at DESC`,
-    [like, like],
+    [like, like, like],
   )
 }
 

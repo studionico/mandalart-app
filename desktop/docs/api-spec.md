@@ -98,8 +98,8 @@ createMandalartFromStockItem(stockItemId: string): Promise<Mandalart>
 // 自動破棄 (新規作成カードで開いて何も入力せず戻る) のみ permanentDeleteMandalart で hard delete。
 deleteMandalart(id: string): Promise<void>
 
-// 全文検索: タイトルまたは配下のセル本文に一致するものを更新日降順で返す
-// LIKE の % / _ / \ はエスケープされる
+// 全文検索: タイトル・配下のセル本文・グリッドメモのいずれかに部分一致するものを更新日降順で返す
+// LIKE の % / _ / \ はエスケープされる。soft-deleted な grid / cell は LEFT JOIN 条件で除外される
 searchMandalarts(q: string): Promise<Mandalart[]>
 
 // マンダラートを丸ごと複製 (全グリッド / セル / サブツリーを再帰複製)

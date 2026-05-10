@@ -34,7 +34,7 @@ Landscape 2 ペイン構成 (`HStack` ベース):
 ### Dashboard (Phase 4)
 
 - 左 sidebar: フォルダタブ (Landscape の余白を活かす、iPhone 横向きでも展開できる)
-- 右メイン: カードグリッド (`LazyVGrid(columns: .adaptive(minimum: 140))`) + `searchable`
+- 右メイン: カードグリッド (`LazyVGrid(columns: .adaptive(minimum: 140))`) + 検索バー (toolbar 右上の虫眼鏡アイコンタップで `.searchable` modifier をトグル表示。検索対象は `Mandalart.title` + 配下 `Cell.text` + `Grid.memo` の OR 部分一致で desktop の `searchMandalarts` と同等。Cancel タップで Apple が text を自動クリアするため `lastQuery` 別 state に直前値をバックアップして再オープン時に復元する)
 - カードの長押しで context menu (ピン留め / ロック / 複製 / 削除 / フォルダ移動) — desktop の HoverActionButtons 相当
 - **新規作成カード**: グリッド先頭に dashed-border + "+" のカードを置く (検索中は非表示)。tap で空タイトルの mandalart を作成して即 Editor を開く。toolbar 右上の "+" ボタンは廃止 (= desktop の `NewMandalartCard` と同等)
 

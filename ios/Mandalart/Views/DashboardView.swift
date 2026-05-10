@@ -30,8 +30,18 @@ struct DashboardView: View {
     )
     private var rootGrids: [Grid]
 
+    /// 全 grid (子 grid 含む) — 検索時に cell.gridId → mandalartId を解決する目的で取得。
+    /// rootGrids は parentCellId == nil で絞っているため、子 grid 配下の cell を検索範囲に入れるには
+    /// 子 grid も含む別 query が必要。
+    @Query(filter: #Predicate<Grid> { $0.deletedAt == nil })
+    private var allGrids: [Grid]
+
     @State private var selectedFolderId: String?
     @State private var query: String = ""
+    @State private var isSearchPresented: Bool = false
+    /// .searchable(isPresented:) は Cancel タップで text binding を自動クリアするため、
+    /// 直前の query を別 state にバックアップして虫眼鏡再オープン時に復元する。
+    @State private var lastQuery: String = ""
     @State private var showSettings = false
 
     @State private var showAddFolder = false
@@ -85,24 +95,58 @@ struct DashboardView: View {
             }
     }
 
-    /// 検索中は全 folder 横断、空のときは選択中 folder のみ (desktop と同等)。
+    /// 検索バー open かつ query 非空のときのみ全 folder 横断 filter。
+    /// title / cell.text / grid.memo の OR 部分一致 (desktop searchMandalarts と同等)。
+    /// 検索バーを閉じた瞬間に通常の folder filter に戻す。
     private var visibleMandalarts: [Mandalart] {
-        if !query.isEmpty {
+        if isSearchPresented && !query.isEmpty {
             let lower = query.lowercased()
-            return sortedMandalarts(in: nil).filter { $0.title.lowercased().contains(lower) }
+            // gridId → mandalartId 解決マップ (子 grid 含む)
+            let mandalartIdByGrid: [String: String] = Dictionary(
+                uniqueKeysWithValues: allGrids.map { ($0.id, $0.mandalartId) }
+            )
+            // cell.text 部分一致 → 所属 mandalartId 集合
+            var matchedByCellText: Set<String> = []
+            for cell in allCellsForRoot {
+                if cell.text.lowercased().contains(lower),
+                   let mid = mandalartIdByGrid[cell.gridId] {
+                    matchedByCellText.insert(mid)
+                }
+            }
+            // grid.memo 部分一致 → 所属 mandalartId 集合 (memo は optional)
+            var matchedByGridMemo: Set<String> = []
+            for grid in allGrids {
+                if let memo = grid.memo, memo.lowercased().contains(lower) {
+                    matchedByGridMemo.insert(grid.mandalartId)
+                }
+            }
+            return sortedMandalarts(in: nil).filter { m in
+                m.title.lowercased().contains(lower)
+                    || matchedByCellText.contains(m.id)
+                    || matchedByGridMemo.contains(m.id)
+            }
         }
         return sortedMandalarts(in: selectedFolderId)
     }
 
     var body: some View {
         NavigationStack {
-            mainGrid
-                // dashboard 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` に揃える。
-                // NavigationStack の背景透過を防ぐため scrollContentBackground は hidden にせず、
-                // ZStack overlay で root 全面に塗る。
-                .background(NeutralPalette.rootBackground.ignoresSafeArea())
-                .navigationBarTitleDisplayMode(.inline)
-                .searchable(text: $query, placement: .toolbar, prompt: "検索")
+            // .searchable は isPresented = false でも search field 自体を NavigationBar 配下に常時表示する
+            // 仕様 (isPresented は active/Cancel 状態のみを制御)。アイコンタップ前は完全に隠したいため、
+            // modifier 自体を isSearchPresented で条件付き適用する。
+            Group {
+                if isSearchPresented {
+                    mainGrid
+                        .searchable(text: $query, isPresented: $isSearchPresented, placement: .toolbar, prompt: "タイトル・セル本文・メモで検索...")
+                } else {
+                    mainGrid
+                }
+            }
+            // dashboard 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` に揃える。
+            // NavigationStack の背景透過を防ぐため scrollContentBackground は hidden にせず、
+            // ZStack overlay で root 全面に塗る。
+            .background(NeutralPalette.rootBackground.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: {
@@ -115,6 +159,16 @@ struct DashboardView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 8) {
+                        Button {
+                            // Cancel タップで Apple が自動クリアした query を直前値で復元
+                            if query.isEmpty && !lastQuery.isEmpty {
+                                query = lastQuery
+                            }
+                            isSearchPresented = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel("検索")
                         Button { showFileImporter = true } label: {
                             Image(systemName: "square.and.arrow.down")
                         }
@@ -173,6 +227,12 @@ struct DashboardView: View {
         }
         .onAppear { initSelectedFolder() }
         .onChange(of: foldersRaw.count) { _, _ in initSelectedFolder() }
+        // Cancel で query が "" にクリアされる前に直前値をバックアップ
+        .onChange(of: query) { _, newValue in
+            if !newValue.isEmpty {
+                lastQuery = newValue
+            }
+        }
     }
 
     // MARK: - Folder tab bar (toolbar principal slot)
@@ -273,8 +333,8 @@ struct DashboardView: View {
                     }
                     let textByCellId = Dictionary(uniqueKeysWithValues: allCellsForRoot.map { ($0.id, $0.text) })
                     LazyVGrid(columns: columns, spacing: 12) {
-                        // 検索中以外は常に grid 先頭に「新規作成」カードを並べる (desktop の NewMandalartCard 移植)
-                        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        // 検索バー open 中は新規作成カードを抑制し、検索結果の純粋な一覧にする。
+                        if !isSearchPresented {
                             NewMandalartCard(squareSize: cardSquareSize) {
                                 handleCreateNewMandalart()
                             }
@@ -297,6 +357,7 @@ struct DashboardView: View {
                     .padding(12)
                 }
             }
+            .scrollDismissesKeyboard(.immediately)
         }
     }
 
@@ -372,7 +433,7 @@ struct DashboardView: View {
             Image(systemName: "square.grid.3x3")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            if !query.isEmpty {
+            if isSearchPresented && !query.isEmpty {
                 Text("「\(query)」に一致するマンダラートはありません")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

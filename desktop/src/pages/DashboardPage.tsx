@@ -521,7 +521,7 @@ export default function DashboardPage() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="タイトル・セル本文で検索..."
+            placeholder="タイトル・セル本文・メモで検索..."
             className="flex-1 text-sm border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
           />
           {/* 並び順セレクターは検索中のみ表示。通常画面は API ORDER BY (pinned > 手動 sort_order >

@@ -190,7 +190,8 @@ Shift+Tab は逆順
 - **タイトル = ルート中心セルのテキスト**
   - 別途「ファイル名」を付ける運用は廃止
   - `mandalarts.title` カラムはルート中心セルのキャッシュとして自動同期 (`updateCell` で position=4 + root grid に書き込むと同時に更新)
-  - ダッシュボードの表示・検索・ソートは `mandalarts.title` を参照する
+  - ダッシュボードの表示・ソートは `mandalarts.title` を参照する
+  - 検索 (`searchMandalarts`) は title + 配下 `cells.text` + `grids.memo` の OR 部分一致 (`api-spec.md` / `lib/api/mandalarts.ts:searchMandalarts` 参照)
 - **ホームへの遷移フロー**:
   1. 中心セルが空 (text trim 空 AND image_path null、root grid 単一) のままホームへ → マンダラートを **自動 hard delete** (= ゴミ箱には入れず即時物理削除 + cloud cascade DELETE) してダッシュボードへ
   2. 内容が入力済み → そのままダッシュボードへ (タイトル入力ダイアログは無い)
