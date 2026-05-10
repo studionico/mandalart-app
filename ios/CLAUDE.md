@@ -48,7 +48,7 @@
 
 | カテゴリ | 場所 | 代表定数 |
 |---|---|---|
-| グリッド構造 | `GridConstants` | `centerPosition`, `gridSide`, `gridCellCount`, `orbitOrder` |
+| グリッド構造 | `GridConstants` | `centerPosition`, `gridSide`, `gridCellCount`, `orbitOrder`, `tabOrder`, `peripheralPositionsByTab` |
 | レイアウト (pt) | `LayoutConstants` | `outerGridGap`, `cellBaseFontSize`, `dashboardCardSize` |
 | タイミング (ms) | `TimingConstants` | `animStaggerMs`, `animFadeMs`, `convergeDurationMs` |
 | カラープリセット | [`PresetColors`](Mandalart/Utils/PresetColors.swift) | `all` (10 色)、`find(_:)`。desktop の `constants/colors.ts` と完全に同じ key 文字列 |
@@ -105,6 +105,6 @@ Views → ViewModels (@Observable) → Services → SwiftData (local) / supabase
 | [`architecture.md`](docs/architecture.md) | フォルダ構成 / レイヤー / xcodegen + project.yml / 設計分離方針 |
 | [`data-model.md`](docs/data-model.md) | 5 つの @Model 定義 / desktop SQLite + Postgres スキーマとの対応表 (camelCase ↔ snake_case) |
 | [`sync.md`](docs/sync.md) | SyncEngine.pullAll / pushPending / RLS user_id / last-write-wins / realtime (将来) |
-| [`pitfalls.md`](docs/pitfalls.md) | iOS 固有の落とし穴詳細 (5 件) + desktop 共通 4 件への参照 |
+| [`pitfalls.md`](docs/pitfalls.md) | iOS 固有の落とし穴詳細 + desktop 共通落とし穴への参照 |
 | [`requirements.md`](docs/requirements.md) | iOS 固有 UX (Landscape / 2 ペイン / SF Symbols) — 機能要件本体は desktop/docs/requirements.md |
 | [`tasks.md`](docs/tasks.md) | Phase 0-11 進捗チェックリスト |

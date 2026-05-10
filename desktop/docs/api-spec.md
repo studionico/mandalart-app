@@ -90,9 +90,12 @@ updateMandalartFolderId(id: string, folderId: string): Promise<void>
 // (破壊的「stock → 既存カード置換」は実装しないため本 API は新規作成のみ提供)。
 createMandalartFromStockItem(stockItemId: string): Promise<Mandalart>
 
-// マンダラートと配下を削除する。
-// - 未同期行 (synced_at IS NULL): hard delete (orphan 防止)
-// - 同期済み行: soft delete (deleted_at) → push でクラウドに伝播
+// マンダラートと配下をゴミ箱に入れる (= 常に soft delete、未同期も含めて統一)。
+// 過去には syncAwareDelete 経由で「未同期は hard / 同期済は soft」と分岐していたが、
+// ユーザー視点で「削除したのにゴミ箱に入らない」という不整合があり、ゴミ箱から復元できる
+// 一貫体験を優先して soft delete に統一 (落とし穴 #12 の orphan 防止は pushAll 冒頭の
+// zombie cleanup `grids NOT IN mandalarts` / `cells NOT IN grids` でカバー済)。
+// 自動破棄 (新規作成カードで開いて何も入力せず戻る) のみ permanentDeleteMandalart で hard delete。
 deleteMandalart(id: string): Promise<void>
 
 // 全文検索: タイトルまたは配下のセル本文に一致するものを更新日降順で返す

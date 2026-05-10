@@ -20,23 +20,29 @@ ios/
 │   │   ├── Folder.swift
 │   │   └── StockItem.swift
 │   ├── Views/
-│   │   ├── DashboardView.swift   ホーム (LazyVGrid + 新規作成 + サインインボタン)
-│   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state)
+│   │   ├── DashboardView.swift   ホーム (LazyVGrid + 新規作成カード + 検索 + フォルダタブ + ゴミ箱 / インポート toolbar)
+│   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state + 不変条件 enforcement + 空マンダラート自動 hard delete)
+│   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除、desktop の TrashDialog 等価)
+│   │   ├── DashboardTransferSupport.swift Dashboard の Export/Import modifier 切り出し (SourceKit timeout 回避、pitfalls.md #12)
 │   │   ├── SettingsView.swift    アカウント / 同期ボタン
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
 │   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / クリア context menu、編集中以外は overlay で hit テスト)
 │   │       ├── GridView3x3.swift 3×3 (`displayCells: [Cell?]` 9 要素受け取り、id で grid 切替時 remount)
 │   │       ├── Breadcrumb.swift  右ペイン上部の階層 navigation (タップで drill-up)
-│   │       └── MemoTab.swift     右ペイン下部のメモタブ (編集 / プレビュー切替、grid.memo を 1 秒 debounce で auto-save)
+│   │       ├── MemoTab.swift     右ペイン下部のメモタブ (編集 / プレビュー切替、grid.memo を 1 秒 debounce で auto-save)
+│   │       ├── StockTab.swift    右ペイン下部のストックタブ (3 列タイル grid + ペースト / 削除 / 全削除)
+│   │       └── EditingSheet.swift `.fullScreenCover` 共通 sheet (セル / メモ編集を統一、Landscape kbd 覆い対策)
 │   ├── ViewModels/
 │   │   └── AuthStore.swift       @Observable / @MainActor / supabase-swift Auth ラッパ
 │   ├── Services/
 │   │   ├── SupabaseService.swift 共有 SupabaseClient
-│   │   ├── MandalartFactory.swift create / permanentDelete (cascade) / cloud cascade + tombstone
+│   │   ├── MandalartFactory.swift create / duplicate / softDelete / restore / permanentDelete (cascade) / deleteFromCloud (cloud cascade + tombstone)
 │   │   ├── FolderRepository.swift ensureInboxFolder (重複 system folder 統合) / adoptOrphansToInbox
 │   │   ├── ImageStorage.swift     セル画像のローカル保存 (Application Support/images/、JPEG 圧縮、cross-device 非同期)
-│   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty)
+│   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree)
+│   │   ├── StockService.swift    Stock CRUD (addToStock / moveCellToStock = cut / pasteFromStock、CellSnapshot/GridSnapshot は desktop と互換)
+│   │   ├── TransferService.swift Export/Import (JSON / Markdown / IndentText)。round-trip で位置保存
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO
