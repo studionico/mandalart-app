@@ -20,6 +20,9 @@ enum GridConstants {
 enum LayoutConstants {
     static let outerGridGap: CGFloat = 8
     static let cellBaseFontSize: CGFloat = 14
+    /// 9×9 view 内 inner cell のベース font (= 3×3 base ÷ gridSide)。
+    /// desktop の `CELL_BASE_FONT_PX / GRID_SIDE` ミラー。
+    static let cellNineByNineFontSize: CGFloat = cellBaseFontSize / CGFloat(GridConstants.gridSide)
     static let dashboardCardSize: CGFloat = 160
     /// セル / カードの cornerRadius・border は **desktop の規則を canonical** とし、iOS pt にスケールして揃える。
     /// desktop の 28px font に対して中心 6px border (= 0.21 ratio) を、iOS の 14pt 中心 font で同 ratio に維持。
@@ -45,4 +48,20 @@ enum TimingConstants {
     static let animStaggerMs: Int = 50
     static let animFadeMs: Int = 200
     static let convergeDurationMs: Int = 600
+}
+
+/// 文字サイズ調整 (desktop editorStore.ts ミラー)。
+/// fontScale = 1.1^fontLevel。-10 で約 39%、0 で 100%、+20 で約 673%。
+/// UserDefaults キーは desktop の localStorage キーと同名で symmetry を保つ
+/// (storage backend は別だがコード上の慣習として揃える)。
+enum FontConstants {
+    static let levelMin: Int = -10
+    static let levelMax: Int = 20
+    static let levelDefault: Int = 0
+    static let stepFactor: Double = 1.1
+    static let levelStorageKey: String = "mandalart.fontLevel"
+
+    static func scale(for level: Int) -> CGFloat {
+        CGFloat(pow(stepFactor, Double(level)))
+    }
 }

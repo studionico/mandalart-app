@@ -63,6 +63,11 @@ struct EditorView: View {
     /// (`EditorLayout.tsx:1551-1557 / 1627-1632`) と同等の防御。
     @State private var validationAlert: String?
 
+    /// 文字サイズ調整 (UserDefaults 永続、端末単位)。
+    /// CellView 側でも同じ key を `@AppStorage` で購読しており、こちらの変更が即時反映される。
+    /// desktop editorStore.fontLevel (localStorage) ミラーで cross-device 同期はしない。
+    @AppStorage(FontConstants.levelStorageKey) private var fontLevel: Int = FontConstants.levelDefault
+
     /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
     /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
     private var nineByNineSupported: Bool {
@@ -137,6 +142,13 @@ struct EditorView: View {
                             .padding(.leading, 32)
                             .padding(.top, 20)
 
+
+                            // 右上 floating: 文字サイズ調整 capsule。9×9 toggle が visible なら
+                            // 左隣に並置 (trailing 84pt)、hidden (compact) なら trailing 16pt 単独。
+                            fontSizeControl
+                                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                .padding(.trailing, nineByNineSupported ? 84 : 16)
+                                .padding(.top, 20)
 
                             // 右上 floating 9×9 / 3×3 toggle ボタン。iPad regular のみ表示。
                             // iPhone / iPad compact (Split View 1/3 等) では grid セルが小さすぎる
@@ -456,6 +468,49 @@ struct EditorView: View {
             }
         }
         return false
+    }
+
+    /// 右上 floating の文字サイズ調整 capsule (A− / 現在% / A＋)。
+    /// 既存 9×9 toggle と同じ ultraThinMaterial Capsule トーンで横並び配置。
+    /// 中央 % 部 tap で 100% にリセット (desktop EditorLayout の挙動と一致)。
+    @ViewBuilder
+    private var fontSizeControl: some View {
+        let scale = FontConstants.scale(for: fontLevel)
+        let percent = Int((scale * 100).rounded())
+        HStack(spacing: 0) {
+            Button {
+                if fontLevel > FontConstants.levelMin { fontLevel -= 1 }
+            } label: {
+                Text("A−")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .frame(width: 36, height: 36)
+            }
+            .disabled(fontLevel <= FontConstants.levelMin)
+            .opacity(fontLevel <= FontConstants.levelMin ? 0.3 : 1)
+            .accessibilityLabel("文字を小さく")
+
+            Button { fontLevel = FontConstants.levelDefault } label: {
+                Text("\(percent)%")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .frame(width: 52, height: 36)
+            }
+            .accessibilityLabel("文字サイズをリセット")
+
+            Button {
+                if fontLevel < FontConstants.levelMax { fontLevel += 1 }
+            } label: {
+                Text("A＋")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .frame(width: 36, height: 36)
+            }
+            .disabled(fontLevel >= FontConstants.levelMax)
+            .opacity(fontLevel >= FontConstants.levelMax ? 0.3 : 1)
+            .accessibilityLabel("文字を大きく")
+        }
+        .foregroundStyle(.primary)
+        .background(.ultraThinMaterial, in: Capsule())
+        .buttonStyle(.plain)
     }
 
     /// 並列ナビ用の chevron ボタン (visible=false でも layout を予約して grid サイズを安定させる)。

@@ -65,6 +65,7 @@ struct CellView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(FontConstants.levelStorageKey) private var fontLevel: Int = FontConstants.levelDefault
     @State private var photoItem: PhotosPickerItem?
     @State private var loadedImage: UIImage?
     /// drill アニメ用 opacity 補間。`onAppear` で stagger delay 経過後に true に切替。
@@ -148,6 +149,13 @@ struct CellView: View {
         return NeutralPalette.surfaceBackground
     }
 
+    /// 中心/周辺で size/weight は分けず desktop と同一方針。中心強調は borderLineWidth (1.5pt) のみ。
+    /// readOnly (= 9×9 inner) は base を 1/3 に縮小 (desktop typography.md と同じ)。
+    private var effectiveFontSize: CGFloat {
+        let base = readOnly ? LayoutConstants.cellNineByNineFontSize : LayoutConstants.cellBaseFontSize
+        return base * FontConstants.scale(for: fontLevel)
+    }
+
     /// 中心 / 周辺 / 子あり / readOnly に応じた border 太さ。
     /// readOnly (= 9×9 view 内の inner) は中心 1pt / 周辺 1pt で hairline 回避。
     private var borderLineWidth: CGFloat {
@@ -186,10 +194,11 @@ struct CellView: View {
                 RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
                     .strokeBorder(borderColor, lineWidth: borderLineWidth * (isEditing ? 1.5 : 1.0))
 
-                // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)
+                // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)。
+                // 中心/周辺で size/weight は分けない (desktop typography.md 67-77 ミラー、中心強調は border のみ)。
                 Text(cell?.text ?? "")
                     .multilineTextAlignment(.leading)
-                    .font(.system(size: isCenter ? 14 : 12, weight: isCenter ? .semibold : .regular))
+                    .font(.system(size: effectiveFontSize, weight: .regular))
                     .foregroundStyle(loadedImage != nil ? Color.white : Color.primary)
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
