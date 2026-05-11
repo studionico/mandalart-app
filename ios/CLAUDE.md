@@ -49,8 +49,10 @@
 | カテゴリ | 場所 | 代表定数 |
 |---|---|---|
 | グリッド構造 | `GridConstants` | `centerPosition`, `gridSide`, `gridCellCount`, `orbitOrder`, `tabOrder`, `peripheralPositionsByTab` |
-| レイアウト (pt) | `LayoutConstants` | `outerGridGap`, `cellBaseFontSize`, `dashboardCardSize` |
+| レイアウト (pt) | `LayoutConstants` | `outerGridGap`, `cellBaseFontSize`, `cellNineByNineFontSize`, `dashboardCardSize` |
 | タイミング (ms) | `TimingConstants` | `animStaggerMs`, `animFadeMs`, `convergeDurationMs` |
+| フォントスケール | `FontConstants` | `levelMin`, `levelMax`, `levelDefault`, `stepFactor`, `scale(for:)`、legacy `levelStorageKey` |
+| マンダラート単位設定 | `MandalartFontPreference` | `load(for:)`, `save(_:for:)` — UserDefaults キー `mandalart.fontLevel.<mandalartId>` (per-device、cross-device 同期なし) |
 | カラープリセット | [`PresetColors`](Mandalart/Utils/PresetColors.swift) | `all` (10 色)、`find(_:)`。desktop の `constants/colors.ts` と完全に同じ key 文字列 |
 
 ### モデル / 同期

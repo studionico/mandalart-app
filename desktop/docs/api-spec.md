@@ -568,6 +568,8 @@ type BreadcrumbItem = {
 }
 
 // アクション
+// マンダラート切替時に該当 mandalart の per-mandalart fontLevel を localStorage から再 load し
+// fontLevel/fontScale も同時に更新する (per-mandalart × per-device スコープ)。
 setMandalartId(id: string): void
 setCurrentMandalart(m: Mandalart | null): void
 setCurrentGrid(gridId: string | null): void
@@ -581,13 +583,20 @@ setBreadcrumb(items: BreadcrumbItem[]): void
 // gridId に一致するエントリの一部フィールドを更新 (label / imagePath / gridId 自身など)
 updateBreadcrumbItem(gridId: string, updates: Partial<BreadcrumbItem>): void
 
+// state.mandalartId に紐づく per-mandalart key (`mandalart.fontLevel.<id>`) に persist。
 bumpFontLevel(delta: number): void   // +1 / -1 を押すたびに呼ばれる
-resetFontLevel(): void                // 中央の「100%」ボタン
+resetFontLevel(): void                // 中央の「100%」ボタン (= per-mandalart key に 0 を書き込み)
 ```
 
 **注**: 旧 `showCheckbox` / `setShowCheckbox` は migration 007 でマンダラート単位の DB カラム
 (`mandalarts.show_checkbox`) に移行したため editorStore からは撤去された。EditorLayout 側で
 local state + DB load/persist で扱う ([`updateMandalartShowCheckbox`](#libapimandalartsts) 参照)。
+
+**`fontLevel` / `fontScale` の永続化スコープ**: schema 変更ではなく純粋 frontend 改修で
+**per-mandalart × per-device** に変更されている。キー `mandalart.fontLevel.<mandalartId>` (localStorage)、
+未設定マンダラートは legacy global key `mandalart.fontLevel` ([`STORAGE_KEYS.fontLevel`](../src/constants/storage.ts))
+を fallback として全マンダラートのデフォルトに引き継ぐ。詳細は [`typography.md`](./typography.md)
+「文字サイズ」節。iOS も同じスコープ・同じキー prefix で対称実装 (storage backend は UserDefaults)。
 
 ### undoStore
 

@@ -65,7 +65,10 @@ struct CellView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(FontConstants.levelStorageKey) private var fontLevel: Int = FontConstants.levelDefault
+    /// EditorView がマンダラート単位の文字 scale (`FontConstants.scale(for: fontLevel)`) を
+    /// `.environment(\.cellFontScale, ...)` で inject。default 1.0 (= 100%) は root 等の
+    /// 値未注入時の安全値で実エディタ表示中は常に EditorView から上書きされる。
+    @Environment(\.cellFontScale) private var cellFontScale: CGFloat
     @State private var photoItem: PhotosPickerItem?
     @State private var loadedImage: UIImage?
     /// drill アニメ用 opacity 補間。`onAppear` で stagger delay 経過後に true に切替。
@@ -151,9 +154,10 @@ struct CellView: View {
 
     /// 中心/周辺で size/weight は分けず desktop と同一方針。中心強調は borderLineWidth (1.5pt) のみ。
     /// readOnly (= 9×9 inner) は base を 1/3 に縮小 (desktop typography.md と同じ)。
+    /// scale は EditorView が `.environment(\.cellFontScale, ...)` で inject する per-mandalart 値。
     private var effectiveFontSize: CGFloat {
         let base = readOnly ? LayoutConstants.cellNineByNineFontSize : LayoutConstants.cellBaseFontSize
-        return base * FontConstants.scale(for: fontLevel)
+        return base * cellFontScale
     }
 
     /// 中心 / 周辺 / 子あり / readOnly に応じた border 太さ。
@@ -536,5 +540,18 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+/// EditorView がマンダラート単位の文字 scale を CellView へ伝搬するための EnvironmentKey。
+/// default 1.0 (= 100%)、root 等で値が inject されていない場合の安全値。
+private struct CellFontScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1.0
+}
+
+extension EnvironmentValues {
+    var cellFontScale: CGFloat {
+        get { self[CellFontScaleKey.self] }
+        set { self[CellFontScaleKey.self] = newValue }
     }
 }

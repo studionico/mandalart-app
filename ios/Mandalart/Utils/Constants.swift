@@ -52,16 +52,40 @@ enum TimingConstants {
 
 /// 文字サイズ調整 (desktop editorStore.ts ミラー)。
 /// fontScale = 1.1^fontLevel。-10 で約 39%、0 で 100%、+20 で約 673%。
-/// UserDefaults キーは desktop の localStorage キーと同名で symmetry を保つ
-/// (storage backend は別だがコード上の慣習として揃える)。
+/// 永続化スコープは per-mandalart × per-device (`MandalartFontPreference` 経由)。
 enum FontConstants {
     static let levelMin: Int = -10
     static let levelMax: Int = 20
     static let levelDefault: Int = 0
     static let stepFactor: Double = 1.1
+    /// 旧グローバル文字サイズキー。per-mandalart 移行後は **新規書き込み禁止**、
+    /// `MandalartFontPreference.load(for:)` の fallback (= 既存ユーザーが調整した値を
+    /// 全マンダラートのデフォルトに引き継ぐ) としてのみ参照する。
     static let levelStorageKey: String = "mandalart.fontLevel"
 
     static func scale(for level: Int) -> CGFloat {
         CGFloat(pow(stepFactor, Double(level)))
+    }
+}
+
+/// マンダラート単位の文字サイズ設定 (端末単位 UserDefaults)。
+/// キー形式: `mandalart.fontLevel.<mandalartId>`。
+/// per-mandalart キー未設定時は旧 global key を fallback (= 全マンダラートのデフォルト引き継ぎ)。
+/// cross-device 同期はしない。desktop の `editorStore.ts` も同じ key prefix で per-mandalart 化されており設計対称。
+enum MandalartFontPreference {
+    static func key(for mandalartId: String) -> String {
+        "mandalart.fontLevel.\(mandalartId)"
+    }
+
+    static func load(for mandalartId: String) -> Int {
+        let defaults = UserDefaults.standard
+        let perMandalart = defaults.object(forKey: key(for: mandalartId)) as? Int
+        let legacy = defaults.object(forKey: FontConstants.levelStorageKey) as? Int
+        let raw = perMandalart ?? legacy ?? FontConstants.levelDefault
+        return min(FontConstants.levelMax, max(FontConstants.levelMin, raw))
+    }
+
+    static func save(_ level: Int, for mandalartId: String) {
+        UserDefaults.standard.set(level, forKey: key(for: mandalartId))
     }
 }

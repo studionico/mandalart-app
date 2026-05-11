@@ -234,7 +234,7 @@ Shift+Tab は逆順
 
 - **トグル UI**: ダッシュボードカードの hover アクション 🔒 / 🔓 アイコン (HoverActionButtons の先頭)
 - **ロック中の常時 badge**: card 左下に 🔒 を `pointer-events-none` で表示 (hover に依存せず識別できる)
-- **エディタは開いたら read-only モード**: header 直下にロックバナー (`🔒 このマンダラートはロックされています — 編集するにはダッシュボードでロックを解除してください`) を表示。エディタ内ではロック解除できない (誤操作防止のため意図的)
+- **エディタは開いたら read-only モード**: 全てのセル mutation (テキスト編集 / D&D drop / context menu の編集系) は no-op。エディタ内ではロック解除できない (誤操作防止のため意図的)。**ロック状態の視覚化はセル枠線色 (`border-neutral-300 dark:border-neutral-700` 程度の薄色) で表現** — 旧 header 直下のロックバナー (`🔒 このマンダラートはロックされています...`) は画面領域確保のため 2026-05-10 (commit a124d8e) に廃止
 - **ロック中に block される操作**:
   - cell の編集 (拡大エディタの色 / 画像 / commit、inline edit、空 slot click 起動、ダブルクリック編集起動)
   - drill 時の **新規 sub-grid 作成** (既存 sub-grid への drill-down は通す)

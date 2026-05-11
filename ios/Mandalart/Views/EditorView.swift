@@ -63,10 +63,11 @@ struct EditorView: View {
     /// (`EditorLayout.tsx:1551-1557 / 1627-1632`) と同等の防御。
     @State private var validationAlert: String?
 
-    /// 文字サイズ調整 (UserDefaults 永続、端末単位)。
-    /// CellView 側でも同じ key を `@AppStorage` で購読しており、こちらの変更が即時反映される。
-    /// desktop editorStore.fontLevel (localStorage) ミラーで cross-device 同期はしない。
-    @AppStorage(FontConstants.levelStorageKey) private var fontLevel: Int = FontConstants.levelDefault
+    /// マンダラート単位の文字サイズ調整 (UserDefaults 永続、per-device)。
+    /// `init` で `MandalartFontPreference.load(for: mandalartId)` から取得し、
+    /// 値変更時は `.onChange` で per-mandalart key に persist。CellView へは
+    /// `.environment(\.cellFontScale, ...)` で scale を伝搬 (= GridView3x3/9x9 の API は無変更)。
+    @State private var fontLevel: Int
 
     /// 9×9 view が実用可能かどうか (horizontalSizeClass == .regular の時のみ)。
     /// iPhone / iPad compact ではトグルボタン非表示 + viewMode 強制 .grid3x3。
@@ -86,6 +87,7 @@ struct EditorView: View {
         _allCells = Query(
             filter: #Predicate<Cell> { $0.deletedAt == nil }
         )
+        _fontLevel = State(initialValue: MandalartFontPreference.load(for: mandalartId))
     }
 
     private var mandalart: Mandalart? { mandalarts.first }
@@ -262,6 +264,11 @@ struct EditorView: View {
         // editor 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` トーンに揃える。
         // safe area 外まで塗りつぶして status bar / home indicator 周辺の透過を防止。
         .background(NeutralPalette.rootBackground.ignoresSafeArea())
+        // per-mandalart 文字サイズを CellView (3×3 / 9×9 inner 両方) へ Environment 経由で配信
+        .environment(\.cellFontScale, FontConstants.scale(for: fontLevel))
+        .onChange(of: fontLevel) { _, newValue in
+            MandalartFontPreference.save(newValue, for: mandalartId)
+        }
     }
 
     /// 上部全幅 stock paste banner。ペースト先選択モード中に表示し、tap (or キャンセル) でモード解除。

@@ -19,30 +19,50 @@ export type BreadcrumbItem = {
 //   level    0 → 100%
 //   level +20 → 約 673%
 // 線形ステップだと level = -10 で fontScale = 0 になってしまうため乗算採用。
-const FONT_LEVEL_KEY = STORAGE_KEYS.fontLevel
+//
+// 永続化スコープは per-mandalart × per-device。キー: `mandalart.fontLevel.<mandalartId>`。
+// per-mandalart キー未設定時は legacy global key (`STORAGE_KEYS.fontLevel`) を fallback として
+// 全マンダラートのデフォルトに引き継ぐ (= 旧バージョン user の調整値が再オープンで保たれる)。
+// iOS 側 (`MandalartFontPreference`) も同じキー prefix で per-mandalart 化されており設計対称。
+const FONT_LEVEL_LEGACY_KEY = STORAGE_KEYS.fontLevel
 const FONT_LEVEL_MIN = -10
 const FONT_LEVEL_MAX = 20
 const FONT_LEVEL_DEFAULT = 0
 const FONT_STEP_FACTOR = 1.1
 
+function fontLevelKey(mandalartId: string): string {
+  return `${FONT_LEVEL_LEGACY_KEY}.${mandalartId}`
+}
+
 function levelToScale(level: number): number {
   return Math.pow(FONT_STEP_FACTOR, level)
 }
 
-function loadFontLevel(): number {
+function clampLevel(n: number): number {
+  return Math.min(FONT_LEVEL_MAX, Math.max(FONT_LEVEL_MIN, n))
+}
+
+/**
+ * mandalartId が null のときは legacy global key を直接読む (= ダッシュボード等の
+ * 「マンダラート未選択」状態の初期値)。エディタに入って setMandalartId が呼ばれた
+ * タイミングで per-mandalart key を再 load する。
+ */
+function loadFontLevel(mandalartId: string | null): number {
   try {
-    const v = localStorage.getItem(FONT_LEVEL_KEY)
-    if (!v) return FONT_LEVEL_DEFAULT
-    const n = parseInt(v, 10)
+    const raw =
+      (mandalartId ? localStorage.getItem(fontLevelKey(mandalartId)) : null)
+      ?? localStorage.getItem(FONT_LEVEL_LEGACY_KEY)
+    if (!raw) return FONT_LEVEL_DEFAULT
+    const n = parseInt(raw, 10)
     if (Number.isNaN(n)) return FONT_LEVEL_DEFAULT
-    return Math.min(FONT_LEVEL_MAX, Math.max(FONT_LEVEL_MIN, n))
+    return clampLevel(n)
   } catch {
     return FONT_LEVEL_DEFAULT
   }
 }
 
-function persistFontLevel(level: number) {
-  try { localStorage.setItem(FONT_LEVEL_KEY, String(level)) } catch { /* noop */ }
+function persistFontLevel(level: number, mandalartId: string) {
+  try { localStorage.setItem(fontLevelKey(mandalartId), String(level)) } catch { /* noop */ }
 }
 
 // セル左上 done チェックボックス UI 表示 ON/OFF はマンダラート単位の DB カラム
@@ -90,7 +110,7 @@ type EditorState = {
 }
 
 export const useEditorStore = create<EditorState>((set) => {
-  const initialLevel = loadFontLevel()
+  const initialLevel = loadFontLevel(null)
   return {
     mandalartId: null,
     currentMandalart: null,
@@ -100,7 +120,12 @@ export const useEditorStore = create<EditorState>((set) => {
     fontLevel: initialLevel,
     fontScale: levelToScale(initialLevel),
 
-    setMandalartId: (id) => set({ mandalartId: id }),
+    setMandalartId: (id) => {
+      // mandalart 切替時に per-mandalart key を再 load (= 別マンダラートの拡縮が混入しない)。
+      // 未設定マンダラートは legacy global key の値を fallback で引き継ぐ。
+      const lvl = loadFontLevel(id)
+      set({ mandalartId: id, fontLevel: lvl, fontScale: levelToScale(lvl) })
+    },
     setCurrentMandalart: (m) => set({ currentMandalart: m }),
     setCurrentGrid: (gridId) => set({ currentGridId: gridId }),
     setViewMode: (mode) => set({ viewMode: mode }),
@@ -135,14 +160,17 @@ export const useEditorStore = create<EditorState>((set) => {
 
     bumpFontLevel: (delta) =>
       set((s) => {
-        const next = Math.min(FONT_LEVEL_MAX, Math.max(FONT_LEVEL_MIN, s.fontLevel + delta))
+        const next = clampLevel(s.fontLevel + delta)
         if (next === s.fontLevel) return s
-        persistFontLevel(next)
+        // mandalartId 未設定時 (= ダッシュボード等で UI 自体出ないが防御) は
+        // state だけ更新して persist しない。エディタ入った時に正しい per-mandalart key を読む。
+        if (s.mandalartId) persistFontLevel(next, s.mandalartId)
         return { fontLevel: next, fontScale: levelToScale(next) }
       }),
-    resetFontLevel: () => {
-      persistFontLevel(FONT_LEVEL_DEFAULT)
-      set({ fontLevel: FONT_LEVEL_DEFAULT, fontScale: levelToScale(FONT_LEVEL_DEFAULT) })
-    },
+    resetFontLevel: () =>
+      set((s) => {
+        if (s.mandalartId) persistFontLevel(FONT_LEVEL_DEFAULT, s.mandalartId)
+        return { fontLevel: FONT_LEVEL_DEFAULT, fontScale: levelToScale(FONT_LEVEL_DEFAULT) }
+      }),
   }
 })
