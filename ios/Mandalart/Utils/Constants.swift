@@ -35,6 +35,10 @@ enum LayoutConstants {
     /// 9×9 view 内の inner cell border (= 縮小表示で hairline は薄すぎるため 1pt 据え置き)。
     static let cellNineByNineInnerBorder: CGFloat = 1
     static let cardCornerRadius: CGFloat = 4
+    /// Dashboard 右 aside (StockTab) の固定幅。
+    /// iPad regular size class では default で開き、iPhone Landscape では default 折り畳み。
+    /// LazyVGrid `.adaptive` minimum がこの幅引いた viewport で再計算される。
+    static let dashboardStockAsideWidth: CGFloat = 280
 }
 
 enum TimingConstants {

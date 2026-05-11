@@ -1,6 +1,14 @@
 import SwiftUI
 import SwiftData
 
+/// ストックタブの paste アクション解釈モード。
+/// - `.targetCellSelect`: editor 側で使用。paste icon タップ → 親が「ペースト先 cell 選択モード」に入り、cell tap で確定
+/// - `.createNewMandalart`: dashboard 側で使用。paste icon タップ → 親が即時に新規マンダラートを作成
+enum StockPasteMode {
+    case targetCellSelect
+    case createNewMandalart
+}
+
 /// ストックタブ: pasteboard 的に保存されたセル snapshot 一覧を表示する。
 ///
 /// desktop の [`StockTab.tsx`](../../../desktop/src/components/editor/StockTab.tsx) と等価:
@@ -10,18 +18,23 @@ import SwiftData
 /// - 空状態は "ストックは空です"
 ///
 /// **drag-drop は iPhone Landscape の hit-test 不安定さを避けるため未実装**。
-/// paste は親 (EditorView) に `onPasteRequest` callback を渡し、上位で「選択モード + cell tap」で確定する。
+/// paste は親 (EditorView / DashboardView) に `onPasteRequest` callback を渡し、`mode` に応じて
+/// 「選択モード + cell tap」または「即時新規作成」を行う。
 struct StockTab: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query(sort: [SortDescriptor(\StockItem.createdAt, order: .reverse)])
     private var items: [StockItem]
 
-    /// ペーストボタンが押されたときに呼ばれる callback (= EditorView がペースト先選択モードに入る)。
+    /// paste アクションの動作モード (editor: cell tap 待ち / dashboard: 即時新規作成)。
+    let mode: StockPasteMode
+
+    /// ペーストボタンが押されたときに呼ばれる callback (= 親が `mode` に応じて処理する)。
     let onPasteRequest: (StockItem) -> Void
 
     /// 現在のペースト対象アイテム id (= EditorView が保持する選択モード state)。
     /// nil のときはハイライトなし、一致するアイテムだけ強調表示。
+    /// `.createNewMandalart` mode では選択ハイライト概念は無いため通常 nil を渡す。
     let pasteRequestedItemId: String?
 
     @State private var showDeleteAllAlert = false
@@ -133,7 +146,7 @@ struct StockTab: View {
                     Button {
                         onPasteRequest(item)
                     } label: {
-                        Image(systemName: "arrow.down.to.line")
+                        Image(systemName: pasteIconName)
                             .font(.system(size: 10, weight: .semibold))
                             .frame(width: 16, height: 16)
                             .background(Color.primary.opacity(0.08), in: Circle())
@@ -155,6 +168,18 @@ struct StockTab: View {
             .padding(4)
         }
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    // MARK: - Paste icon
+
+    /// mode に応じた SF Symbol 名。
+    /// - `.targetCellSelect`: 「貼り付け先指定」を示す矢印
+    /// - `.createNewMandalart`: 「コピーから新規作成」を示す重ね plus
+    private var pasteIconName: String {
+        switch mode {
+        case .targetCellSelect: return "arrow.down.to.line"
+        case .createNewMandalart: return "plus.square.on.square"
+        }
     }
 
     // MARK: - Preview decoding

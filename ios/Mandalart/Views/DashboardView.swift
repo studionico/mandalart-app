@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthStore.self) private var auth
+    /// iPad regular size class では右 aside (StockTab) を default で開き、
+    /// iPhone Landscape (compact) ではデフォルト折り畳みにするための分岐用。
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Query(filter: #Predicate<Mandalart> { $0.deletedAt == nil })
     private var mandalartsRaw: [Mandalart]
@@ -51,6 +54,11 @@ struct DashboardView: View {
     @State private var renameInput: String = ""
 
     @State private var showTrash = false
+
+    /// 右 aside (StockTab) の表示状態。
+    /// `.onAppear` で `horizontalSizeClass == .regular` (= iPad) なら true、それ以外は false。
+    /// ツールバーの tray icon でユーザーがいつでもトグル可能。
+    @State private var showStock = false
 
     // Export 状態
     @State private var exportTarget: Mandalart?
@@ -134,14 +142,24 @@ struct DashboardView: View {
             // .searchable は isPresented = false でも search field 自体を NavigationBar 配下に常時表示する
             // 仕様 (isPresented は active/Cancel 状態のみを制御)。アイコンタップ前は完全に隠したいため、
             // modifier 自体を isSearchPresented で条件付き適用する。
-            Group {
-                if isSearchPresented {
-                    mainGrid
-                        .searchable(text: $query, isPresented: $isSearchPresented, placement: .toolbar, prompt: "タイトル・セル本文・メモで検索...")
-                } else {
-                    mainGrid
+            // 検索バーは mainGrid 側のみに付け、右 aside (stockAside) はそのまま残す
+            // (検索中も stock からの新規作成動線を維持するため)。
+            HStack(spacing: 0) {
+                Group {
+                    if isSearchPresented {
+                        mainGrid
+                            .searchable(text: $query, isPresented: $isSearchPresented, placement: .toolbar, prompt: "タイトル・セル本文・メモで検索...")
+                    } else {
+                        mainGrid
+                    }
+                }
+                if showStock {
+                    Divider()
+                    stockAside
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: showStock)
             // dashboard 全体背景を desktop の `bg-neutral-50 dark:bg-neutral-950` に揃える。
             // NavigationStack の背景透過を防ぐため scrollContentBackground は hidden にせず、
             // ZStack overlay で root 全面に塗る。
@@ -173,6 +191,10 @@ struct DashboardView: View {
                             Image(systemName: "square.and.arrow.down")
                         }
                         .accessibilityLabel("インポート")
+                        Button { showStock.toggle() } label: {
+                            Image(systemName: showStock ? "tray.full.fill" : "tray")
+                        }
+                        .accessibilityLabel(showStock ? "ストックを閉じる" : "ストックを開く")
                         Button { showTrash = true } label: {
                             Image(systemName: "trash")
                         }
@@ -225,7 +247,10 @@ struct DashboardView: View {
                 .presentationDetents([.height(200)])
             }
         }
-        .onAppear { initSelectedFolder() }
+        .onAppear {
+            initSelectedFolder()
+            initStockAsideVisibility()
+        }
         .onChange(of: foldersRaw.count) { _, _ in initSelectedFolder() }
         // Cancel で query が "" にクリアされる前に直前値をバックアップ
         .onChange(of: query) { _, newValue in
@@ -437,17 +462,18 @@ struct DashboardView: View {
                 Text("「\(query)」に一致するマンダラートはありません")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-            } else if let folder = sortedFolders.first(where: { $0.id == selectedFolderId }) {
-                Text("\(folder.name) は空です")
+            } else {
+                // 初回起動 / iPad simulator など folder pull 前で selectedFolderId が nil の状況でも
+                // 必ず「新規作成」導線を出す。folderId が nil でも MandalartFactory.create は
+                // ensureInboxFolder で Inbox を生成して fallback するため安全。
+                let folderName = sortedFolders.first(where: { $0.id == selectedFolderId })?.name
+                Text(folderName.map { "\($0) は空です" } ?? "マンダラートがありません")
                     .foregroundStyle(.secondary)
                 Button("新規作成") {
                     handleCreateNewMandalart()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.primary)
-            } else {
-                Text("マンダラートがありません")
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(.top, 60)
@@ -455,7 +481,44 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Stock aside
+
+    /// ダッシュボード右側に表示するストックパネル。
+    /// editor 側の StockTab と同じコンポーネントを使い、`mode: .createNewMandalart` で
+    /// paste icon タップ時に「新規マンダラート作成 + Editor 遷移」に分岐させる。
+    private var stockAside: some View {
+        StockTab(
+            mode: .createNewMandalart,
+            onPasteRequest: { item in handleCreateFromStock(item) },
+            pasteRequestedItemId: nil
+        )
+        .padding(12)
+        .frame(width: LayoutConstants.dashboardStockAsideWidth)
+        .background(NeutralPalette.cardBackground.opacity(0.5))
+    }
+
+    /// ストックアイテムから新規マンダラートを作成し、即座に Editor 画面へ遷移する。
+    /// folder は現在 selected な folder (検索中で nil なら Inbox に fallback)。
+    private func handleCreateFromStock(_ item: StockItem) {
+        do {
+            let m = try MandalartFactory.createFromStockItem(
+                item,
+                folderId: selectedFolderId,
+                in: modelContext
+            )
+            onOpenMandalart(m.id)
+        } catch {
+            print("[dashboard] createFromStockItem failed:", error)
+        }
+    }
+
     // MARK: - Actions
+
+    /// 初回表示時に horizontalSizeClass に応じて showStock を初期化する。
+    /// iPad regular: true (= 開く)、iPhone Landscape compact: false (= 閉じる)。
+    private func initStockAsideVisibility() {
+        showStock = (horizontalSizeClass == .regular)
+    }
 
     private func initSelectedFolder() {
         let hasSelected = selectedFolderId != nil &&

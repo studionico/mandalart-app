@@ -321,4 +321,25 @@ enum MandalartFactory {
             .eq("id", value: mandalartId)
             .execute()
     }
+
+    /// ストックアイテムから新規マンダラートを作成する。
+    /// desktop の [`createMandalartFromStockItem`](../../../desktop/src/lib/api/stock.ts) と等価:
+    /// 1. snapshot から fallback title を decode (空なら "新規マンダラート")
+    /// 2. `create` で root grid + center cell を bootstrap
+    /// 3. `StockService.pasteFromStock` で root center cell に snapshot を展開
+    ///    (中心 → 中心 grid 展開モードに乗り、root grid の 8 周辺セル + 子 grids 群が再構築される)
+    @discardableResult
+    static func createFromStockItem(
+        _ item: StockItem,
+        folderId: String? = nil,
+        in context: ModelContext
+    ) throws -> Mandalart {
+        let data = item.snapshot.data(using: .utf8) ?? Data()
+        let snap = try JSONDecoder().decode(CellSnapshot.self, from: data)
+        let raw = snap.cell.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = raw.isEmpty ? "新規マンダラート" : raw
+        let m = try create(title: title, folderId: folderId, in: context)
+        try StockService.pasteFromStock(item, targetCellId: m.rootCellId, in: context)
+        return m
+    }
 }

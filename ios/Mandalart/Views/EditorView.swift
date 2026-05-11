@@ -395,6 +395,7 @@ struct EditorView: View {
                             .frame(maxHeight: .infinity)  // 残り縦領域を memo が吸収
                     case .stock:
                         StockTab(
+                            mode: .targetCellSelect,
                             onPasteRequest: { item in
                                 // stock タブで「ペースト」ボタンを押したら paste-target 選択モードに入る。
                                 // 同じ item を再度押した場合はキャンセル扱い (toggle)。
