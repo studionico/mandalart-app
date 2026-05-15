@@ -36,6 +36,9 @@ struct EditorView: View {
     @State private var rightPaneTab: RightPaneTab = .memo
     /// ストックペースト先選択モード中の対象 stock item id。nil = 通常モード。
     @State private var stockPasteTargetItemId: String?
+    /// セル入れ替え (swap) source の cell id。nil = swap mode 非アクティブ。
+    /// ストックペーストと mutex (= 一方の起動時に他方を必ず nil 化する)。
+    @State private var swapSourceCellId: String?
 
     // Cell 単位の Export 状態 (= cell context menu → format dialog → .fileExporter)
     /// Format 選択ダイアログの対象 cell。`presenting:` に渡す。
@@ -119,6 +122,8 @@ struct EditorView: View {
                     VStack(spacing: 0) {
                         // ロックバナーは廃止 (2026-05-10): 画面を広く使うため。
                         // ロック状態は CellView の枠線色 (`Color.primary.opacity(0.15)`) で視覚化される。
+                        // swap mode は cell 枠の accent color highlight のみで表現 (banner なし)。
+                        // cancel は source 再 tap で行う。
                         if stockPasteTargetItemId != nil {
                             stockPasteBanner
                         }
@@ -302,7 +307,7 @@ struct EditorView: View {
         .background(.ultraThinMaterial)
     }
 
-    @ViewBuilder
+@ViewBuilder
     private func content(mandalart: Mandalart, grid: Grid, capturedLeadingInset: CGFloat) -> some View {
         // GeometryReader で available size を取り、grid を「縦最大の正方形」、memo を
         // 「残り横幅」に相対的に割り当てる。横幅余りなく / bottom 揃いを両立する。
@@ -378,6 +383,9 @@ struct EditorView: View {
                             onImportRequest: { cell in handleCellImportRequest(cell: cell) },
                             editingCellId: editingCellId,
                             onToggleDone: { cell in handleToggleDone(cell: cell) },
+                            swapSourceCellId: swapSourceCellId,
+                            onSwapStartRequest: { cell in handleSwapStart(cell: cell) },
+                            onSwapTargetTapped: { cell, pos in handleSwapTarget(cell: cell, displayPosition: pos) },
                             onEditRequest: { cell in beginEditing(cell: cell) },
                             onCenterTapRequest: { handleCenterTap() },
                             // Dashboard 由来の初回表示時のみ converge 完了まで cell stagger を遅延 (= morph 中 opacity 0 維持)。
@@ -428,9 +436,11 @@ struct EditorView: View {
                             onPasteRequest: { item in
                                 // stock タブで「ペースト」ボタンを押したら paste-target 選択モードに入る。
                                 // 同じ item を再度押した場合はキャンセル扱い (toggle)。
+                                // swap mode と mutex (= paste 起動時に swap mode を解除)。
                                 if stockPasteTargetItemId == item.id {
                                     stockPasteTargetItemId = nil
                                 } else {
+                                    swapSourceCellId = nil
                                     stockPasteTargetItemId = item.id
                                 }
                             },
@@ -636,6 +646,53 @@ struct EditorView: View {
     private func handleToggleDone(cell: Cell) {
         guard let m = mandalart, !m.locked else { return }
         CellCheckboxService.toggle(cellId: cell.id, in: modelContext)
+    }
+
+    /// context menu「入れ替え」tap → swap source を確定 + banner 表示開始。
+    /// 周辺 + 非空 + 非ロックのみ受理 (context menu 側でも gate 済の二重防御)。
+    /// ストックペーストモード中なら強制解除して mutex を維持。
+    private func handleSwapStart(cell: Cell) {
+        guard let m = mandalart, !m.locked else { return }
+        guard cell.position != GridConstants.centerPosition else { return }
+        let textEmpty = cell.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !(textEmpty && cell.imagePath == nil) else { return }
+        stockPasteTargetItemId = nil
+        swapSourceCellId = cell.id
+    }
+
+    /// swap mode 中の grid cell tap → swap 実行 or cancel。
+    /// - source 再 tap: cancel (banner 解除)
+    /// - 中心セル tap (display slot 4): validationAlert + mode 維持 (= 再選択を許可)
+    /// - 周辺セル tap: `CellSwapService.swap` を実行 → 成功 / 失敗いずれも mode 解除
+    /// - ロック中: 即 mode 解除 (= 安全側、書き込み禁止)
+    ///
+    /// `displayPosition` は CellView の `position` prop (= display slot 0..8) を渡す。
+    /// child grid の merged center は `cell.position` が親 peripheral 値で display slot と一致しないため、
+    /// 中心判定は `cell.position` ではなく必ず displayPosition で行うこと。
+    private func handleSwapTarget(cell: Cell, displayPosition: Int) {
+        guard let sourceId = swapSourceCellId else { return }
+        if cell.id == sourceId {
+            swapSourceCellId = nil
+            return
+        }
+        guard let m = mandalart, !m.locked else {
+            swapSourceCellId = nil
+            return
+        }
+        guard displayPosition != GridConstants.centerPosition else {
+            validationAlert = "中心セルとは入れ替えできません"
+            return
+        }
+        do {
+            try CellSwapService.swap(
+                sourceCellId: sourceId,
+                targetCellId: cell.id,
+                in: modelContext
+            )
+        } catch {
+            print("[editor] swap failed:", error)
+        }
+        swapSourceCellId = nil
     }
 
     /// 与えられた grid の中心セル (= `displayCells[centerPosition]`) が「空」(text trim 空 AND imagePath nil)

@@ -239,6 +239,35 @@ xcodebuild -project Mandalart.xcodeproj -scheme Mandalart \
 
 **予防**: 新しい sheet / alert / confirmationDialog / fileExporter / fileImporter を既存 View に追加するとき、すでに同じ body に **3 個以上の同種 modifier** がある場合は最初から ViewModifier 化 + 別ファイル切り出しを検討する。
 
+### #13. child grid の merged center cell の `cell.position` は親 peripheral 値で display slot 4 と一致しない
+
+**症状**: 中心セル判定を `cell.position == GridConstants.centerPosition` で書いた機能が、**root grid では動作するが child grid drill 後は機能しない**。例: 2026-05-15 のセル入れ替え機能で「中心セルとは入れ替えできません」alert が child grid だけ出ず swap が実行されてしまうバグ ([`EditorView.handleSwapTarget`](../Mandalart/Views/EditorView.swift))。
+
+**原因**: desktop 共通の落とし穴 #10 (中心セル 3 パターン) の派生。新モデル (migration 006+) では child grid (= primary drilled) は自グリッドに position=4 の cell 行を持たず、`grids.center_cell_id` が **親 grid の peripheral cell** を指す。[`GridRepository.displayCells`](../Mandalart/Services/GridRepository.swift) はこの merged center cell を 9 要素配列の index 4 に注入するが、cell 行そのものは親 grid 由来のままなので **`cell.position` フィールドは親 peripheral position (例: 3)** で、display 上の slot 4 とは一致しない。
+
+**対処**: CellView は 2 つの「位置」を区別する必要がある:
+
+- **`cell.position`** (= Cell row の DB 値): その cell 行が **本来属していた grid** での position。merged center では親 peripheral 値で残る
+- **`position` prop** (= CellView コンストラクタ引数): その cell が **今 render されている display slot** (0..8)。中心判定はこちらを使う
+
+```swift
+// ❌ child grid で誤動作
+guard cell.position != GridConstants.centerPosition else { ... }
+
+// ✅ display slot を使う
+private var isCenter: Bool { position == GridConstants.centerPosition }  // CellView 内、既存
+// callback で外側に渡すときは display slot も併せて渡す:
+let onSwapTargetTapped: ((Cell, Int) -> Void)?
+// 呼出側:
+onSwapTargetTapped?(target, position)  // position は CellView の prop
+// EditorView 側:
+guard displayPosition != GridConstants.centerPosition else { ... }
+```
+
+**テスト指針**: 中心セル判定が絡む機能は **必ず child grid drill 状態でもテストする**。root grid だけだと `cell.position == 4 == display slot 4` で偶然一致するため bug が表面化しない。
+
+**関連**: desktop 共通の落とし穴 #10 / iOS 落とし穴 #4 / memory `feedback_desktop_merged_cell_grid_id` (grid_id でも同種の問題)。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。

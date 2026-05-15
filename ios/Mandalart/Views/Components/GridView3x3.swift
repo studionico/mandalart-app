@@ -35,6 +35,13 @@ struct GridView3x3: View {
     /// `mandalart.showCheckbox == false` のときも上位は **無条件で渡す** — checkbox 表示判定は
     /// CellView 内に集約済 (= desktop 落とし穴 #16 のアニメ render 取りこぼし対策と同等)。
     let onToggleDone: ((Cell) -> Void)?
+    /// セル入れ替え source の cell id。nil = swap mode 非アクティブ。pass-through。
+    let swapSourceCellId: String?
+    /// context menu「入れ替え」tap で source 確定。pass-through。
+    let onSwapStartRequest: ((Cell) -> Void)?
+    /// swap mode 中の grid cell tap で target 確定。pass-through。
+    /// 第 2 引数は **display slot position** (中心判定で必須、merged center の `cell.position` 不一致対策)。
+    let onSwapTargetTapped: ((Cell, Int) -> Void)?
     /// セル tap で編集要求を上位 EditorView に通知する callback。pass-through。
     let onEditRequest: ((Cell) -> Void)?
     /// 入力済み中心セル tap で drill-up / home navigation を起動する callback。pass-through。
@@ -60,6 +67,9 @@ struct GridView3x3: View {
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
         onToggleDone: ((Cell) -> Void)? = nil,
+        swapSourceCellId: String? = nil,
+        onSwapStartRequest: ((Cell) -> Void)? = nil,
+        onSwapTargetTapped: ((Cell, Int) -> Void)? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
         initialDelayMs: Int = 0,
@@ -78,6 +88,9 @@ struct GridView3x3: View {
         self.onImportRequest = onImportRequest
         self.editingCellId = editingCellId
         self.onToggleDone = onToggleDone
+        self.swapSourceCellId = swapSourceCellId
+        self.onSwapStartRequest = onSwapStartRequest
+        self.onSwapTargetTapped = onSwapTargetTapped
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
         self.initialDelayMs = initialDelayMs
@@ -111,6 +124,9 @@ struct GridView3x3: View {
                     onImportRequest: onImportRequest,
                     editingCellId: editingCellId,
                     onToggleDone: onToggleDone,
+                    swapSourceCellId: swapSourceCellId,
+                    onSwapStartRequest: onSwapStartRequest,
+                    onSwapTargetTapped: onSwapTargetTapped,
                     onEditRequest: onEditRequest,
                     onCenterTapRequest: onCenterTapRequest,
                     initialDelayMs: initialDelayMs,

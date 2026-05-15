@@ -51,6 +51,18 @@ struct CellView: View {
     /// nil または `mandalart.showCheckbox == false` 時はチェックボックス自体を非表示。
     /// ロック中も visible だが tap 時に呼出側で no-op するため pass-through。
     let onToggleDone: ((Cell) -> Void)?
+    /// 現在 swap mode (= セル入れ替え target 選択中) の source cell id。nil = swap mode 非アクティブ。
+    /// 自セルが source のときは枠を accent color で highlight する。
+    let swapSourceCellId: String?
+    /// context menu「入れ替え」tap で swap source として確定通知 (= EditorView 側で
+    /// `swapSourceCellId` をセットして banner を出す)。
+    let onSwapStartRequest: ((Cell) -> Void)?
+    /// swap mode 中の grid cell tap で target 確定通知。空 slot tap 時は lazy create して渡す。
+    /// source 再 tap (= sourceId == cell.id) もそのまま渡し、EditorView 側で cancel として扱う。
+    /// **第 2 引数は display slot position** (= `position` prop) — 中心セル絡みの swap 拒否判定で必須
+    /// (child grid では merged center cell の `cell.position` が親 peripheral 値になるため `cell.position`
+    /// だけでは display slot 4 を判定できない)。
+    let onSwapTargetTapped: ((Cell, Int) -> Void)?
     /// セル tap で編集要求を上位 EditorView に通知する callback。空 slot の場合は
     /// この View 側で lazy create した Cell を渡す。
     let onEditRequest: ((Cell) -> Void)?
@@ -93,6 +105,9 @@ struct CellView: View {
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
         onToggleDone: ((Cell) -> Void)? = nil,
+        swapSourceCellId: String? = nil,
+        onSwapStartRequest: ((Cell) -> Void)? = nil,
+        onSwapTargetTapped: ((Cell, Int) -> Void)? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
         initialDelayMs: Int = 0,
@@ -112,6 +127,9 @@ struct CellView: View {
         self.onImportRequest = onImportRequest
         self.editingCellId = editingCellId
         self.onToggleDone = onToggleDone
+        self.swapSourceCellId = swapSourceCellId
+        self.onSwapStartRequest = onSwapStartRequest
+        self.onSwapTargetTapped = onSwapTargetTapped
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
         self.initialDelayMs = initialDelayMs
@@ -148,17 +166,25 @@ struct CellView: View {
         return mandalart.showCheckbox && !readOnly && !isEmpty && !isEditing
     }
 
+    /// セル入れ替え (swap) mode がアクティブか (= banner 表示中)。
+    private var isSwapMode: Bool { swapSourceCellId != nil }
+    /// 自セルが swap source か (= 枠 highlight 対象)。
+    private var isSwapSource: Bool {
+        guard let id = cell?.id, let sourceId = swapSourceCellId else { return false }
+        return id == sourceId
+    }
+
     /// チェックボックス本体の視覚サイズ (pt)。`paddingTopWhenCheckbox` と連動。
     private var checkboxSize: CGFloat { 22 }
     private var checkboxPadding: CGFloat { 6 }
     /// チェックボックス表示時の Text 上端 inset (= 22 + 6 + 4 = 32pt)。
     private var checkboxTextTopInset: CGFloat { checkboxSize + checkboxPadding + 4 }
     /// border の色。
-    /// - 編集中: accent color で highlight
+    /// - 編集中 / swap source: accent color で highlight
     /// - locked: ロック中バナー廃止 (2026-05-10) に伴い、枠線を muted gray にしてロック状態を視覚化
     /// - 通常: `Color.primary.opacity(0.4)`
     private var borderColor: Color {
-        if isEditing { return Color.accentColor }
+        if isEditing || isSwapSource { return Color.accentColor }
         if isLocked { return Color.primary.opacity(0.15) }
         return Color.primary.opacity(0.4)
     }
@@ -216,7 +242,7 @@ struct CellView: View {
                 // 旧 `.stroke + clipShape` だと外側半分が clip されて visible が半分になり、Dashboard card との対比で
                 // 見た目が約 2 倍ズレていた (= clip なしの card と整合しなかった)。Constants 側で値も 3 → 1.5 に半減済み。
                 RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
-                    .strokeBorder(borderColor, lineWidth: borderLineWidth * (isEditing ? 1.5 : 1.0))
+                    .strokeBorder(borderColor, lineWidth: borderLineWidth * ((isEditing || isSwapSource) ? 1.5 : 1.0))
 
                 // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)。
                 // 中心/周辺で size/weight は分けない (desktop typography.md 67-77 ミラー、中心強調は border のみ)。
@@ -335,6 +361,21 @@ struct CellView: View {
 
     private func handleTap() {
         guard !readOnly else { return }
+        // 入れ替え先選択モード中: 周辺セルへの swap (空 slot にも可)。
+        // source 再 tap も含めて EditorView 側 (handleSwapTarget) が cancel / 中心セル alert
+        // を判定する。空 slot は lazy create で Cell 行を作成してから渡す。
+        if isSwapMode {
+            let target: Cell
+            if let existing = cell {
+                target = existing
+            } else {
+                target = lazyCreateEmptyCell()
+            }
+            // 第 2 引数は display slot position (cell.position は child grid merged center で
+            // 親 peripheral 値になるため、中心判定は display slot で行う必要がある)
+            onSwapTargetTapped?(target, position)
+            return
+        }
         // ペースト先選択モード中: cell が無ければ lazy create で Cell 行を作成してから渡す。
         // 新規作成直後の mandalart では周辺セルは空 slot (= cell == nil) のため、
         // この lazy create が無いと「周辺セルに paste できない」(中心セルだけ paste できる) 症状になる。
@@ -458,6 +499,16 @@ struct CellView: View {
             }
 
             Divider()
+
+            // 入れ替え: 非中心 + 非空 + 非ロックのときのみ表示。空セル drag source 不可ルール (desktop と同等)。
+            // 中心セル絡みは禁止 (desktop resolveDndAction 落とし穴 #15)。
+            if !isEmpty, !isCenter {
+                Button {
+                    onSwapStartRequest?(cell)
+                } label: {
+                    Label("入れ替え", systemImage: "arrow.left.arrow.right")
+                }
+            }
 
             // ストック追加: 非破壊なので空セル以外で常に有効。中心セルなら grid 全体 snapshot。
             Button {
