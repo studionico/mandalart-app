@@ -107,7 +107,14 @@ struct GridView3x3: View {
     )
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: LayoutConstants.outerGridGap) {
+        // 同じ grid の周辺セル (position != 4) に 1 つでも非空 cell があるか。
+        // 中心セルの「内容をクリア」抑止判定に CellView 側で使う。
+        let hasNonEmptyPeripheralCells: Bool = (0..<GridConstants.gridCellCount).contains { pos in
+            guard pos != GridConstants.centerPosition, let c = displayCells[pos] else { return false }
+            let textNonEmpty = !c.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return textNonEmpty || c.imagePath != nil
+        }
+        return LazyVGrid(columns: columns, spacing: LayoutConstants.outerGridGap) {
             ForEach(0..<GridConstants.gridCellCount, id: \.self) { position in
                 CellView(
                     cell: displayCells[position],
@@ -117,6 +124,7 @@ struct GridView3x3: View {
                     transitionKind: transitionKind,
                     readOnly: readOnly,
                     hasChild: hasChild(at: position),
+                    hasNonEmptyPeripheralCells: hasNonEmptyPeripheralCells,
                     onDrillRequest: onDrillRequest,
                     pasteMode: pasteMode,
                     onPasteTargetTapped: onPasteTargetTapped,

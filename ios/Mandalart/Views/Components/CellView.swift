@@ -36,6 +36,9 @@ struct CellView: View {
     /// このセルが drill 元として子グリッドを持つか (= peripheral で既に drill 済)。border 太さ出し分けに使用。
     /// 中心セル / 空セル / readOnly では未使用。
     let hasChild: Bool
+    /// 同じ grid の周辺セル (position != 4) に 1 つでも非空 (text trim 後非空 or imagePath != nil) cell があるか。
+    /// 親 GridView3x3 で計算済の値を pass-through。中心セルの「内容をクリア」抑止判定に使用。
+    let hasNonEmptyPeripheralCells: Bool
     /// ストックペースト先選択モード中かどうか。`true` のとき tap は drill / focus せず
     /// `onPasteTargetTapped` を発火する。
     let pasteMode: Bool
@@ -98,6 +101,7 @@ struct CellView: View {
         transitionKind: DrillTransitionKind = .initial,
         readOnly: Bool = false,
         hasChild: Bool = false,
+        hasNonEmptyPeripheralCells: Bool = false,
         onDrillRequest: ((Cell) -> Void)? = nil,
         pasteMode: Bool = false,
         onPasteTargetTapped: ((Cell) -> Void)? = nil,
@@ -120,6 +124,7 @@ struct CellView: View {
         self.transitionKind = transitionKind
         self.readOnly = readOnly
         self.hasChild = hasChild
+        self.hasNonEmptyPeripheralCells = hasNonEmptyPeripheralCells
         self.onDrillRequest = onDrillRequest
         self.pasteMode = pasteMode
         self.onPasteTargetTapped = onPasteTargetTapped
@@ -529,10 +534,14 @@ struct CellView: View {
 
             Divider()
 
-            Button(role: .destructive) {
-                clearContent(of: cell)
-            } label: {
-                Label("内容をクリア", systemImage: "eraser")
+            // 中心セルは周辺セルが 1 つでも非空ならクリア禁止 (テーマを消すと展開要素が宙に浮くため)。
+            // disabled ではなくボタン自体を非表示にする (= 禁止操作は UI 要素を物理削除する規約)。
+            if !(isCenter && hasNonEmptyPeripheralCells) {
+                Button(role: .destructive) {
+                    clearContent(of: cell)
+                } label: {
+                    Label("内容をクリア", systemImage: "eraser")
+                }
             }
         } else if !isLocked, cell == nil {
             // 空 slot: 画像追加 + ここにインポート (= lazy create で Cell を生成してから対応 callback)。

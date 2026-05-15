@@ -47,9 +47,13 @@ Landscape 2 ペイン構成 (`HStack` ベース):
 ## マンダラート不変条件
 
 - **中心セル空のときは周辺セルを編集できない**: 中心セル (position=4) が text 空 かつ imagePath nil の状態で、周辺セル (position ≠ 4) の新規入力は alert で拒否する
-- **周辺セルに入力があるときは中心セルを空にできない**: 周辺セルのいずれかに text または imagePath がある状態で、中心セル text を空 (and imagePath nil) に変更しようとすると alert で拒否する
+- **周辺セルに入力があるときは中心セルを空にできない**: 周辺セルのいずれかに text または imagePath がある状態で、中心セル content を空にする経路をすべて禁止する:
+  - EditingSheet 経由で中心セル text を空 (and imagePath nil) に変更しようとすると alert で拒否
+  - CellView 長押し context menu の「内容をクリア」項目は **DOM レベルで非表示** ([`feedback_disallowed_action_remove_ui`] 規約準拠、disabled ではなく条件付きレンダーで除外)
 - 上記 2 つにより「中心空 AND 周辺入力済」状態はユーザー操作経路では発生しないことが保証される
-- 実装: [`EditorView.beginEditing`](../Mandalart/Views/EditorView.swift) (周辺 tap のガード) + [`EditorView.commitEditing`](../Mandalart/Views/EditorView.swift) (中心 clear のガード) で `validationAlert` 経由 SwiftUI alert を出す
+- 実装:
+  - alert 経路: [`EditorView.beginEditing`](../Mandalart/Views/EditorView.swift) (周辺 tap のガード) + [`EditorView.commitEditing`](../Mandalart/Views/EditorView.swift) (中心 clear のガード) で `validationAlert` 経由 SwiftUI alert を出す
+  - menu 非表示経路: [`GridView3x3`](../Mandalart/Views/Components/GridView3x3.swift) が `displayCells` から周辺非空判定 (`text` trim 後非空 or `imagePath != nil` が 1 つ以上) を 1 回計算し [`CellView`](../Mandalart/Views/Components/CellView.swift) に Bool で pass-down、`isCenter && hasNonEmptyPeripheralCells` のとき「内容をクリア」Button をレンダーしない
 - desktop 版と完全同等 (`desktop/docs/requirements.md`、[`EditorLayout.tsx:1551-1557 / 1627-1632`](../../desktop/src/components/editor/EditorLayout.tsx))
 - 既知の未ガード経路: ストックからの paste (Phase 11+ で対応予定)
 
