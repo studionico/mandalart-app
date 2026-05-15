@@ -30,6 +30,8 @@ Landscape 2 ペイン構成 (`HStack` ベース):
 - 9×9 表示時も同じ正方形クランプで、3×3 を 9 個ネスト
 - **9×9 view は iPad regular のみ実用**: iPhone Landscape (= horizontalSizeClass .compact) では grid サイズが ~380pt / セル ~14pt まで縮小するため非表示にする ([`pitfalls.md`](pitfalls.md) #11)。toggle ボタンも非表示、`viewMode` は `.grid3x3` 固定
 - **breadcrumb 折りたたみ**: 4 階層以上で `[root] > [...] menu > [N-1] > [N]` 表示にして overflow 回避 ([`Breadcrumb.swift`](../Mandalart/Views/Components/Breadcrumb.swift))
+- **右上 floating control の並び順** (左 → 右): showCheckbox 表示切替 (36pt circle) → 文字サイズ調整 (124pt capsule, A− / N% / A＋) → 9×9 toggle (56pt capsule, iPad regular のみ)。**showCheckbox toggle は compact / regular 両方で常時表示** (= マンダラートの done 状態が見やすいよう操作性を優先、9×9 toggle のように compact 隠しはしない)。実装: [`EditorView.checkboxToggleControl`](../Mandalart/Views/EditorView.swift)
+- **セル左上 done チェックボックス** (`Mandalart.showCheckbox == true` 時のみ): 22pt 視覚 + 30pt hit area、非空 cell 全てに表示 (中心 / 周辺 / 子あり / 画像セル どれでも)。tap で `Cell.done` をトグル + サブツリーへ down 伝播 + 親方向へ up 伝播 ([`CellCheckboxService`](../Mandalart/Services/CellCheckboxService.swift))。9×9 inner / 編集中 / 空セルでは非表示。**ロック中は visible (= 閲覧情報) だが tap で no-op** ([`EditorView.handleToggleDone`](../Mandalart/Views/EditorView.swift) で `m.locked` ガード)。desktop [`Cell.tsx:336-412`](../../desktop/src/components/editor/Cell.tsx) と挙動一致
 
 ### Dashboard (Phase 4)
 

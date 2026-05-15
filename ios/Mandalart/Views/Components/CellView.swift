@@ -47,6 +47,10 @@ struct CellView: View {
     /// EditorView の Floating Bar が現在編集中の cell.id (nil = 非編集中)。
     /// このセルが対象なら border を accent color + 太線にして highlight する。
     let editingCellId: String?
+    /// チェックボックス tap で done 状態を toggle する callback。
+    /// nil または `mandalart.showCheckbox == false` 時はチェックボックス自体を非表示。
+    /// ロック中も visible だが tap 時に呼出側で no-op するため pass-through。
+    let onToggleDone: ((Cell) -> Void)?
     /// セル tap で編集要求を上位 EditorView に通知する callback。空 slot の場合は
     /// この View 側で lazy create した Cell を渡す。
     let onEditRequest: ((Cell) -> Void)?
@@ -88,6 +92,7 @@ struct CellView: View {
         onExportRequest: ((Cell) -> Void)? = nil,
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
+        onToggleDone: ((Cell) -> Void)? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
         initialDelayMs: Int = 0,
@@ -106,6 +111,7 @@ struct CellView: View {
         self.onExportRequest = onExportRequest
         self.onImportRequest = onImportRequest
         self.editingCellId = editingCellId
+        self.onToggleDone = onToggleDone
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
         self.initialDelayMs = initialDelayMs
@@ -133,6 +139,20 @@ struct CellView: View {
         guard let id = cell?.id, let editing = editingCellId else { return false }
         return id == editing
     }
+
+    /// チェックボックスを表示する条件 (desktop `Cell.tsx:336` と等価)。
+    /// `mandalart.showCheckbox` + 非 readOnly (9×9 inner 除外) + 非空 + 非編集中 + callback 提供時のみ true。
+    /// ロック中も visible (= done 状態の閲覧情報)、tap での書込は callback 側で gate する。
+    private var showCheckbox: Bool {
+        guard let _ = cell, onToggleDone != nil else { return false }
+        return mandalart.showCheckbox && !readOnly && !isEmpty && !isEditing
+    }
+
+    /// チェックボックス本体の視覚サイズ (pt)。`paddingTopWhenCheckbox` と連動。
+    private var checkboxSize: CGFloat { 22 }
+    private var checkboxPadding: CGFloat { 6 }
+    /// チェックボックス表示時の Text 上端 inset (= 22 + 6 + 4 = 32pt)。
+    private var checkboxTextTopInset: CGFloat { checkboxSize + checkboxPadding + 4 }
     /// border の色。
     /// - 編集中: accent color で highlight
     /// - locked: ロック中バナー廃止 (2026-05-10) に伴い、枠線を muted gray にしてロック状態を視覚化
@@ -200,11 +220,14 @@ struct CellView: View {
 
                 // 表示専用 Text (= 編集は EditorView の Floating Bar 側で行う)。
                 // 中心/周辺で size/weight は分けない (desktop typography.md 67-77 ミラー、中心強調は border のみ)。
+                // チェックボックス表示時は上端 inset を増やして重なり回避 (desktop Cell.tsx:337-338 と同等)。
                 Text(cell?.text ?? "")
                     .multilineTextAlignment(.leading)
                     .font(.system(size: effectiveFontSize, weight: .regular))
                     .foregroundStyle(loadedImage != nil ? Color.white : Color.primary)
-                    .padding(6)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 6)
+                    .padding(.top, showCheckbox ? checkboxTextTopInset : 6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 // 透明 overlay が全 tap を吸い、drill or 編集要求に分岐する。
@@ -223,6 +246,15 @@ struct CellView: View {
         // GeometryReader 内で `.frame()` + `.clipped()` で Image を正確に枠内サイズに固定済だが、
         // 念のため外側でも `.clipShape` を適用して角丸を確保。
         .clipShape(RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius))
+        // チェックボックス overlay (= ZStack 内 Color.clear tap-overlay より上位、drill/編集と干渉しない)。
+        // desktop Cell.tsx:393-412 と等価。中心/周辺問わず非空セル全てに表示する。
+        .overlay(alignment: .topLeading) {
+            if showCheckbox, let c = cell {
+                checkboxButton(for: c)
+                    .padding(.top, checkboxPadding)
+                    .padding(.leading, checkboxPadding)
+            }
+        }
         // Dashboard MandalartCard 外枠 ↔ Editor 中心セル外枠の morph (= desktop の Converge Overlay と同等)。
         // position=4 かつ namespace 提供時のみ付与。drill / parallel ナビでは namespace=nil で no-op。
         .matchedGeometryEffectIfAvailable(
@@ -263,6 +295,40 @@ struct CellView: View {
             // sync 経路 / context menu 経由の imagePath 変更を反映
             loadedImage = ImageStorage.loadImage(at: newPath)
         }
+    }
+
+    // MARK: - Checkbox
+
+    /// セル左上の done チェックボックス。22pt 視覚を 30pt 透明枠で囲み hit area を拡張。
+    /// 30pt フレームは `topLeading` 揃えで視覚位置を `padding(.top:.leading: 6)` から動かさず、
+    /// 右下方向に hit area が伸びる構成 (= セル端方向への誤タップ抑制)。
+    /// ロック中も visible (= 状態閲覧)、tap 時は `onToggleDone` に委譲し locked ガードは呼出側で行う。
+    @ViewBuilder
+    private func checkboxButton(for cell: Cell) -> some View {
+        let isDone = cell.done
+        Button {
+            onToggleDone?(cell)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isDone ? Color.primary : NeutralPalette.surfaceBackground)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(
+                        isDone ? Color.primary : Color.primary.opacity(0.4),
+                        lineWidth: 1.5
+                    )
+                if isDone {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(NeutralPalette.surfaceBackground)
+                }
+            }
+            .frame(width: checkboxSize, height: checkboxSize)
+            .frame(width: 30, height: 30, alignment: .topLeading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isDone ? "チェック済 (タップで解除)" : "未チェック (タップで完了)")
     }
 
     // MARK: - Tap / commit

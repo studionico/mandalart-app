@@ -152,6 +152,15 @@ struct EditorView: View {
                                 .padding(.trailing, nineByNineSupported ? 84 : 16)
                                 .padding(.top, 20)
 
+                            // 右上 floating: showCheckbox トグル (= マンダラート単位の done 表示 ON/OFF)。
+                            // fontSizeControl (幅 124pt = 36+52+36) の更に左隣に 36pt circle を配置。
+                            // compact / regular 両方で常時表示。fontSizeControl 幅 124pt + 8pt spacing を加算した
+                            // trailing で重ならない位置に固定。
+                            checkboxToggleControl
+                                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                .padding(.trailing, nineByNineSupported ? (84 + 124 + 8) : (16 + 124 + 8))
+                                .padding(.top, 20)
+
                             // 右上 floating 9×9 / 3×3 toggle ボタン。iPad regular のみ表示。
                             // iPhone / iPad compact (Split View 1/3 等) では grid セルが小さすぎる
                             // ため非表示 + viewMode は .grid3x3 固定。
@@ -368,6 +377,7 @@ struct EditorView: View {
                             onExportRequest: { cell in cellExportTarget = cell },
                             onImportRequest: { cell in handleCellImportRequest(cell: cell) },
                             editingCellId: editingCellId,
+                            onToggleDone: { cell in handleToggleDone(cell: cell) },
                             onEditRequest: { cell in beginEditing(cell: cell) },
                             onCenterTapRequest: { handleCenterTap() },
                             // Dashboard 由来の初回表示時のみ converge 完了まで cell stagger を遅延 (= morph 中 opacity 0 維持)。
@@ -475,6 +485,29 @@ struct EditorView: View {
             }
         }
         return false
+    }
+
+    /// 右上 floating の showCheckbox 表示切替ボタン (= マンダラート単位の done 表示 ON/OFF)。
+    /// fontSizeControl と同じ ultraThinMaterial Circle トーン (home button と統一)。
+    /// **ロック中も動作可** — checkbox 表示は閲覧設定 (per-mandalart 永続化) なので書き込み制限の対象外。
+    /// desktop EditorLayout.tsx:2165-2180 の挙動と一致。
+    @ViewBuilder
+    private var checkboxToggleControl: some View {
+        let isOn = mandalart?.showCheckbox == true
+        Button {
+            guard let m = mandalart else { return }
+            m.showCheckbox.toggle()
+            m.updatedAt = Date()
+            try? modelContext.save()
+        } label: {
+            Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isOn ? "チェックボックスを非表示" : "チェックボックスを表示")
     }
 
     /// 右上 floating の文字サイズ調整 capsule (A− / 現在% / A＋)。
@@ -596,6 +629,13 @@ struct EditorView: View {
     private func cancelEditing() {
         editingCellId = nil
         editingDraft = ""
+    }
+
+    /// セル checkbox tap → done をトグル + サブツリーと親方向へ伝播。
+    /// ロック中は no-op (= desktop EditorLayout.tsx:2046 の `if (isLocked) return` と同挙動)。
+    private func handleToggleDone(cell: Cell) {
+        guard let m = mandalart, !m.locked else { return }
+        CellCheckboxService.toggle(cellId: cell.id, in: modelContext)
     }
 
     /// 与えられた grid の中心セル (= `displayCells[centerPosition]`) が「空」(text trim 空 AND imagePath nil)

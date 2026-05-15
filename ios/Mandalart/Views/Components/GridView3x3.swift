@@ -31,6 +31,10 @@ struct GridView3x3: View {
     let onImportRequest: ((Cell) -> Void)?
     /// EditorView の Floating Bar が現在編集中の cell.id (nil = 非編集中)。pass-through。
     let editingCellId: String?
+    /// セル左上 checkbox tap で done をトグルする callback。pass-through。
+    /// `mandalart.showCheckbox == false` のときも上位は **無条件で渡す** — checkbox 表示判定は
+    /// CellView 内に集約済 (= desktop 落とし穴 #16 のアニメ render 取りこぼし対策と同等)。
+    let onToggleDone: ((Cell) -> Void)?
     /// セル tap で編集要求を上位 EditorView に通知する callback。pass-through。
     let onEditRequest: ((Cell) -> Void)?
     /// 入力済み中心セル tap で drill-up / home navigation を起動する callback。pass-through。
@@ -55,6 +59,7 @@ struct GridView3x3: View {
         onExportRequest: ((Cell) -> Void)? = nil,
         onImportRequest: ((Cell) -> Void)? = nil,
         editingCellId: String? = nil,
+        onToggleDone: ((Cell) -> Void)? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
         initialDelayMs: Int = 0,
@@ -72,6 +77,7 @@ struct GridView3x3: View {
         self.onExportRequest = onExportRequest
         self.onImportRequest = onImportRequest
         self.editingCellId = editingCellId
+        self.onToggleDone = onToggleDone
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
         self.initialDelayMs = initialDelayMs
@@ -104,6 +110,7 @@ struct GridView3x3: View {
                     onExportRequest: onExportRequest,
                     onImportRequest: onImportRequest,
                     editingCellId: editingCellId,
+                    onToggleDone: onToggleDone,
                     onEditRequest: onEditRequest,
                     onCenterTapRequest: onCenterTapRequest,
                     initialDelayMs: initialDelayMs,

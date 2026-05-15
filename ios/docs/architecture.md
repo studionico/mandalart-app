@@ -42,6 +42,7 @@ ios/
 │   │   ├── ImageStorage.swift     セル画像のローカル保存 (Application Support/images/、JPEG 圧縮、cross-device 非同期)
 │   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree)
 │   │   ├── StockService.swift    Stock CRUD (addToStock / moveCellToStock = cut / pasteFromStock、CellSnapshot/GridSnapshot は desktop と互換)
+│   │   ├── CellCheckboxService.swift done トグル + サブツリー down 伝播 + 親方向 up 伝播 (desktop toggleCellDone と等価、centerCellId ベース)
 │   │   ├── TransferService.swift Export/Import (JSON / Markdown / IndentText)。round-trip で位置保存
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
