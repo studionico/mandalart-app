@@ -1,6 +1,6 @@
 ---
 name: migration-release-check
-description: Use proactively before releases or whenever a new SQL migration file is added under desktop/src-tauri/migrations/, to verify that (1) Supabase manual ALTER instructions are documented in cloud-sync-setup.md, (2) push.ts / pull.ts / realtime.ts are wired up, and (3) iOS @Model + SyncEngine DTO/select/payload + ios/docs/data-model.md も同等に反映済み. Prevents PGRST204 thrash incidents (落とし穴 #17) on both desktop and iOS. Output lists missing items + copy-paste ready ALTER statements.
+description: Use proactively before releases or whenever a new SQL migration file is added under desktop/src-tauri/migrations/, to verify that (1) Supabase manual ALTER instructions are documented in cloud-sync-setup.md, (2) push.ts / pull.ts / realtime.ts are wired up, (3) iOS @Model + SyncEngine DTO/select/payload + ios/docs/data-model.md も同等に反映済み, (4) 新規テーブルに GRANT + RLS policy が同梱されているか (2026-10-30 enforce 対策), (5) 新規 function に SET search_path 指定があるか. Prevents PGRST204 / PGRST 42501 thrash incidents (落とし穴 #17) on both desktop and iOS. Output lists missing items + copy-paste ready ALTER statements.
 tools: Read, Grep, Bash, Glob
 ---
 
@@ -121,6 +121,29 @@ SQLite と Supabase で型が異なる注意点:
 
 iOS 側に反映漏れがあると、cross-device 同期で型不整合 (Codable decode error) や同期データ欠損が発生する。desktop 同様 🔴 優先度。
 
+### 7. 新規テーブル / 新規 function の GRANT・search_path チェック
+
+各 migration の `CREATE TABLE` / `CREATE FUNCTION` 操作について **新規 schema オブジェクトの hardening 漏れ**を検出する。詳細テンプレートは [`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) の「新規 schema オブジェクト追加時の必須テンプレート」節にある。
+
+#### 新規テーブル (= `CREATE TABLE`)
+2026-10-30 以降、Supabase の Data API は明示 GRANT されたテーブルしか公開しないため、新規テーブル migration には以下が**すべて** cloud-sync-setup.md に記載されている必要がある:
+
+- `grant select on public.<table> to anon;`
+- `grant select, insert, update, delete on public.<table> to authenticated;`
+- `grant select, insert, update, delete on public.<table> to service_role;`
+- `alter table public.<table> enable row level security;`
+- `create policy "<table> own" on public.<table> for all using (user_id = auth.uid()) with check (user_id = auth.uid());`
+
+漏れだと 2026-10-30 以降に push が PostgREST `42501` で 403 を返し、落とし穴 #17 と同じ thrash 化症状になる → 🔴 優先度。
+
+#### 新規 function (= `CREATE FUNCTION` / `CREATE OR REPLACE FUNCTION`)
+新規 function には `SET search_path = ...` (e.g. `pg_catalog, public`) が指定されている必要がある:
+
+- 未指定なら Supabase Security Advisor が `function_search_path_mutable` WARN を出す
+- 既存の `update_updated_at` (migration 005) も該当だが、新規追加分のみチェック対象 (既存分は別途 ALTER で修正済 / 修正中の前提)
+
+漏れだと search path hijack 攻撃面が残る → 🟡 優先度 (RLS で実害は限定されるが、リリース前に潰したい)。
+
 ## 出力フォーマット
 
 ```markdown
@@ -148,6 +171,17 @@ iOS 側に反映漏れがあると、cross-device 同期で型不整合 (Codable
   - ios/Mandalart/Services/SyncEngine.swift `Cloud<Table>` DTO 未追加 (snake_case)
   - 同 SyncEngine の pullAll select 列 / upsert<Table> / pushPending payload に未追加
   - ios/docs/data-model.md 対応表に未記載
+
+### 🔴 Critical: 新規テーブルの GRANT / RLS 漏れ
+- **migration 00X** (`<sql_file>`) で `CREATE TABLE <table>` を追加しているが、cloud-sync-setup.md に以下が未記載:
+  - `grant ... to anon / authenticated / service_role`
+  - `enable row level security` + `create policy ... user_id = auth.uid()`
+  - 2026-10-30 以降 push が PGRST 42501 で thrash 化するリスク
+
+### 🟡 Warning: 新規 function の search_path 未指定
+- **migration 00X** で `CREATE FUNCTION <func>` を追加しているが `SET search_path = ...` が未指定
+  - Supabase Security Advisor が `function_search_path_mutable` WARN を出す
+  - 修正例: `alter function public.<func>() set search_path = pg_catalog, public;`
 
 ### 🟢 Reflected (反映済み)
 - migration 008 (last_grid_id): cloud-sync-setup.md / push.ts / pull.ts / realtime.ts /
