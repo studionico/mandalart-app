@@ -122,11 +122,10 @@ struct EditorView: View {
                     VStack(spacing: 0) {
                         // ロックバナーは廃止 (2026-05-10): 画面を広く使うため。
                         // ロック状態は CellView の枠線色 (`Color.primary.opacity(0.15)`) で視覚化される。
-                        // swap mode は cell 枠の accent color highlight のみで表現 (banner なし)。
-                        // cancel は source 再 tap で行う。
-                        if stockPasteTargetItemId != nil {
-                            stockPasteBanner
-                        }
+                        // swap mode / stock paste mode どちらも banner なし:
+                        //  - swap: source cell 枠の accent color highlight + source 再 tap で cancel
+                        //  - stock paste: StockTab の選択 item に accent color border + item 再 tap で cancel
+                        // (= 縦スペース節約、視覚 cue は source 表示元に集約)
                         ZStack(alignment: .topLeading) {
                             content(
                                 mandalart: m,
@@ -285,29 +284,7 @@ struct EditorView: View {
         }
     }
 
-    /// 上部全幅 stock paste banner。ペースト先選択モード中に表示し、tap (or キャンセル) でモード解除。
-    private var stockPasteBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "tray.and.arrow.down")
-            Text("ペースト先のセルをタップ")
-                .lineLimit(1)
-            Spacer()
-            Button("キャンセル") {
-                stockPasteTargetItemId = nil
-            }
-            .font(.caption2)
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-        }
-        .font(.callout)
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
-    }
-
-@ViewBuilder
+    @ViewBuilder
     private func content(mandalart: Mandalart, grid: Grid, capturedLeadingInset: CGFloat) -> some View {
         // GeometryReader で available size を取り、grid を「縦最大の正方形」、memo を
         // 「残り横幅」に相対的に割り当てる。横幅余りなく / bottom 揃いを両立する。
