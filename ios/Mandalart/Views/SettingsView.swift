@@ -62,6 +62,10 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("外観") {
+                    ThemeToggle(layout: .segmented)
+                }
+
                 Section("バージョン") {
                     LabeledContent("ビルド") {
                         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")

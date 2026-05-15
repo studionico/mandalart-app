@@ -177,6 +177,7 @@ struct DashboardView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 8) {
+                        ThemeToggle(layout: .capsule)
                         Button {
                             // Cancel タップで Apple が自動クリアした query を直前値で復元
                             if query.isEmpty && !lastQuery.isEmpty {

@@ -163,6 +163,11 @@ struct EditorView: View {
                                     .frame(maxWidth: .infinity, alignment: .topTrailing)
                                     .padding(.trailing, 84 + 124 + 8)
                                     .padding(.top, 20)
+
+                                ThemeToggle(layout: .capsule)
+                                    .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                    .padding(.trailing, 84 + 124 + 8 + 36 + 8)
+                                    .padding(.top, 20)
                             }
 
                             // 右上 floating 9×9 / 3×3 toggle ボタン。iPad regular のみ表示。
@@ -420,6 +425,7 @@ struct EditorView: View {
 
                                 checkboxToggleControl
                                 fontSizeControl
+                                ThemeToggle(layout: .capsule)
                             }
                         }
                     }

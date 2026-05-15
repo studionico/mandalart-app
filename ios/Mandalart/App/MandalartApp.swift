@@ -5,6 +5,7 @@ import SwiftData
 struct MandalartApp: App {
     @State private var auth = AuthStore()
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(ThemePreference.storageKey) private var rawTheme: String = ThemePreference.system.rawValue
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -29,6 +30,7 @@ struct MandalartApp: App {
         WindowGroup {
             ContentView()
                 .environment(auth)
+                .preferredColorScheme(ThemePreference(rawValue: rawTheme)?.colorScheme)
                 .task { await auth.bootstrap() }
                 // サインイン状態が変わるたびに発火 (= bootstrap で session 復元時 / 手動サインイン時)。
                 // サインイン直後: フル同期のみ。
