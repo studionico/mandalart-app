@@ -149,21 +149,21 @@ struct EditorView: View {
                             .padding(.top, 20)
 
 
-                            // 右上 floating: 文字サイズ調整 capsule。9×9 toggle が visible なら
-                            // 左隣に並置 (trailing 84pt)、hidden (compact) なら trailing 16pt 単独。
-                            fontSizeControl
-                                .frame(maxWidth: .infinity, alignment: .topTrailing)
-                                .padding(.trailing, nineByNineSupported ? 84 : 16)
-                                .padding(.top, 20)
+                            // 右上 floating: 文字サイズ調整 capsule / showCheckbox トグル。
+                            // iPad (regular) のみ 9×9 toggle の左隣に並べて常駐表示。
+                            // iPhone (compact) では右ペイン (memo/stock) 上部 HStack に集約 (= 下記参照)
+                            // ため floating からは外す。
+                            if horizontalSizeClass == .regular {
+                                fontSizeControl
+                                    .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                    .padding(.trailing, 84)
+                                    .padding(.top, 20)
 
-                            // 右上 floating: showCheckbox トグル (= マンダラート単位の done 表示 ON/OFF)。
-                            // fontSizeControl (幅 124pt = 36+52+36) の更に左隣に 36pt circle を配置。
-                            // compact / regular 両方で常時表示。fontSizeControl 幅 124pt + 8pt spacing を加算した
-                            // trailing で重ならない位置に固定。
-                            checkboxToggleControl
-                                .frame(maxWidth: .infinity, alignment: .topTrailing)
-                                .padding(.trailing, nineByNineSupported ? (84 + 124 + 8) : (16 + 124 + 8))
-                                .padding(.top, 20)
+                                checkboxToggleControl
+                                    .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                    .padding(.trailing, 84 + 124 + 8)
+                                    .padding(.top, 20)
+                            }
 
                             // 右上 floating 9×9 / 3×3 toggle ボタン。iPad regular のみ表示。
                             // iPhone / iPad compact (Split View 1/3 等) では grid セルが小さすぎる
@@ -391,8 +391,37 @@ struct EditorView: View {
 
                 // 右ペイン: breadcrumb / tab picker / memo or stock。高さ = grid と同じ (bottom 揃え)
                 VStack(alignment: .leading, spacing: 8) {
-                    Breadcrumb(items: breadcrumb) { index in
-                        navigateToBreadcrumb(index, mandalart: mandalart)
+                    if horizontalSizeClass == .regular {
+                        // iPad: 従来通り breadcrumb 全階層表示
+                        Breadcrumb(items: breadcrumb) { index in
+                            navigateToBreadcrumb(index, mandalart: mandalart)
+                        }
+                    } else {
+                        // iPhone (compact): breadcrumb を出さず、右ペイン (memo/stock) 上部に
+                        // [root 戻る icon] [showCheckbox toggle] [文字サイズ capsule] を HStack で並置。
+                        // root 戻るは depth>1 のみ可視 (layout 安定のため opacity で隠す = 36pt 枠保持)。
+                        // memoW が控えめな機種で 36+8+36+8+124=212pt を下回るケースを ScrollView でガード。
+                        // 中間階層へのジャンプは割愛 (= 9×9 toggle と同じ compact 縮退方針)。
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Button {
+                                    navigateToBreadcrumb(0, mandalart: mandalart)
+                                } label: {
+                                    Image(systemName: "arrow.up.to.line")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 36, height: 36)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .opacity(breadcrumb.count > 1 ? 1 : 0)
+                                .allowsHitTesting(breadcrumb.count > 1)
+                                .accessibilityLabel("マンダラート最上位に戻る")
+
+                                checkboxToggleControl
+                                fontSizeControl
+                            }
+                        }
                     }
                     Divider()
                     // memo / stock 切替 segmented picker
