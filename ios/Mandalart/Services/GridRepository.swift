@@ -101,12 +101,16 @@ enum GridRepository {
         return slots
     }
 
-    /// 指定 grid の displayCells 9 要素について、**各 cell に子グリッドが存在するか** を Bool 配列で返す。
-    /// CellView の border 太さ (= 子あり時 1.5pt、なし時 0.5pt) 描画に使う。
+    /// 指定 grid の displayCells 9 要素について、**各 cell に "意味のある" 子グリッドが存在するか** を
+    /// Bool 配列で返す。CellView の border 太さ (= 子あり時 1.5pt、なし時 0.5pt) 描画に使う。
+    ///
+    /// "意味のある" = 子グリッドの周辺セル (position != 4) に 1 つでも `text` (trim 後非空) または
+    /// `imagePath` を持つ cell がある。drill-down 直後で空のまま戻ったケースは false 扱いとなり、
+    /// ユーザーが実際に内容を入れるまで太枠化されない (= desktop の `fetchChildCountsFor` 等価)。
     ///
     /// 中心 (position=4) は drill 元にならないので常に false。
-    /// 周辺セル各々について `findChildGrid(parentCellId:)` を 1 回呼び出し (= 最大 8 回の DB fetch)。
-    /// 結果は EditorView の各 render 周期で計算 (= grid 切替や cell 更新で再計算)。
+    /// 最悪 8 cells × (1 grid fetch + 8 peripheral cells fetch) ≒ 72 fetch まで膨らみうるが、
+    /// 子グリッド未作成のセルは findChildGrid で即 nil → スキップされるので実測コストは軽い。
     static func hasChildMaskForGrid(
         displayCells: [Cell?],
         in context: ModelContext
@@ -114,9 +118,34 @@ enum GridRepository {
         var mask: [Bool] = Array(repeating: false, count: GridConstants.gridCellCount)
         for (i, cell) in displayCells.enumerated() {
             guard i != GridConstants.centerPosition, let cell else { continue }
-            mask[i] = findChildGrid(parentCellId: cell.id, in: context) != nil
+            guard let child = findChildGrid(parentCellId: cell.id, in: context) else { continue }
+            mask[i] = hasMeaningfulPeripheralContent(in: child, context: context)
         }
         return mask
+    }
+
+    /// 子グリッドが「意味のある中身」を持つかを判定する。
+    /// = 周辺セル (position != 4) に 1 つでも `text` (trim 後非空) または `imagePath` を持つ
+    /// cell が存在すれば true。中心 (position=4) は X=C 統一モデルで親 peripheral と共有のため
+    /// 除外する (= 親側の入力が子の「意味」にカウントされるのを防ぐ)。
+    /// desktop の `EditorLayout.tsx` `fetchChildCountsFor`
+    /// (`EXISTS (… position != 4 AND (text != '' OR image_path IS NOT NULL))`) と等価。
+    private static func hasMeaningfulPeripheralContent(
+        in grid: Grid,
+        context: ModelContext
+    ) -> Bool {
+        let gridId = grid.id
+        let center = GridConstants.centerPosition
+        let descriptor = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> {
+                $0.gridId == gridId && $0.position != center && $0.deletedAt == nil
+            }
+        )
+        guard let cells = try? context.fetch(descriptor) else { return false }
+        return cells.contains { c in
+            let textNonEmpty = !c.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return textNonEmpty || c.imagePath != nil
+        }
     }
 
     /// 同じ `parent_cell_id` を持つ兄弟 grid 群 (= 並列) を `sortOrder` 昇順で返す。

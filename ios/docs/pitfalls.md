@@ -166,7 +166,7 @@ self.client = SupabaseClient(
 
 **フォント weight は iOS .system 維持** (= Dynamic Type 対応のため強制 desktop 同期しない)。`.semibold` / `.regular` は iOS ネイティブ感を優先。
 
-**子グリッドあり判定**: `findChildGrid` は per-cell に O(N) クエリなので、`GridRepository.hasChildMaskForGrid(displayCells:in:)` で 9 要素 Bool を一度に計算 → `GridView3x3` → `CellView` に props 経路で pass-through。9×9 view 内では readOnly mode になるので mask 計算スキップ。
+**子グリッドあり判定**: `findChildGrid` は per-cell に O(N) クエリなので、`GridRepository.hasChildMaskForGrid(displayCells:in:)` で 9 要素 Bool を一度に計算 → `GridView3x3` → `CellView` に props 経路で pass-through。9×9 view 内では readOnly mode になるので mask 計算スキップ。**判定は「子 Grid 行が存在するか」だけでなく「子 Grid の周辺セル (position != 4) に 1 つでも text/imagePath を持つ cell があるか」も併せて判定する** (= desktop の `EditorLayout.tsx` `fetchChildCountsFor` `EXISTS (… position != 4 AND (text != '' OR image_path IS NOT NULL))` と等価)。drill-down 直後で空のまま戻ったケースで太枠化しないため (= ユーザーが実際に入力するまで「サブグリッドあり」扱いしない)。
 
 ### #11a. 背景トーンは Apple semantic color ではなく Tailwind neutral 系列に揃える
 
