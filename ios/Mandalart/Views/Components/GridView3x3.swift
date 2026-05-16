@@ -46,6 +46,8 @@ struct GridView3x3: View {
     let onEditRequest: ((Cell) -> Void)?
     /// 入力済み中心セル tap で drill-up / home navigation を起動する callback。pass-through。
     let onCenterTapRequest: (() -> Void)?
+    /// context menu「シュレッダー」tap で破壊操作要求を上位 EditorView へ通知。pass-through。
+    let onShredRequest: ((Cell) -> Void)?
     /// Dashboard → Editor 遷移時に渡す morph 完了までの待機時間 (ms)。CellView へ pass-through。
     /// drill / drill-up / 並列ナビでは 0 が渡され、既存挙動と完全一致。
     let initialDelayMs: Int
@@ -72,6 +74,7 @@ struct GridView3x3: View {
         onSwapTargetTapped: ((Cell, Int) -> Void)? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
+        onShredRequest: ((Cell) -> Void)? = nil,
         initialDelayMs: Int = 0,
         convergeNamespace: Namespace.ID? = nil
     ) {
@@ -93,6 +96,7 @@ struct GridView3x3: View {
         self.onSwapTargetTapped = onSwapTargetTapped
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
+        self.onShredRequest = onShredRequest
         self.initialDelayMs = initialDelayMs
         self.convergeNamespace = convergeNamespace
     }
@@ -137,6 +141,7 @@ struct GridView3x3: View {
                     onSwapTargetTapped: onSwapTargetTapped,
                     onEditRequest: onEditRequest,
                     onCenterTapRequest: onCenterTapRequest,
+                    onShredRequest: onShredRequest,
                     initialDelayMs: initialDelayMs,
                     convergeNamespace: convergeNamespace
                 )

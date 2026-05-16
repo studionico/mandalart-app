@@ -27,13 +27,15 @@ ios/
 │   │   ├── SettingsView.swift    アカウント / 同期ボタン
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
-│   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / クリア context menu、編集中以外は overlay で hit テスト)
+│   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / シュレッダー context menu、編集中以外は overlay で hit テスト)
 │   │       ├── GridView3x3.swift 3×3 (`displayCells: [Cell?]` 9 要素受け取り、id で grid 切替時 remount)
 │   │       ├── Breadcrumb.swift  右ペイン上部の階層 navigation (タップで drill-up)
 │   │       ├── MemoTab.swift     右ペイン下部のメモタブ (編集 / プレビュー切替、grid.memo を 1 秒 debounce で auto-save)
 │   │       ├── StockTab.swift    右ペイン下部のストックタブ (3 列タイル grid + ペースト / 削除 / 全削除)
 │   │       ├── EditingSheet.swift `.fullScreenCover` 共通 sheet (セル / メモ編集を統一、Landscape kbd 覆い対策)
-│   │       └── ThemeToggle.swift ライト/システム/ダーク切替 (capsule = Editor 右上 / Dashboard toolbar、segmented = SettingsView Form)
+│   │       ├── ThemeToggle.swift ライト/システム/ダーク切替 (capsule = Editor 右上 / Dashboard toolbar、segmented = SettingsView Form)
+│   │       ├── ShredderIcon.swift   desktop ShredderIcon SVG を SwiftUI Path で移植したベクター icon (24×24 viewBox、シュレッダー context menu の icon slot で使用)
+│   │       └── ShredConfirmModifier.swift シュレッダー確認 `.confirmationDialog` を切り出した ViewModifier (EditorView body chain type-check timeout 回避 / 落とし穴 #12 対策)
 │   ├── ViewModels/
 │   │   └── AuthStore.swift       @Observable / @MainActor / supabase-swift Auth ラッパ
 │   ├── Services/
@@ -41,7 +43,7 @@ ios/
 │   │   ├── MandalartFactory.swift create / duplicate / softDelete / restore / permanentDelete (cascade) / deleteFromCloud (cloud cascade + tombstone)
 │   │   ├── FolderRepository.swift ensureInboxFolder (重複 system folder 統合) / adoptOrphansToInbox
 │   │   ├── ImageStorage.swift     セル画像のローカル保存 (Application Support/images/、JPEG 圧縮、cross-device 非同期)
-│   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree)
+│   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree / permanentDeleteGrid)
 │   │   ├── StockService.swift    Stock CRUD (addToStock / moveCellToStock = cut / pasteFromStock、CellSnapshot/GridSnapshot は desktop と互換)
 │   │   ├── CellCheckboxService.swift done トグル + サブツリー down 伝播 + 親方向 up 伝播 (desktop toggleCellDone と等価、centerCellId ベース)
 │   │   ├── CellSwapService.swift     周辺セル入れ替え (text/imagePath/color + grids の parentCellId/centerCellId を双方向 swap、自グリッド除外、done 除外)

@@ -47,15 +47,23 @@ Landscape 2 ペイン構成 (`HStack` ベース):
 ## マンダラート不変条件
 
 - **中心セル空のときは周辺セルを編集できない**: 中心セル (position=4) が text 空 かつ imagePath nil の状態で、周辺セル (position ≠ 4) の新規入力は alert で拒否する
-- **周辺セルに入力があるときは中心セルを空にできない**: 周辺セルのいずれかに text または imagePath がある状態で、中心セル content を空にする経路をすべて禁止する:
-  - EditingSheet 経由で中心セル text を空 (and imagePath nil) に変更しようとすると alert で拒否
-  - CellView 長押し context menu の「内容をクリア」項目は **DOM レベルで非表示** ([`feedback_disallowed_action_remove_ui`] 規約準拠、disabled ではなく条件付きレンダーで除外)
-- 上記 2 つにより「中心空 AND 周辺入力済」状態はユーザー操作経路では発生しないことが保証される
+- **周辺セルに入力があるときは中心セルを空にできない**: 周辺セルのいずれかに text または imagePath がある状態で、中心セル content を空にする経路を **EditingSheet で alert 拒否** する。
+  - シュレッダー (cell + 配下 grid 削除 / 並列 grid 削除 / マンダラート全体削除) は中心セルでも実行できるが、いずれの分岐でも周辺セルもまとめて消える経路に乗るので不変則は守られる (= 中心空のまま周辺だけ残る状態を作らない)
+- 上記により「中心空 AND 周辺入力済」状態はユーザー操作経路では発生しないことが保証される
 - 実装:
   - alert 経路: [`EditorView.beginEditing`](../Mandalart/Views/EditorView.swift) (周辺 tap のガード) + [`EditorView.commitEditing`](../Mandalart/Views/EditorView.swift) (中心 clear のガード) で `validationAlert` 経由 SwiftUI alert を出す
-  - menu 非表示経路: [`GridView3x3`](../Mandalart/Views/Components/GridView3x3.swift) が `displayCells` から周辺非空判定 (`text` trim 後非空 or `imagePath != nil` が 1 つ以上) を 1 回計算し [`CellView`](../Mandalart/Views/Components/CellView.swift) に Bool で pass-down、`isCenter && hasNonEmptyPeripheralCells` のとき「内容をクリア」Button をレンダーしない
 - desktop 版と完全同等 (`desktop/docs/requirements.md`、[`EditorLayout.tsx:1551-1557 / 1627-1632`](../../desktop/src/components/editor/EditorLayout.tsx))
 - 既知の未ガード経路: ストックからの paste (Phase 11+ で対応予定)
+
+## シュレッダー (破壊操作の統一窓口)
+
+- **アクセス経路**: CellView 長押し context menu の「シュレッダー」項目 (赤文字 destructive、icon は `ShredderIcon` SwiftUI Path で desktop の SVG を移植)
+- **確認ダイアログ**: `.confirmationDialog` (= desktop の `ShredConfirmDialog` 相当) で「この操作は元に戻せません」warning + cell 種別ごとの title 切替
+- **3 分岐実行** ([`EditorView.performShred`](../Mandalart/Views/EditorView.swift)、desktop の `EditorLayout.handleShredConfirm` ([`EditorLayout.tsx:974-1001`](../../desktop/src/components/editor/EditorLayout.tsx)) と等価):
+  1. **primary root center** (`cell.id == mandalart.rootCellId`): [`MandalartFactory.permanentDelete`](../Mandalart/Services/MandalartFactory.swift) でマンダラート全体を hard delete (cloud cascade 込み) → `onBack()` で Dashboard へ
+  2. **並列 grid 自所属 center** (`parallelGrids.count > 1` + `cell.gridId == curGrid.id` + `cell.id == curGrid.centerCellId`): [`GridRepository.permanentDeleteGrid`](../Mandalart/Services/GridRepository.swift) で並列 grid 1 本を hard delete → 残り並列の左隣に切替 (なければ親 drill-up、それもなければ `onBack()`)
+  3. **それ以外** (周辺 / X=C drilled 中心): [`GridRepository.shredCellSubtree`](../Mandalart/Services/GridRepository.swift) で cell content クリア + 配下 sub-grid 再帰削除 → 中心セルなら drill-up、周辺はその場に留まる
+- 旧「内容をクリア」(eraser icon、cell.text/imagePath/color のみリセット) は撤去 (= desktop と仕様統一)
 
 ## 空マンダラートの自動破棄 (hard delete)
 

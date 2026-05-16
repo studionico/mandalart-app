@@ -66,6 +66,12 @@ struct EditorView: View {
     /// (`EditorLayout.tsx:1551-1557 / 1627-1632`) と同等の防御。
     @State private var validationAlert: String?
 
+    /// シュレッダー (cell context menu「シュレッダー」) の確認ダイアログ対象 cell。
+    /// nil でない間 `.confirmationDialog` を表示し、確認後に `performShred(_:)` が
+    /// 種別ごとに 3 分岐 (primary root → マンダラート / 並列 center → grid / その他 → cell+subtree) で
+    /// 破壊操作を実行する。desktop の `ShredConfirmDialog` 相当。
+    @State private var shredTarget: Cell?
+
     /// マンダラート単位の文字サイズ調整 (UserDefaults 永続、per-device)。
     /// `init` で `MandalartFontPreference.load(for: mandalartId)` から取得し、
     /// 値変更時は `.onChange` で per-mandalart key に persist。CellView へは
@@ -265,6 +271,16 @@ struct EditorView: View {
         } message: {
             Text(validationAlert ?? "")
         }
+        // シュレッダー確認ダイアログ (= desktop の ShredConfirmDialog 相当)。
+        // body chain の type-check timeout (iOS 落とし穴 #12) を避けるため
+        // 独立した `ShredConfirmModifier` ViewModifier として切り出し。
+        .modifier(ShredConfirmModifier(
+            target: $shredTarget,
+            title: shredConfirmTitle(),
+            onConfirm: { cell in
+                Task { @MainActor in await performShred(cell) }
+            }
+        ))
         // セル編集の全画面 sheet (Landscape キーボード覆い対策)。
         // NavigationStack + TextField の中で iOS 自動 keyboard avoidance が効く。
         .fullScreenCover(isPresented: Binding(
@@ -370,6 +386,7 @@ struct EditorView: View {
                             onSwapTargetTapped: { cell, pos in handleSwapTarget(cell: cell, displayPosition: pos) },
                             onEditRequest: { cell in beginEditing(cell: cell) },
                             onCenterTapRequest: { handleCenterTap() },
+                            onShredRequest: { cell in shredTarget = cell },
                             // Dashboard 由来の初回表示時のみ converge 完了まで cell stagger を遅延 (= morph 中 opacity 0 維持)。
                             // drill / drill-up / 並列ナビでは lastTransitionKind が変化するので 0 になり既存挙動維持。
                             initialDelayMs: lastTransitionKind == .initial ? TimingConstants.convergeDurationMs : 0,
@@ -981,6 +998,112 @@ struct EditorView: View {
             return parent.text.isEmpty ? "(無題)" : parent.text
         }
         return "(無題)"
+    }
+
+    // MARK: - Shredder
+
+    /// `shredTarget` の cell 種別に応じた `.confirmationDialog` タイトル文言を返す。
+    /// desktop の `ShredConfirmDialog` (`ShredConfirmDialog.tsx:42` 相当) を踏襲。
+    private func shredConfirmTitle() -> String {
+        guard let cell = shredTarget, let m = mandalart else { return "完全に削除しますか?" }
+        if cell.id == m.rootCellId { return "マンダラートを削除しますか?" }
+        if isParallelRootCenterCell(cell) { return "並列グリッドを削除しますか?" }
+        return "完全に削除しますか?"
+    }
+
+    /// 並列 grid の自所属 center cell かどうかを判定する。
+    /// - cell が現在 grid に属する (= self-centered な center)
+    /// - 現在 grid が並列セット (= parallelGrids.count > 1) の 1 本
+    /// - cell が現在 grid の centerCellId と一致する
+    /// X=C primary drilled の中心セル (= 親 peripheral と共有) はこの条件に該当しない (cell.gridId が
+    /// 現在 grid ではなく親 grid を指すため false になる)。よってその経路は shredCellSubtree 分岐へ落ちる。
+    private func isParallelRootCenterCell(_ cell: Cell) -> Bool {
+        guard parallelGrids.count > 1 else { return false }
+        guard cell.position == GridConstants.centerPosition else { return false }
+        guard let cur = parallelGrids.first(where: { $0.id == cell.gridId }) else { return false }
+        return cur.centerCellId == cell.id
+    }
+
+    /// シュレッダー本体: cell 種別ごとに 3 分岐で破壊操作を実行する。
+    /// desktop の `EditorLayout.tsx:974-1001` `handleShredConfirm` と等価。
+    ///
+    /// 1. **primary root center** (`cell.id == mandalart.rootCellId`):
+    ///    `MandalartFactory.permanentDelete` でマンダラート全体を hard delete (cloud cascade 込み) →
+    ///    `onBack()` で Dashboard へ戻る。
+    /// 2. **並列 grid 自所属 center** (`isParallelRootCenterCell`):
+    ///    `GridRepository.permanentDeleteGrid` で並列 grid 1 本だけ hard delete → 左隣 (or 右隣) の
+    ///    並列に切替。
+    /// 3. **それ以外** (周辺セル / X=C drilled 中心):
+    ///    `GridRepository.shredCellSubtree` で cell content クリア + 配下サブグリッド再帰削除 →
+    ///    中心セルの場合は drill-up、周辺の場合はその場に留まる。
+    @MainActor
+    private func performShred(_ cell: Cell) async {
+        defer { shredTarget = nil }
+        guard let m = mandalart else { return }
+
+        let isPrimaryRoot = (cell.id == m.rootCellId)
+        let parallelCenter = isParallelRootCenterCell(cell)
+
+        do {
+            if isPrimaryRoot {
+                try await MandalartFactory.permanentDelete(m, in: modelContext)
+                onBack()
+                return
+            }
+
+            if parallelCenter {
+                let curGridId = cell.gridId
+                // 並列 grid を 1 本物理削除
+                try await GridRepository.permanentDeleteGrid(gridId: curGridId, in: modelContext)
+                // 削除後の navigation: 残った並列に切替 (= 左隣優先、なければ右隣、なければ親へ)
+                navigateAfterParallelDeleted(deletedGridId: curGridId, mandalart: m)
+                return
+            }
+
+            // 通常: cell + 配下 subgrid を再帰削除
+            try GridRepository.shredCellSubtree(cellId: cell.id, in: modelContext)
+            if cell.position == GridConstants.centerPosition {
+                // X=C drilled 中心セル → drill-up
+                if breadcrumb.count > 1 {
+                    navigateToBreadcrumb(breadcrumb.count - 2, mandalart: m)
+                }
+            }
+            // 周辺セルはその場に留まり @Query 反映で UI 更新される
+        } catch {
+            print("[editor] shred failed:", error)
+            validationAlert = "削除に失敗しました: \(error.localizedDescription)"
+        }
+    }
+
+    /// 並列 grid 削除後の navigation。
+    /// - 残り並列があれば: 削除前の index の左隣 (1 つ前) を優先、index=0 だった場合は 0 番目 (= 元 1 番目) に
+    /// - 残り並列がなければ: 親階層に drill-up (breadcrumb.count > 1) or onBack (root の場合)
+    private func navigateAfterParallelDeleted(deletedGridId: String, mandalart: Mandalart) {
+        let remaining = parallelGrids.filter { $0.id != deletedGridId }
+        let candidateIndex = max(0, parallelIndex - 1)
+        let next: Grid? = candidateIndex < remaining.count ? remaining[candidateIndex] : remaining.first
+        if let next {
+            lastTransitionKind = .parallel
+            currentGridId = next.id
+            if !breadcrumb.isEmpty {
+                let last = breadcrumb.last!
+                breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
+                    gridId: next.id,
+                    cellId: last.cellId,
+                    label: last.label
+                )
+            }
+            if !mandalart.locked {
+                mandalart.lastGridId = next.id
+                mandalart.updatedAt = Date()
+                try? modelContext.save()
+            }
+            refreshParallelState(for: mandalart)
+        } else if breadcrumb.count > 1 {
+            navigateToBreadcrumb(breadcrumb.count - 2, mandalart: mandalart)
+        } else {
+            onBack()
+        }
     }
 
     // MARK: - Stock paste

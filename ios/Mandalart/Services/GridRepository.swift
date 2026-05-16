@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Supabase
 
 /// Drill / ancestry / merged cell ヘルパ。
 /// desktop の `lib/api/grids.ts` (`getGrid` / `createGrid` / `getGridAncestry`) を Swift / SwiftData に移植。
@@ -338,6 +339,81 @@ enum GridRepository {
             }
         }
         try context.save()
+    }
+
+    /// 指定 grid を物理削除 (= 自所属 cells + 配下 grids 含めた cascade hard-delete)。
+    /// 用途: シュレッダー (並列 grid を 1 本まるごと消す)。
+    ///
+    /// - `cleanupGridIfEmpty` が「空のときだけ消す」のに対し、こちらは **内容問わず消す**。
+    /// - 並列 root grid 中心セル (= self-centered な center cell) シュレッダー時に呼ぶ想定。
+    /// - cloud 削除は `MandalartFactory.deleteFromCloud` と同等の cells → grids 順で実行し、
+    ///   失敗時は `CloudDeleteTombstone` に積んで次回 pullAll 冒頭で再試行 (落とし穴 #6 zombie 復活防止)。
+    ///
+    /// 削除順序:
+    /// 1. BFS で `gridId` + 配下 grid id を全収集 (自 grid 所属 cells から派生する parentCellId
+    ///    マッチの grid を再帰的に辿る)
+    /// 2. ローカル: cells 先 → grids 後の順で `context.delete` → `save`
+    /// 3. クラウド: cells WHERE grid_id IN (...) → grids WHERE id IN (...) を best-effort。
+    ///    失敗時は CloudDeleteTombstone に各 grid_id を mandalartId として登録 (= 同テーブル
+    ///    再利用、削除復活ガードは grid id でも同様に効く)。
+    @MainActor
+    static func permanentDeleteGrid(
+        gridId: String,
+        in context: ModelContext
+    ) async throws {
+        // 1) BFS で配下 grid id を全収集 (= 自 grid + 孫 grid)
+        var gridIdsToDelete: [String] = [gridId]
+        var queue: [String] = [gridId]
+        var visited = Set<String>([gridId])
+        while let gid = queue.popLast() {
+            let cFetch = FetchDescriptor<Cell>(
+                predicate: #Predicate<Cell> { $0.gridId == gid && $0.deletedAt == nil }
+            )
+            let cells = try context.fetch(cFetch)
+            for c in cells {
+                let cid = c.id
+                let descriptor = FetchDescriptor<Grid>(
+                    predicate: #Predicate<Grid> {
+                        $0.parentCellId == cid && $0.deletedAt == nil
+                    }
+                )
+                let childGrids = try context.fetch(descriptor)
+                for g in childGrids where !visited.contains(g.id) {
+                    visited.insert(g.id)
+                    gridIdsToDelete.append(g.id)
+                    queue.append(g.id)
+                }
+            }
+        }
+
+        // 2) ローカル物理削除: cells 先 → grids 後
+        for gid in gridIdsToDelete {
+            let cFetch = FetchDescriptor<Cell>(predicate: #Predicate<Cell> { $0.gridId == gid })
+            for c in try context.fetch(cFetch) { context.delete(c) }
+            let gFetch = FetchDescriptor<Grid>(predicate: #Predicate<Grid> { $0.id == gid })
+            if let g = try context.fetch(gFetch).first { context.delete(g) }
+        }
+        try context.save()
+
+        // 3) クラウド削除 (best-effort)。失敗時は tombstone へ。
+        let client = SupabaseService.shared.client
+        guard (try? await client.auth.session) != nil else {
+            for gid in gridIdsToDelete { CloudDeleteTombstone.add(gid) }
+            return
+        }
+        do {
+            try await client.from("cells")
+                .delete()
+                .in("grid_id", values: gridIdsToDelete)
+                .execute()
+            try await client.from("grids")
+                .delete()
+                .in("id", values: gridIdsToDelete)
+                .execute()
+        } catch {
+            print("[permanentDeleteGrid] cloud delete failed → tombstone:", error)
+            for gid in gridIdsToDelete { CloudDeleteTombstone.add(gid) }
+        }
     }
 
     /// 9×9 view 表示用 layout を返す。9 ブロック分の `(対応する Grid?, 9 要素 displayCells)` を

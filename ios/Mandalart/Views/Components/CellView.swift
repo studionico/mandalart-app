@@ -37,7 +37,12 @@ struct CellView: View {
     /// 中心セル / 空セル / readOnly では未使用。
     let hasChild: Bool
     /// 同じ grid の周辺セル (position != 4) に 1 つでも非空 (text trim 後非空 or imagePath != nil) cell があるか。
-    /// 親 GridView3x3 で計算済の値を pass-through。中心セルの「内容をクリア」抑止判定に使用。
+    /// 親 GridView3x3 で計算済の値を pass-through。
+    /// **2026-05 まで**: 中心セルの「内容をクリア」を抑止する判定に使っていたが、
+    /// 「内容をクリア」を desktop と揃えて「シュレッダー」(3 分岐: マンダラート / 並列 grid /
+    /// cell+subtree) に置換した以降は **使用していない**。中心セルでもシュレッダー実行時に
+    /// 周辺セルもまとめて消える経路に分岐するので不変則は守られる。
+    /// API 互換のため引数自体は残置 (将来別の用途で使う可能性があるため削除しない)。
     let hasNonEmptyPeripheralCells: Bool
     /// ストックペースト先選択モード中かどうか。`true` のとき tap は drill / focus せず
     /// `onPasteTargetTapped` を発火する。
@@ -73,6 +78,11 @@ struct CellView: View {
     /// 中心 + 非空のときに発火 (ロック中も閲覧 navigation として許可)。
     /// 空中心 / 周辺セルでは未使用。
     let onCenterTapRequest: (() -> Void)?
+    /// context menu「シュレッダー」tap で破壊操作を上位 EditorView に通知する callback。
+    /// EditorView 側で確認ダイアログを起動し、cell の種別 (primary root / 並列 center /
+    /// その他) で desktop と同等 3 分岐の destructive 操作を実行する。
+    /// ロック中 / 空セル / readOnly では context menu 自体が出ないので発火しない。
+    let onShredRequest: ((Cell) -> Void)?
     /// Dashboard → Editor 遷移時に渡される morph 完了までの待機時間 (ms)。
     /// この値分だけ全 cell の delay を後ろにずらすことで、morph 中は周辺セルが opacity 0 を維持。
     /// drill / drill-up / 並列ナビでは 0 が渡され、既存挙動と完全一致。
@@ -114,6 +124,7 @@ struct CellView: View {
         onSwapTargetTapped: ((Cell, Int) -> Void)? = nil,
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
+        onShredRequest: ((Cell) -> Void)? = nil,
         initialDelayMs: Int = 0,
         convergeNamespace: Namespace.ID? = nil
     ) {
@@ -137,6 +148,7 @@ struct CellView: View {
         self.onSwapTargetTapped = onSwapTargetTapped
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
+        self.onShredRequest = onShredRequest
         self.initialDelayMs = initialDelayMs
         self.convergeNamespace = convergeNamespace
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
@@ -534,13 +546,20 @@ struct CellView: View {
 
             Divider()
 
-            // 中心セルは周辺セルが 1 つでも非空ならクリア禁止 (テーマを消すと展開要素が宙に浮くため)。
-            // disabled ではなくボタン自体を非表示にする (= 禁止操作は UI 要素を物理削除する規約)。
-            if !(isCenter && hasNonEmptyPeripheralCells) {
-                Button(role: .destructive) {
-                    clearContent(of: cell)
-                } label: {
-                    Label("内容をクリア", systemImage: "eraser")
+            // シュレッダー: desktop の D&D 4 アクション「シュレッダー」と同等の破壊操作。
+            // 実際の処理は EditorView 側の `performShred(_:)` で cell 種別ごとに 3 分岐:
+            //  - primary root center → `MandalartFactory.permanentDelete` でマンダラート全体削除
+            //  - 並列 grid 中心 (self-centered) → `GridRepository.permanentDeleteGrid` で並列 1 本削除
+            //  - それ以外 (周辺 / X=C drilled 中心) → `GridRepository.shredCellSubtree` で cell + 配下削除
+            // 中心セル + 周辺非空でも全分岐で周辺セルが同時に消える経路に乗るので「不変則:
+            // 中心空 + 周辺入力済」状態は作られない。よって従来の menu 非表示ガードは不要。
+            Button(role: .destructive) {
+                onShredRequest?(cell)
+            } label: {
+                Label {
+                    Text("シュレッダー")
+                } icon: {
+                    ShredderIcon()
                 }
             }
         } else if !isLocked, cell == nil {
@@ -579,22 +598,6 @@ struct CellView: View {
     private func applyColor(_ key: String?, to cell: Cell) {
         cell.color = key
         cell.updatedAt = Date()
-        try? modelContext.save()
-    }
-
-    private func clearContent(of cell: Cell) {
-        if let path = cell.imagePath {
-            ImageStorage.deleteImage(at: path)
-        }
-        cell.text = ""
-        cell.color = nil
-        cell.imagePath = nil
-        cell.updatedAt = Date()
-        loadedImage = nil
-        if isRootCell {
-            mandalart.title = ""
-            mandalart.updatedAt = Date()
-        }
         try? modelContext.save()
     }
 
