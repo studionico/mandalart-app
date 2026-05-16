@@ -175,7 +175,7 @@ src/
 │   ├── supabase/
 │   │   └── client.ts         # Supabase クライアント (env 欠損時フォールバック)
 │   ├── utils/
-│   │   ├── grid.ts                   # isCellEmpty / hasPeripheralContent / getCenterCell
+│   │   ├── grid.ts                   # isCellEmpty / hasPeripheralContent / getCenterCell / isGridContentEmpty
 │   │   ├── dnd.ts                    # resolveDndAction (D&D ルール判定)
 │   │   ├── dndPayload.ts             # HTML5 D&D 共通 helper: setDragPayload / getDragPayload (`application/x-mandalart-drag` MIME に `{ kind, id }` JSON を詰める / 取り出す)、applyCleanDragImage (cloneNode + setDragImage で WebKit drag image の他要素混入を回避)。useDragAndDrop / useDashboardDnd で使用
 │   │   ├── reorderArray.ts           # drag-and-drop 用 pure 関数: src → target に要素移動した新配列を返す (DashboardPage の card-reorder で使用)

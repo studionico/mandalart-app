@@ -5,10 +5,11 @@ import {
   getCenterCell,
   getPeripheralCells,
   isGridEmpty,
+  isGridContentEmpty,
   cellMap,
 } from '../grid'
 import { CENTER_POSITION, GRID_CELL_COUNT, PERIPHERAL_POSITIONS } from '@/constants/grid'
-import type { Cell } from '@/types'
+import type { Cell, Grid } from '@/types'
 
 function cell(pos: number, overrides: Partial<Cell> = {}): Cell {
   return {
@@ -97,5 +98,90 @@ describe('cellMap', () => {
     expect(m.get(0)?.text).toBe('a')
     expect(m.get(CENTER_POSITION)?.text).toBe('c')
     expect(m.get(8)).toBeUndefined()
+  })
+})
+
+describe('isGridContentEmpty', () => {
+  function makeGrid(overrides: Partial<Pick<Grid, 'center_cell_id' | 'memo'>> = {}) {
+    return {
+      center_cell_id: overrides.center_cell_id ?? 'center-id',
+      memo: overrides.memo ?? null,
+    }
+  }
+
+  describe('memo ガード', () => {
+    it('memo 非空 + cells 全空 + self-centered → false (= 保持)', () => {
+      const cells = Array.from({ length: GRID_CELL_COUNT }, (_, i) =>
+        cell(i, i === CENTER_POSITION ? { id: 'center-id', grid_id: 'g1' } : { grid_id: 'g1' }),
+      )
+      expect(isGridContentEmpty(makeGrid({ memo: 'note' }), cells, true)).toBe(false)
+    })
+    it('memo 非空 + cells 全空 + 非 self-centered → false (= 保持)', () => {
+      const cells = Array.from({ length: GRID_CELL_COUNT }, (_, i) =>
+        cell(i, i === CENTER_POSITION ? { id: 'center-id', grid_id: 'parent' } : { grid_id: 'g1' }),
+      )
+      expect(isGridContentEmpty(makeGrid({ memo: 'note' }), cells, false)).toBe(false)
+    })
+    it('memo 空白のみ + cells 全空 + self-centered → true (= 削除可)', () => {
+      const cells = Array.from({ length: GRID_CELL_COUNT }, (_, i) =>
+        cell(i, i === CENTER_POSITION ? { id: 'center-id', grid_id: 'g1' } : { grid_id: 'g1' }),
+      )
+      expect(isGridContentEmpty(makeGrid({ memo: '   \n  ' }), cells, true)).toBe(true)
+    })
+    it('memo null + cells 全空 + self-centered → true (= 削除可)', () => {
+      const cells = Array.from({ length: GRID_CELL_COUNT }, (_, i) =>
+        cell(i, i === CENTER_POSITION ? { id: 'center-id', grid_id: 'g1' } : { grid_id: 'g1' }),
+      )
+      expect(isGridContentEmpty(makeGrid({ memo: null }), cells, true)).toBe(true)
+    })
+  })
+
+  describe('self-centered (root / 独立並列)', () => {
+    it('周辺セル 1 つでも非空なら false', () => {
+      const cells = [
+        cell(0, { text: 'x', grid_id: 'g1' }),
+        cell(CENTER_POSITION, { id: 'center-id', grid_id: 'g1' }),
+      ]
+      expect(isGridContentEmpty(makeGrid(), cells, true)).toBe(false)
+    })
+    it('中心セルだけ非空でも false (= 保持)', () => {
+      const cells = Array.from({ length: GRID_CELL_COUNT }, (_, i) =>
+        i === CENTER_POSITION
+          ? cell(i, { id: 'center-id', grid_id: 'g1', text: 'center' })
+          : cell(i, { grid_id: 'g1' }),
+      )
+      expect(isGridContentEmpty(makeGrid(), cells, true)).toBe(false)
+    })
+    it('全 9 セル空 → true', () => {
+      const cells = Array.from({ length: GRID_CELL_COUNT }, (_, i) =>
+        cell(i, i === CENTER_POSITION ? { id: 'center-id', grid_id: 'g1' } : { grid_id: 'g1' }),
+      )
+      expect(isGridContentEmpty(makeGrid(), cells, true)).toBe(true)
+    })
+  })
+
+  describe('非 self-centered (X=C primary drilled)', () => {
+    it('中心セル (親 grid 由来) は無視し、自 grid 所属の周辺が全空なら true', () => {
+      // 中心は親由来 (grid_id !== self)、周辺 8 個は自 grid 所属で全空
+      const cells: Cell[] = [
+        ...Array.from({ length: 8 }, (_, i) => {
+          const pos = i < 4 ? i : i + 1 // 0..3, 5..8
+          return cell(pos, { grid_id: 'g1' })
+        }),
+        cell(CENTER_POSITION, { id: 'center-id', grid_id: 'parent', text: 'parent-content' }),
+      ]
+      expect(isGridContentEmpty(makeGrid({ center_cell_id: 'center-id' }), cells, false)).toBe(true)
+    })
+    it('周辺セルに 1 つでも内容あれば false', () => {
+      const cells: Cell[] = [
+        cell(0, { grid_id: 'g1', text: 'a' }),
+        ...Array.from({ length: 7 }, (_, i) => {
+          const pos = i < 3 ? i + 1 : i + 2
+          return cell(pos, { grid_id: 'g1' })
+        }),
+        cell(CENTER_POSITION, { id: 'center-id', grid_id: 'parent' }),
+      ]
+      expect(isGridContentEmpty(makeGrid({ center_cell_id: 'center-id' }), cells, false)).toBe(false)
+    })
   })
 })

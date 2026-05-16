@@ -476,6 +476,7 @@ Shift+Tab は逆順
 - **空グリッドの自動削除**: 離脱時 (並列切替 / パンくず / ホーム) に `cleanupGridIfEmpty` ([`EditorLayout.tsx`](../src/components/editor/EditorLayout.tsx)) が呼ばれ、グリッド種別ごとに以下を判定する:
   - **self-centered** (root grid / 独立並列グリッド、center cell が自グリッド所属) — **中心セルかつ peripherals 全て空**なら hard-delete (独立並列は center を持つため、中心のみ確認では誤削除につながる)
   - **非 self-centered (X=C primary drilled / レガシー共有並列)** — 周辺 8 セルが全て空なら hard-delete (X=C では中心は親 X と共有で空にできないため、周辺基準で判定する)
+  - **memo ガード (cells より優先)** — `grid.memo` がトリム後非空ならグリッド種別に関わらず保持する。memo は cells と独立したサイドパネル記述で、中心セルだけ埋めた状態でも memo 単独で「内容あり」とみなす (drill-up / breadcrumb / 並列 / Home いずれの経路でも同様)。判定本体は [`isGridContentEmpty`](../src/lib/utils/grid.ts) に集約
 
 ### アニメーション
 

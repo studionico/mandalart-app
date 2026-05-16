@@ -490,6 +490,20 @@ hasPeripheralContent(cells: Cell[]): boolean
 
 // 中央セル (position === 4) を取得
 getCenterCell(cells: Cell[]): Cell | undefined
+
+// グリッドが「内容なし」(= 自動 cleanup 対象) かどうかを判定する純関数。
+// memo が trim 後非空なら cells に関係なく false (= 保持) — サブグリッドの中心セル
+// にだけ memo を入れた状態を drill-up / breadcrumb / 並列 / Home の各経路で誤削除
+// から守るためのガード。
+// memo が空のときは:
+// - self-centered (root / 独立並列): 中心 + 周辺すべて isCellEmpty なら true
+// - 非 self-centered (X=C primary drilled): 周辺 (centerCellId 以外) すべて isCellEmpty なら true
+// EditorLayout の cleanupGridIfEmpty が判定本体として使う。
+isGridContentEmpty(
+  grid: Pick<Grid, 'center_cell_id' | 'memo'>,
+  cells: Cell[],
+  isSelfCentered: boolean,
+): boolean
 ```
 
 ## lib/utils/dnd.ts

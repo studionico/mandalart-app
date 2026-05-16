@@ -31,7 +31,7 @@ import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } 
 import { uploadCellImage } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
-import { isCellEmpty, hasPeripheralContent, getCenterCell } from '@/lib/utils/grid'
+import { isCellEmpty, hasPeripheralContent, getCenterCell, isGridContentEmpty } from '@/lib/utils/grid'
 import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
 import { nextTabPosition } from '@/constants/tabOrder'
 import {
@@ -1677,6 +1677,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
    *   兄弟の有無に関わらず削除する (以前は「単独 drilled」は X 保持のため残していたが、
    *   空グリッドの累積を招くだけで X 自体や UI には影響しないと判明したため廃止)。
    *
+   * 加えて **`grid.memo` (サイドパネル記述) が非空なら、cells に関係なく保持する**。
+   * memo は cells と独立した内容で、中心セルだけ埋まっていなくても memo 単独で
+   * 「内容あり」とみなさないと drill-up / breadcrumb / 並列 / Home の各経路で
+   * grid レコードごと hard-delete されて memo が消える。判定本体は
+   * [`isGridContentEmpty`](src/lib/utils/grid.ts) (純関数) に委譲する。
+   *
    * 判定は DB から再読み込みした merged cells で行う (state の部分更新で position
    * override が崩れていても影響を受けないようにするため)。
    */
@@ -1687,22 +1693,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const centerCell = gridWithCells.cells.find((c) => c.id === centerCellId)
       const isSelfCentered = centerCell?.grid_id === gridWithCells.id
 
-      if (isSelfCentered) {
-        const center = gridWithCells.cells.find((c) => c.position === CENTER_POSITION)
-        const peripherals = gridWithCells.cells.filter((c) => c.position !== CENTER_POSITION)
-        const centerEmpty = !center || isCellEmpty(center)
-        const peripheralsEmpty = peripherals.every(isCellEmpty)
-        if (!centerEmpty || !peripheralsEmpty) return false
-        // 自動掃除は復元の意図がないので soft-delete ではなく local + cloud の hard-delete を使う
-        // (deleteGrid の soft-delete では cloud に deleted_at 付きゴミが永続的に残るため)
-        await permanentDeleteGrid(gridId)
-        return true
+      if (!isGridContentEmpty(gridWithCells, gridWithCells.cells, isSelfCentered)) {
+        return false
       }
-
-      // 非 self-centered: peripherals (自 grid 所属のセル = centerCellId 以外) が全て空か?
-      const peripherals = gridWithCells.cells.filter((c) => c.id !== centerCellId)
-      if (peripherals.some((c) => !isCellEmpty(c))) return false
-
+      // 自動掃除は復元の意図がないので soft-delete ではなく local + cloud の hard-delete を使う
+      // (deleteGrid の soft-delete では cloud に deleted_at 付きゴミが永続的に残るため)
       await permanentDeleteGrid(gridId)
       return true
     } catch (e) {
