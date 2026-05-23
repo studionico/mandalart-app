@@ -46,6 +46,15 @@ enum CellCheckboxService {
         propagateDoneUp(cellId: cellId, ts: Date(), in: context)
     }
 
+    /// 空→非空入力 (= 新タスク発生) で、親 (中心セル) の done を解除する。
+    /// 入力されたセル自身を未完了にした後に呼び、祖先の done=true を再帰的に false へ戻す。
+    /// `context.save()` は呼出側で行う前提 (このメソッド内では save しない)。
+    /// desktop の [`updateCell`](../../../desktop/src/lib/api/cells.ts) 空→非空分岐の
+    /// `propagateUndoneUp` と対称。
+    static func propagateUndoneUpward(fromCellId cellId: String, in context: ModelContext) {
+        propagateUndoneUp(cellId: cellId, ts: Date(), in: context)
+    }
+
     // MARK: - subtree (down)
 
     /// 自身 + 配下の全 peripheral cells を `done` に揃える。

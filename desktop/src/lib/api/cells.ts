@@ -94,9 +94,15 @@ export async function updateCell(
     }
   }
 
-  // 空 → 非空 への遷移 + そのセルが done=0 のとき: 新しいタスクが生まれたので、
-  // 親セルの done=1 を解除して invariant を維持する。
-  if (cell && wasEmpty && !isCellEmpty(cell) && Number(cell.done) !== 1) {
+  // 空 → 非空 への遷移: 新たに入力されたセルは必ず未完了にする。cut / 内容クリア後に
+  // 残った stale done (done=1 のまま空にされた履歴) を 0 にリセットした上で、新タスク発生として
+  // 親セルの done=1 を解除して invariant を維持する。既存非空セルの text 編集 (typo 修正等) では
+  // wasEmpty=false なのでこの分岐に入らず done は保持される。
+  if (cell && wasEmpty && !isCellEmpty(cell)) {
+    if (Number(cell.done) === 1) {
+      await execute('UPDATE cells SET done = 0, updated_at = ? WHERE id = ?', [ts, cell.id])
+      cell.done = false
+    }
     await propagateUndoneUp(cell.id, ts)
   }
 
@@ -223,9 +229,11 @@ export async function pasteCell(
 
   if (mode === 'cut') {
     const ts = now()
+    // done=0 も明示リセット (shredCellSubtree と対称)。done を残すと、空になったセルへ
+    // 再入力したとき stale done が表示される (= 新規入力セルが完了扱いになるバグの発生源)。
     await execute(
-      'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
-      ['', null, null, ts, sourceCellId],
+      'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
+      ['', null, null, 0, ts, sourceCellId],
     )
     const sourceGridRow = await query<{ grid_id: string }>(
       'SELECT grid_id FROM cells WHERE id = ?',

@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
 import { createMandalart } from '@/lib/api/mandalarts'
 import { getRootGrids, createGrid, getGrid } from '@/lib/api/grids'
-import { upsertCellAt, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
+import { upsertCellAt, updateCell, pasteCell, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
 
 let db: Database.Database
 
@@ -165,5 +165,52 @@ describe('shredCellSubtree (done 上方再計算)', () => {
     await shredCellSubtree(p2.id)
     expect(doneOf(p1.id)).toBe(0)
     expect(doneOf(X.id)).toBe(0)
+  })
+})
+
+describe('updateCell / pasteCell (新規入力セルは必ず未完了)', () => {
+  const doneOf = (id: string) =>
+    Number((db.prepare('SELECT done FROM cells WHERE id = ?').get(id) as { done: number }).done)
+
+  it('stale done セルへ再入力すると未完了になる (空→非空で done=0 リセット)', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    const cell = await upsertCellAt(root.id, 0, { text: 'task' })
+    await toggleCellDone(cell.id)
+    expect(doneOf(cell.id)).toBe(1)
+
+    // 内容を空に編集 (done は stale で残る = 非空→空では reset しない仕様)
+    await updateCell(cell.id, { text: '' })
+    expect(doneOf(cell.id)).toBe(1)
+
+    // 再入力 (空→非空) → 必ず未完了
+    await updateCell(cell.id, { text: 'new-task' })
+    expect(doneOf(cell.id)).toBe(0)
+  })
+
+  it('既存非空セルの text 編集では done を保持する (空→非空でないため)', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    const cell = await upsertCellAt(root.id, 0, { text: 'task' })
+    await toggleCellDone(cell.id)
+    expect(doneOf(cell.id)).toBe(1)
+
+    await updateCell(cell.id, { text: 'task (edited)' })
+    expect(doneOf(cell.id)).toBe(1)
+  })
+
+  it('cut で source セルの done が 0 にリセットされる', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    // 周辺セルへの paste は中心セル非空が前提なので中心を埋める
+    await upsertCellAt(root.id, 4, { text: 'center' })
+    const src = await upsertCellAt(root.id, 0, { text: 'src' })
+    const dst = await upsertCellAt(root.id, 1, { text: 'dst' })
+    await toggleCellDone(src.id)
+    expect(doneOf(src.id)).toBe(1)
+
+    await pasteCell(src.id, dst.id, 'cut')
+    // source は空クリア + done=0
+    expect(doneOf(src.id)).toBe(0)
   })
 })

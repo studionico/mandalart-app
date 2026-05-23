@@ -201,7 +201,9 @@ upsertCellAt(
 
 // セルの内容を部分更新 (指定フィールドのみ)
 // ルートグリッドの中心セル (position=4) を更新した場合、
-// mandalarts.title も同じテキストで自動同期される
+// mandalarts.title も同じテキストで自動同期される。
+// 空→非空遷移 (新規入力) では done を 0 に固定 (stale done リセット) + propagateUndoneUp で
+// 親 done を解除する。既存非空セルの編集では done を保持 (= 空→非空遷移のみリセット)
 updateCell(
   id: string,
   params: { text?: string; image_path?: string | null; color?: string | null }
@@ -217,7 +219,8 @@ swapCellContent(cellIdA: string, cellIdB: string): Promise<void>
 swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void>
 
 // クリップボードからのペースト (カット/コピー)
-// copyCellSubtree で内容とサブツリーを複製し、cut モードなら source を論理削除
+// copyCellSubtree で内容とサブツリーを複製し、cut モードなら source の text/image/color/done を
+// クリア (done=0 も明示リセット → 空セルへの再入力で stale done が出ないようにする)
 pasteCell(sourceCellId: string, targetCellId: string, mode: 'cut' | 'copy'): Promise<void>
 
 // sourceCellId のサブツリーを targetCellId 配下に再帰的にコピー (BFS + bulk INSERT)。

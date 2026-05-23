@@ -654,12 +654,23 @@ struct EditorView: View {
             return
         }
 
+        let wasEmpty = target.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && target.imagePath == nil
         let now = Date()
         target.text = editingDraft
         target.updatedAt = now
         if target.id == m.rootCellId {
             m.title = editingDraft
             m.updatedAt = now
+        }
+        // 空 → 非空 への遷移: 新たに入力されたセルは必ず未完了にする (cut / 内容クリア後に残った
+        // stale done をリセット)。done=false に固定した上で、新タスク発生として親 (中心セル) の
+        // done を解除する。既存非空セルの編集 (typo 修正等) は wasEmpty=false なので done を保持。
+        let nowEmpty = editingDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && target.imagePath == nil
+        if wasEmpty && !nowEmpty {
+            if target.done { target.done = false }
+            CellCheckboxService.propagateUndoneUpward(fromCellId: target.id, in: modelContext)
         }
         try? modelContext.save()
     }
