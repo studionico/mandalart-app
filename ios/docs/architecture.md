@@ -59,6 +59,7 @@ ios/
 │   │   ├── PresetColors.swift    desktop と完全一致の 10 色 (light/dark 両値)
 │   │   └── ThemePreference.swift app.theme グローバル UserDefaults / 3 値 enum (light/system/dark) / colorScheme 算出
 │   └── Resources/
+│       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)
 └── docs/                    本ドキュメント群
 ```
