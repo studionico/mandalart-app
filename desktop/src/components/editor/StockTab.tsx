@@ -83,7 +83,7 @@ export default function StockTab({
 
   return (
     <div className="flex flex-col h-full gap-2">
-      {/* ストック追加導線は D&D 中の DragActionPanel (Copy アイコン) に集約済 (旧 data-stock-drop は廃止) */}
+      {/* ストック追加導線は D&D 中の DragActionPanel (「ストックにコピー」/「ストックへ移動」タイル) に集約済 (旧 data-stock-drop は廃止) */}
 
       {/* すべて削除ボタン (件数付き、2 クリック確認) */}
       {!loading && items.length > 0 && (

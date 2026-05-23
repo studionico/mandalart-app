@@ -5,8 +5,8 @@
  * resolveTargetSlot 相当が検出する。
  *
  * - shred: ターゲットセル + サブグリッド全体を完全削除 (確認 dialog 経由)
- * - move: snapshot をストック追加してから shred (= cut to stock)
- * - copy: snapshot をストック追加 (元はそのまま)
+ * - move (ストックへ移動): snapshot をストック追加してから shred (= cut to stock)
+ * - copy (ストックにコピー): snapshot をストック追加 (元はそのまま)
  * - export: snapshot を JSON / Markdown / IndentText で保存
  */
 export type ActionDropType = 'shred' | 'move' | 'copy' | 'export'
@@ -51,11 +51,11 @@ export default function DragActionPanel({ hoveredAction, getActionDropProps, hid
         </ActionTile>
       )}
       {!hideMoveTile && (
-        <ActionTile action="move" label="移動" hovered={hoveredAction === 'move'} dropProps={getActionDropProps?.('move')}>
+        <ActionTile action="move" label="ストックへ移動" hovered={hoveredAction === 'move'} dropProps={getActionDropProps?.('move')}>
           <MoveIcon />
         </ActionTile>
       )}
-      <ActionTile action="copy" label="コピー" hovered={hoveredAction === 'copy'} dropProps={getActionDropProps?.('copy')}>
+      <ActionTile action="copy" label="ストックにコピー" hovered={hoveredAction === 'copy'} dropProps={getActionDropProps?.('copy')}>
         <CopyIcon />
       </ActionTile>
       <ActionTile action="export" label="エクスポート" hovered={hoveredAction === 'export'} dropProps={getActionDropProps?.('export')}>
@@ -97,7 +97,7 @@ function ActionTile({
       onDrop={dropProps?.onDrop}
     >
       <div style={{ width: ICON_SIZE, height: ICON_SIZE }}>{children}</div>
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-[10px] font-medium text-center leading-tight">{label}</span>
     </div>
   )
 }

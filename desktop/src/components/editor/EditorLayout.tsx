@@ -2060,10 +2060,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         return
       }
       try {
-        await pasteSnapshot(clipboard.snapshot, target.id)
+        const snap = clipboard.snapshot  // redo 用に clear 前へ退避
+        const before = await buildCellSnapshot(target.id)  // 貼り付け先の元状態 (空セルなら空 snapshot)
+        await pasteSnapshot(snap, target.id)
         clipboard.clear()
         reload()
         reloadSubGrids()
+        pushUndo({
+          description: 'ペースト',
+          undo: async () => { await pasteSnapshotReplacing(before, target.id); reload(); reloadSubGrids() },
+          redo: async () => { await pasteSnapshot(snap, target.id); reload(); reloadSubGrids() },
+        })
         setToast({ message: 'ペーストしました', type: 'success' })
       } catch (e) {
         setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
@@ -2073,9 +2080,16 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // copy: 元セルを live 参照して複製 (元セルは残る)
     if (!clipboard.sourceCellId) return
     try {
-      await pasteCell(clipboard.sourceCellId, target.id, 'copy')
+      const sourceCellId = clipboard.sourceCellId
+      const before = await buildCellSnapshot(target.id)  // 貼り付け先の元状態 (copy は上書き確認なし)
+      await pasteCell(sourceCellId, target.id, 'copy')
       reload()
       reloadSubGrids()
+      pushUndo({
+        description: 'ペースト',
+        undo: async () => { await pasteSnapshotReplacing(before, target.id); reload(); reloadSubGrids() },
+        redo: async () => { await pasteCell(sourceCellId, target.id, 'copy'); reload(); reloadSubGrids() },
+      })
       setToast({ message: 'ペーストしました', type: 'success' })
     } catch (e) {
       setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
@@ -2086,16 +2100,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   const handleClipboardReplaceConfirm = useCallback(async () => {
     if (!clipboardReplace) return
     try {
-      await pasteSnapshotReplacing(clipboardReplace.snapshot, clipboardReplace.targetCellId)
+      const { snapshot, targetCellId } = clipboardReplace
+      const before = await buildCellSnapshot(targetCellId)  // 上書き前の貼り付け先状態
+      await pasteSnapshotReplacing(snapshot, targetCellId)
       useClipboardStore.getState().clear()
       reloadAll()
+      pushUndo({
+        description: 'ペースト',
+        undo: async () => { await pasteSnapshotReplacing(before, targetCellId); reloadAll() },
+        redo: async () => { await pasteSnapshotReplacing(snapshot, targetCellId); reloadAll() },
+      })
       setToast({ message: 'クリップボードの内容で上書きしました', type: 'success' })
     } catch (e) {
       setToast({ message: `上書き失敗: ${(e as Error).message}`, type: 'error' })
     } finally {
       setClipboardReplace(null)
     }
-  }, [clipboardReplace, reloadAll])
+  }, [clipboardReplace, reloadAll, pushUndo])
 
   // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
   // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。

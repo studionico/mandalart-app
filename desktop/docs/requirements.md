@@ -127,7 +127,7 @@ Shift+Tab は逆順
 | 任意のセル | 中央セル | ❌ 禁止 (drop ポリシー)|
 | **空セル** (text 空 + image_path なし) | 任意 | ❌ **drag source 不可** ([`Cell.tsx`](../src/components/editor/Cell.tsx) で `draggable=false`)。空セルは drop **target** にはなれる (= 内容を空マスへ移動できる) |
 
-中央セル絡みの cell-to-cell drop は全面廃止。中心セルからの操作は **D&D 中の 4 アクションアイコン** に集約 (シュレッダー / 移動 / コピー / エクスポート)。
+中央セル絡みの cell-to-cell drop は全面廃止。中心セルからの操作は **D&D 中の 4 アクションアイコン** に集約 (シュレッダー / ストックへ移動 / ストックにコピー / エクスポート)。
 
 ### 4 アクションアイコン (D&D 中のみ右パネルに表示)
 
@@ -136,16 +136,16 @@ Shift+Tab は逆順
 | アイコン | 動作 |
 |---|---|
 | 🗑️ シュレッダー | **確認ダイアログ** → セル内容 + 配下サブグリッド全体を完全削除 (復元不可) |
-| ✂️ 移動 | snapshot をストック追加 + 元セル内容 + 配下サブグリッド全体をクリア (= カット to ストック) |
-| 📋 コピー | snapshot をストック追加 (元セルは変化なし) |
+| ✂️ ストックへ移動 | snapshot をストック追加 + 元セル内容 + 配下サブグリッド全体をクリア (= カット to ストック) |
+| 📋 ストックにコピー | snapshot をストック追加 (元セルは変化なし) |
 | 💾 エクスポート | 形式選択 popup (JSON / Markdown / IndentText) → ダウンロードフォルダに保存 |
 
-中心セルを **シュレッダー / 移動** にドロップした場合は、操作完了後に **上の階層へ navigate**:
+中心セルを **シュレッダー / ストックへ移動** にドロップした場合は、操作完了後に **上の階層へ navigate**:
 - drilled grid 中心 → 親 grid に戻る (breadcrumb 1 段戻し)
 - root grid 中心 → dashboard へ
 - 独立並列 grid 中心 → 親 grid へ
 
-**移動 / コピー** にドロップしてストックに格納された際は、選択セル → 新規ストックエントリへの morph アニメ (Converge Overlay) で「格納先がストックのどこに入ったか」を視覚的に示す ([`animations.md`](animations.md) "5. Converge Overlay" 節)。メモタブがアクティブだった場合は SidePanel が `convergeStore.direction === 'stock'` を購読してストックタブへ自動切替するため、メモタブで drop しても着地点が必ず可視化される。
+**ストックへ移動 / ストックにコピー** にドロップしてストックに格納された際は、選択セル → 新規ストックエントリへの morph アニメ (Converge Overlay) で「格納先がストックのどこに入ったか」を視覚的に示す ([`animations.md`](animations.md) "5. Converge Overlay" 節)。メモタブがアクティブだった場合は SidePanel が `convergeStore.direction === 'stock'` を購読してストックタブへ自動切替するため、メモタブで drop しても着地点が必ず可視化される。
 
 **ストックエントリ**をドラッグした場合は、4 アクションアイコンへの drop 経路が無いため (ストック → 4 アイコンは意味を持たない) DragActionPanel を**出さず**、メモ / ストックタブをそのまま表示する (drag 起点が見えていてユーザーが drag 元を確認できる)。
 
@@ -214,7 +214,7 @@ Shift+Tab は逆順
 
 ### ダッシュボードのストックエリアと D&D
 - 右側に lg breakpoint 以上で `StockTab` が常駐表示される (editor 側 SidePanel と同じ w-72 幅)。エディタを開かずに stock 内容を一覧 / 削除 / paste できる
-- カード ↔ ストックの D&D は editor のセル D&D と同じ「4 アクションアイコン」UX を採用 (mandalart カードを drag 開始すると、右パネルの StockTab が **`DragActionPanel`** に切替わってシュレッダー / 移動 / コピー / エクスポートの 4 アイコンが現れる)
+- カード ↔ ストックの D&D は editor のセル D&D と同じ「4 アクションアイコン」UX を採用 (mandalart カードを drag 開始すると、右パネルの StockTab が **`DragActionPanel`** に切替わってシュレッダー / ストックへ移動 / ストックにコピー / エクスポートの 4 アイコンが現れる)
   - `shred`: 確認ダイアログ → `permanentDeleteMandalart` でマンダラートを完全削除 (cloud 含む)
   - `move`: `addToStock(root_cell_id)` で snapshot 保存 → `permanentDeleteMandalart` で削除 (= cut to stock)
   - `copy`: `addToStock(root_cell_id)` のみ (元 mandalart は残る)
@@ -409,8 +409,11 @@ Shift+Tab は逆順
 ## Undo / Redo
 
 - `⌘Z` / `⌘⇧Z` / `⌘Y` (Mac)、`Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` (Windows)
-- 対象: テキスト編集 / 色変更 / D&D (SWAP_SUBTREE / SWAP_CONTENT / COPY_SUBTREE) / セル移動
-- D&D の COPY_SUBTREE は「target の事前状態 + 新規作成された grid ID」を記録して undo でそれらを削除・復元する
+- 実装済み対象: テキスト編集 (色変更含む) / カット / **ペースト (クリップボード)** / D&D SWAP_SUBTREE
+  - ペーストは copy / cut→空セル / cut→上書き の 3 経路とも、貼り付け **前** の貼り付け先セル状態を `buildCellSnapshot` で退避し、undo で `pasteSnapshotReplacing` により復元する。cut→paste (移動) はカットとペーストの 2 エントリに分かれ、⌘Z 2 回で完全復元する
+  - ストックからの貼り付け (`handleStockPaste`) は Undo 対象外
+- 未実装 (将来対応): D&D の SWAP_CONTENT / COPY_SUBTREE / チェックのトグル
+- D&D の COPY_SUBTREE を実装する際は「target の事前状態 + 新規作成された grid ID」を記録して undo でそれらを削除・復元する想定
 
 ---
 
