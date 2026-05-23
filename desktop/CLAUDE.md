@@ -84,7 +84,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 - **データモデル**: `mandalarts → grids → cells` の再帰階層。FK 制約なし (後述)。`deleted_at` でソフトデリート。**子グリッドの中心セル行の有無は 3 パターン**: ① root / 独立並列 (migration 006+) は自グリッド所属、② X=C primary drilled は親 peripheral と共有、③ レガシー共有並列 (migration 006 未満) は primary と center_cell_id 共有 (落とし穴 #10 参照)。並列の判定は `grids.parent_cell_id` (migration 006) で統一
 - **lazy cell creation** (migration 005+): 空セル行は DB に作らない。`upsertCellAt(grid_id, position)` で書込時に初めて INSERT
 - **同期**: `lib/sync/` で last-write-wins (updated_at 比較)、`lib/realtime.ts` で postgres_changes 購読。マンダラート単位の UI プリファレンス (`show_checkbox`、migration 007) も同期される
-- **状態**: Zustand (`editorStore` / `undoStore` / `clipboardStore` / `authStore` / `themeStore` / `convergeStore`)。マンダラート単位の永続 UI 設定は DB カラム経由 (editorStore に置かない)。`convergeStore` は App 直下の `ConvergeOverlay` が購読し、エディタ ↔ ダッシュボード ↔ ストック 間のセル ↔ カード ↔ ストックエントリ morph アニメを駆動する
+- **状態**: Zustand (`editorStore` / `undoStore` / `authStore` / `themeStore` / `convergeStore`)。マンダラート単位の永続 UI 設定は DB カラム経由 (editorStore に置かない)。`convergeStore` は App 直下の `ConvergeOverlay` が購読し、エディタ ↔ ダッシュボード ↔ ストック 間のセル ↔ カード ↔ ストックエントリ morph アニメを駆動する
 - **ルーティング**: HashRouter — `/dashboard`, `/mandalart/:id`。認証ガードなし (ローカル専用モードで全機能使える)
 - 詳細は [`folder-structure.md`](docs/folder-structure.md)
 
@@ -150,7 +150,7 @@ components/ → hooks/ → lib/api/ → lib/db/ → tauri-plugin-sql (SQLite)
 
 | ファイル | 内容 |
 |---|---|
-| [`requirements.md`](docs/requirements.md) | 機能要件・UX・セル操作・D&D・ストック・クリップボード・空データルール・並列グリッド・ゴミ箱・デザイン |
+| [`requirements.md`](docs/requirements.md) | 機能要件・UX・セル操作・D&D・ストック・空データルール・並列グリッド・ゴミ箱・デザイン |
 | [`data-model.md`](docs/data-model.md) | SQLite スキーマ・マイグレーション・FK 排除理由・WAL・同期カラム |
 | [`api-spec.md`](docs/api-spec.md) | `lib/api/` / `lib/sync/` / `lib/realtime.ts` / Zustand の全シグネチャ |
 | [`folder-structure.md`](docs/folder-structure.md) | ディレクトリツリー・設計分離方針・設定ファイル一覧 |

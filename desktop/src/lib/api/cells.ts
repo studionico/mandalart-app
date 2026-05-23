@@ -192,66 +192,6 @@ export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise
 }
 
 /**
- * クリップボード (カット/コピー) からのペースト。
- */
-export async function pasteCell(
-  sourceCellId: string,
-  targetCellId: string,
-  mode: 'cut' | 'copy',
-): Promise<void> {
-  if (sourceCellId === targetCellId) return
-
-  const targetRows = await query<{ grid_id: string; position: number }>(
-    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
-    [targetCellId],
-  )
-  const target = targetRows[0]
-  if (target && target.position !== CENTER_POSITION) {
-    // 新モデル: 中心セル = 所属グリッドの center_cell_id が指すセル
-    const gridRow = await query<{ center_cell_id: string }>(
-      'SELECT center_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
-      [target.grid_id],
-    )
-    const centerId = gridRow[0]?.center_cell_id
-    const centerRows = centerId
-      ? await query<{ text: string; image_path: string | null }>(
-          'SELECT text, image_path FROM cells WHERE id = ? AND deleted_at IS NULL',
-          [centerId],
-        )
-      : []
-    const center = centerRows[0]
-    if (!center || (center.text.trim() === '' && center.image_path === null)) {
-      throw new Error('中心セルが空のグリッドの周辺セルにはペーストできません')
-    }
-  }
-
-  await copyCellSubtree(sourceCellId, targetCellId)
-
-  if (mode === 'cut') {
-    const ts = now()
-    // done=0 も明示リセット (shredCellSubtree と対称)。done を残すと、空になったセルへ
-    // 再入力したとき stale done が表示される (= 新規入力セルが完了扱いになるバグの発生源)。
-    await execute(
-      'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
-      ['', null, null, 0, ts, sourceCellId],
-    )
-    const sourceGridRow = await query<{ grid_id: string }>(
-      'SELECT grid_id FROM cells WHERE id = ?',
-      [sourceCellId],
-    )
-    const sourceGridId = sourceGridRow[0]?.grid_id ?? ''
-    const childGrids = await query<{ id: string }>(
-      'SELECT id FROM grids WHERE center_cell_id = ? AND id != ? AND deleted_at IS NULL',
-      [sourceCellId, sourceGridId],
-    )
-    for (const cg of childGrids) {
-      const { deleteGrid } = await import('./grids')
-      await deleteGrid(cg.id)
-    }
-  }
-}
-
-/**
  * cellId が「自グリッドの中心」(root / 独立並列の center_cell_id が指す = cells テーブル上 position=4 の行)
  * であり、かつそのグリッドの周辺セルが 1 つでも非空かを返す。
  *

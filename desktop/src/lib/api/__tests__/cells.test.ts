@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
 import { createMandalart } from '@/lib/api/mandalarts'
 import { getRootGrids, createGrid, getGrid } from '@/lib/api/grids'
-import { upsertCellAt, updateCell, pasteCell, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
+import { upsertCellAt, updateCell, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
 
 let db: Database.Database
 
@@ -168,7 +168,7 @@ describe('shredCellSubtree (done 上方再計算)', () => {
   })
 })
 
-describe('updateCell / pasteCell (新規入力セルは必ず未完了)', () => {
+describe('updateCell (新規入力セルは必ず未完了)', () => {
   const doneOf = (id: string) =>
     Number((db.prepare('SELECT done FROM cells WHERE id = ?').get(id) as { done: number }).done)
 
@@ -197,20 +197,5 @@ describe('updateCell / pasteCell (新規入力セルは必ず未完了)', () => 
 
     await updateCell(cell.id, { text: 'task (edited)' })
     expect(doneOf(cell.id)).toBe(1)
-  })
-
-  it('cut で source セルの done が 0 にリセットされる', async () => {
-    const m = await createMandalart('test')
-    const root = (await getRootGrids(m.id))[0]
-    // 周辺セルへの paste は中心セル非空が前提なので中心を埋める
-    await upsertCellAt(root.id, 4, { text: 'center' })
-    const src = await upsertCellAt(root.id, 0, { text: 'src' })
-    const dst = await upsertCellAt(root.id, 1, { text: 'dst' })
-    await toggleCellDone(src.id)
-    expect(doneOf(src.id)).toBe(1)
-
-    await pasteCell(src.id, dst.id, 'cut')
-    // source は空クリア + done=0
-    expect(doneOf(src.id)).toBe(0)
   })
 })

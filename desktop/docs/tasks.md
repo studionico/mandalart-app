@@ -55,7 +55,7 @@
 
 - [x] `src/store/editorStore.ts`（currentGridId / viewMode / breadcrumb）
 - [x] `src/store/undoStore.ts`（操作履歴スタック）
-- [x] `src/store/clipboardStore.ts`（カット/コピー状態）
+- [x] ~~`src/store/clipboardStore.ts`（カット/コピー状態）~~ → 2026-05-24 削除（カット＆ペースト機能 全廃、フェーズ17 参照）
 
 ---
 
@@ -171,6 +171,8 @@
 ---
 
 ## フェーズ 17: カット＆ペースト ✅
+
+> ⚠️ **2026-05-24 廃止**: 右クリックの カット / コピー / ペースト / ストックに追加 と ⌘X/⌘C/⌘V、関連 Undo は仕様変更により全廃。`clipboardStore` / `pasteCell` も削除済み。階層間データ移動はストックエリア（D&D の移動/コピー + ストックからのペースト）に集約。以下のチェックリストは歴史記録として残す。
 
 - [x] 右クリックコンテキストメニュー（カット / コピー / ペースト / ストックに追加）
 - [x] ~~カット後のセルをグレーアウト表示（clipboardStore）~~ → **廃止**: カットは即削除 + snapshot 退避方式に変更（下記）

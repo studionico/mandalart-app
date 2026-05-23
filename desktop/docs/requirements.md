@@ -163,15 +163,8 @@ Shift+Tab は逆順
 
 ## 階層間データ移動
 
-### カット＆ペースト
-- 右クリックのコンテキストメニューから カット / コピー を選択
-- キーボードショートカット（⌘X / ⌘C / ⌘V）
-- **カットは実行した瞬間に元セルを空にし、内容を detached snapshot としてクリップボードに退避する** (一般的な ⌘X 挙動)。
-  - 貼れば移動、貼らなければ消えたまま (= シュレッダーとしても使える)。
-  - 安全網として **カットは undo に積まれ ⌘Z で元セルに復元**できる。
-  - 中心セル保護: 自グリッドの中心セルで周辺が 1 つでも非空なら、周辺が孤立するためカット不可。
-  - 入力ありセルへ cut paste すると上書き確認ダイアログを表示。
-- コピーは元セルを live 参照し、ペースト時に複製する (元セルは残る)。
+> セル単位のカット / コピー / ペースト (右クリックメニュー + ⌘X/⌘C/⌘V) は廃止済み。
+> 階層間のデータ移動はストックエリア (D&D の「ストックへ移動」「ストックにコピー」+ ストックからのペースト) に集約する。
 
 ### ストックエリア
 - セルをストックへコピー → 別の階層で貼り付け
@@ -245,12 +238,11 @@ Shift+Tab は逆順
   - drill 時の **新規 sub-grid 作成** (既存 sub-grid への drill-down は通す)
   - 並列グリッドの追加 / 削除
   - メモタブの textarea 編集 (readOnly + grayed-out、プレビューは通常通り閲覧可能)
-  - clipboard `⌘X` (cut)、`⌘V` (paste)、context menu の cut / paste / import
+  - context menu の import (= cell 編集を伴う)
   - D&D の `move` / `shred` (cell-to-cell drag 自体が起動しない、stock → cell の paste も block)
   - チェックボックス state の切替 (`handleToggleDone`)
 - **ロック中も通る操作 (閲覧 / マンダラート操作)**:
   - drill / drill-up / 9×9 切替 / parallel switch / breadcrumb / home navigation
-  - `⌘C` (copy)、context menu の copy / stock 追加 (= 元 cell 不変)
   - D&D の 4 アクション `copy` / `export` (読み取り操作)、ダッシュボードカード経由の copy / export / pin / 複製 / フォルダ移動 / ゴミ箱 (ロックは「中身を編集させない」目的)
   - **ダッシュボードのカード drag 中、destructive な 2 アクション (シュレッダー / 移動) はロック中マンダラートに対しては `DragActionPanel` から tile が描画されない** (`hideShredTile` / `hideMoveTile` が立つ)。drop target として DOM 自体が存在しないので drop 不可。defensive ガードは `handleDashboardDrop` の `'shred'` / `'move'` case と `permanentDeleteMandalart` API 層の 3 重で構成 (落とし穴 #15「禁止アクションは drop target を出さない」方針)
 - **複製時の継承**: `pinned` は継承しないが、`locked` は **継承する** (テンプレートとしてロック済みマンダラートを複製する用途を想定。新コピーもロック状態で渡る)
@@ -409,8 +401,7 @@ Shift+Tab は逆順
 ## Undo / Redo
 
 - `⌘Z` / `⌘⇧Z` / `⌘Y` (Mac)、`Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` (Windows)
-- 実装済み対象: テキスト編集 (色変更含む) / カット / **ペースト (クリップボード)** / D&D SWAP_SUBTREE
-  - ペーストは copy / cut→空セル / cut→上書き の 3 経路とも、貼り付け **前** の貼り付け先セル状態を `buildCellSnapshot` で退避し、undo で `pasteSnapshotReplacing` により復元する。cut→paste (移動) はカットとペーストの 2 エントリに分かれ、⌘Z 2 回で完全復元する
+- 実装済み対象: テキスト編集 (色変更含む) / D&D SWAP_SUBTREE
   - ストックからの貼り付け (`handleStockPaste`) は Undo 対象外
 - 未実装 (将来対応): D&D の SWAP_CONTENT / COPY_SUBTREE / チェックのトグル
 - D&D の COPY_SUBTREE を実装する際は「target の事前状態 + 新規作成された grid ID」を記録して undo でそれらを削除・復元する想定

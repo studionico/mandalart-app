@@ -150,7 +150,6 @@ src/
 ├── store/                    # Zustand グローバルストア
 │   ├── editorStore.ts        # currentMandalart (ロック購読源) / currentGridId / viewMode / breadcrumb / fontLevel
 │   ├── undoStore.ts          # 操作履歴スタック
-│   ├── clipboardStore.ts     # mode / sourceCellId (スナップショットは持たない)
 │   ├── authStore.ts          # session / user / loading
 │   ├── themeStore.ts         # light / dark / system
 │   └── convergeStore.ts      # クロスルート morph 用 overlay state (direction='home'|'open'|'stock' / targetId / sourceRect / centerCell)

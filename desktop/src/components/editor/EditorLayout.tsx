@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEditorStore, type BreadcrumbItem } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
-import { useClipboardStore } from '@/store/clipboardStore'
 import { useGrid } from '@/hooks/useGrid'
 import { useSubGrids, type SubGridData } from '@/hooks/useSubGrids'
 import { useRealtime } from '@/hooks/useRealtime'
@@ -25,9 +24,9 @@ import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { WarningIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
-import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree, isSelfCenterWithPeripheralContent } from '@/lib/api/cells'
+import { toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
 import { getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
-import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock, buildCellSnapshot, pasteSnapshot, pasteSnapshotReplacing } from '@/lib/api/stock'
+import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
 import { uploadCellImage } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
@@ -55,7 +54,7 @@ import {
   OUTER_GRID_GAP_PX,
   SIDE_BUTTON_RESERVE_PX,
 } from '@/constants/layout'
-import type { Cell, Grid, StockItem, CellSnapshot } from '@/types'
+import type { Cell, Grid, StockItem } from '@/types'
 
 type Props = {
   mandalartId: string
@@ -133,7 +132,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   const { push: pushUndo } = useUndo()
   const { isOffline } = useOffline()
-  const clipboard = useClipboardStore()
 
   const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
   const { subGrids, reload: reloadSubGrids, setSubGrids } = useSubGrids(gridData?.cells ?? [])
@@ -452,10 +450,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   }
 
   // コンテキストメニュー
-  // context menu は (a) 既存 cell に対する 5 項目メニュー (kind: 'cell') と
-  // (b) 空 slot (DB row 不在) に対する import / paste のみのメニュー (kind: 'slot') の 2 形態。
-  // 'slot' クリック時は handleContextAction 内で upsertCellAt を呼んで実 row を遅延作成し、
-  // 既存の importIntoCell / handlePaste 経路に合流する。
+  // context menu は (a) 既存 cell と (b) 空 slot (DB row 不在) の 2 形態。どちらも
+  // 「ここにインポート」のみを提供する。'slot' クリック時は handleContextAction 内で
+  // upsertCellAt を呼んで実 row を遅延作成してから import 経路に合流する。
   type ContextMenuState =
     | { x: number; y: number; kind: 'cell'; cell: Cell }
     | { x: number; y: number; kind: 'slot'; gridId: string; position: number }
@@ -790,9 +787,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // ストック → 入力ありの周辺セル drop: 確認 dialog を開く
   const [replaceConfirm, setReplaceConfirm] = useState<{ stockItemId: string; targetCellId: string; targetText: string } | null>(null)
 
-  // クリップボードのカット (snapshot) → 入力ありセルへの paste: 上書き確認 dialog を開く
-  const [clipboardReplace, setClipboardReplace] = useState<{ snapshot: CellSnapshot; targetCellId: string; targetText: string } | null>(null)
-
   const handleStockReplaceDrop = useCallback((stockItemId: string, targetCellId: string) => {
     if (isLocked) return  // ロック中は確認 dialog も開かない
     const target = dndCells.find((c) => c.id === targetCellId)
@@ -1072,65 +1066,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     isLocked,  // ロック中は drag/drop 全 path を block (migration 011)
   )
 
-  // クリップボードショートカット用: マウス位置を追跡
-  const mousePosRef = useRef({ x: 0, y: 0 })
+  // ファイル drop 等で最新の dndCells を []-deps クロージャ越しに参照するための ref
   const dndCellsRef = useRef<Cell[]>(dndCells)
   dndCellsRef.current = dndCells
-  // 最新の handlePaste を保持（useEffect の []-deps クロージャ越しでも最新参照を使うため）
-  const handlePasteRef = useRef<(target: Cell) => Promise<void>>(async () => {})
-  const handleCutRef = useRef<(cell: Cell) => Promise<void>>(async () => {})
-  // 最新の isLocked を keydown listener (deps=[]) から参照するための ref (migration 011)
-  const isLockedRef = useRef(isLocked)
-  isLockedRef.current = isLocked
-
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      mousePosRef.current = { x: e.clientX, y: e.clientY }
-    }
-    function getHoveredCell(): Cell | null {
-      const { x, y } = mousePosRef.current
-      const el = document.elementFromPoint(x, y)
-      const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
-      const id = cellEl?.dataset.cellId
-      if (!id) return null
-      return dndCellsRef.current.find((c) => c.id === id) ?? null
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      const mod = e.metaKey || e.ctrlKey
-      if (!mod) return
-      // 入力中はテキスト編集側の ⌘X/C/V を優先
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-
-      if (e.key === 'c' || e.key === 'x') {
-        const cell = getHoveredCell()
-        if (!cell || isCellEmpty(cell)) return
-        // ロック中は ⌘X (cut = 元セル即削除を伴う) を block。⌘C は通す (migration 011)。
-        if (e.key === 'x' && isLockedRef.current) return
-        e.preventDefault()
-        if (e.key === 'x') {
-          handleCutRef.current(cell)  // 即削除 + snapshot 退避 + undo 登録
-        } else {
-          useClipboardStore.getState().setCopy(cell.id)
-          setToast({ message: 'コピーしました', type: 'info' })
-        }
-      } else if (e.key === 'v') {
-        const cell = getHoveredCell()
-        if (!cell) return
-        const cb = useClipboardStore.getState()
-        if (!cb.mode || (!cb.sourceCellId && !cb.snapshot)) return
-        if (isLockedRef.current) return  // ロック中は ⌘V (paste) を block
-        e.preventDefault()
-        handlePasteRef.current(cell)
-      }
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [])
 
   // デスクトップからのファイル drop (HTML5 dataTransfer.files、`dragDropEnabled: false` 前提)。
   // 画像ファイルを受け付け、ドロップ位置のセルに保存 + image_path を更新する。
@@ -1961,22 +1899,18 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!contextMenu) return
     const menu = contextMenu
     setContextMenu(null)
+    if (action !== 'import') return
+    if (isLocked) return  // ロック中は import (cell 編集) を block
 
     if (menu.kind === 'slot') {
-      // 空 slot は import / paste のみ受付
-      if (action !== 'import' && action !== 'paste') return
-      if (isLocked) return
+      // 空 slot は実 row を遅延作成してから import 経路に合流する
       try {
         const newCell = await upsertCellAt(menu.gridId, menu.position, {})
         refreshCell(newCell)
-        if (action === 'import') {
-          setImportTarget({
-            cellId: newCell.id,
-            cellLabel: newCell.text || `セル ${newCell.position + 1}`,
-          })
-        } else {
-          await handlePaste(newCell)
-        }
+        setImportTarget({
+          cellId: newCell.id,
+          cellLabel: newCell.text || `セル ${newCell.position + 1}`,
+        })
       } catch (err) {
         setToast({ message: `操作失敗: ${(err as Error).message}`, type: 'error' })
       }
@@ -1984,139 +1918,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
 
     const cell = menu.cell
-    switch (action) {
-      case 'copy':
-        clipboard.setCopy(cell.id)
-        setToast({ message: 'コピーしました', type: 'info' })
-        break
-      case 'cut':
-        // 即削除 + snapshot 退避 + undo 登録。ロック中 block / 中心セル保護は handleCut が担う。
-        await handleCut(cell)
-        break
-      case 'paste':
-        await handlePaste(cell)
-        break
-      case 'stock':
-        // stock 追加は cell の copy 操作 (元 cell に変化なし) なのでロック中も通す
-        await addToStock(cell.id)
-        setStockReloadKey((k) => k + 1)
-        setToast({ message: 'ストックに追加しました', type: 'success' })
-        break
-      case 'import':
-        if (isLocked) return  // ロック中は import (cell 編集) を block
-        setImportTarget({
-          cellId: cell.id,
-          cellLabel: cell.text || `セル ${cell.position + 1}`,
-        })
-        break
-    }
+    setImportTarget({
+      cellId: cell.id,
+      cellLabel: cell.text || `セル ${cell.position + 1}`,
+    })
   }
-
-  // カット: 即座に元セルを空にして内容を detached snapshot としてクリップボードに退避する。
-  // 貼れば移動、貼らなければ消えたまま (= シュレッダー)。安全網として undo に積み ⌘Z で復元できる。
-  async function handleCut(cell: Cell) {
-    if (isLocked) return  // ロック中は cut (即削除を伴う) を block (migration 011)
-    if (isCellEmpty(cell)) return  // 空セルはカット対象にしない
-    // 中心セル保護: 自グリッドの中心 + 周辺非空なら、中心を空にすると周辺が孤立するため block。
-    if (await isSelfCenterWithPeripheralContent(cell.id)) {
-      setToast({ message: '周辺セルがあるため中心セルはカットできません', type: 'info' })
-      return
-    }
-    try {
-      const snap = await buildCellSnapshot(cell.id)
-      await shredCellSubtree(cell.id)
-      useClipboardStore.getState().setCut(snap)
-      pushUndo({
-        description: 'カット',
-        undo: async () => { await pasteSnapshot(snap, cell.id); reload(); reloadSubGrids() },
-        redo: async () => { await shredCellSubtree(cell.id); reload(); reloadSubGrids() },
-      })
-      reload()
-      reloadSubGrids()
-      setToast({ message: 'カットしました（⌘V で貼り付け / ⌘Z で取り消し）', type: 'info' })
-    } catch (e) {
-      setToast({ message: `カット失敗: ${(e as Error).message}`, type: 'error' })
-    }
-  }
-  handleCutRef.current = handleCut
-
-  async function handlePaste(target: Cell) {
-    if (isLocked) return  // ロック中は paste を block (migration 011)
-    if (!clipboard.mode || (!clipboard.sourceCellId && !clipboard.snapshot)) {
-      setToast({ message: 'クリップボードが空です', type: 'info' })
-      return
-    }
-    if (clipboard.mode === 'copy' && clipboard.sourceCellId === target.id) return
-    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可。
-    // drilled child grid では中心の grid_id が異なるため canPasteIntoPeripheral (getCenterCell ベース) で判定。
-    if (!canPasteIntoPeripheral(target, dndCells)) {
-      setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
-      return
-    }
-    // cut: detached snapshot から復元。入力ありセルへは上書き確認 dialog を経由する。
-    if (clipboard.mode === 'cut' && clipboard.snapshot) {
-      if (!isCellEmpty(target)) {
-        setClipboardReplace({ snapshot: clipboard.snapshot, targetCellId: target.id, targetText: target.text })
-        return
-      }
-      try {
-        const snap = clipboard.snapshot  // redo 用に clear 前へ退避
-        const before = await buildCellSnapshot(target.id)  // 貼り付け先の元状態 (空セルなら空 snapshot)
-        await pasteSnapshot(snap, target.id)
-        clipboard.clear()
-        reload()
-        reloadSubGrids()
-        pushUndo({
-          description: 'ペースト',
-          undo: async () => { await pasteSnapshotReplacing(before, target.id); reload(); reloadSubGrids() },
-          redo: async () => { await pasteSnapshot(snap, target.id); reload(); reloadSubGrids() },
-        })
-        setToast({ message: 'ペーストしました', type: 'success' })
-      } catch (e) {
-        setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
-      }
-      return
-    }
-    // copy: 元セルを live 参照して複製 (元セルは残る)
-    if (!clipboard.sourceCellId) return
-    try {
-      const sourceCellId = clipboard.sourceCellId
-      const before = await buildCellSnapshot(target.id)  // 貼り付け先の元状態 (copy は上書き確認なし)
-      await pasteCell(sourceCellId, target.id, 'copy')
-      reload()
-      reloadSubGrids()
-      pushUndo({
-        description: 'ペースト',
-        undo: async () => { await pasteSnapshotReplacing(before, target.id); reload(); reloadSubGrids() },
-        redo: async () => { await pasteCell(sourceCellId, target.id, 'copy'); reload(); reloadSubGrids() },
-      })
-      setToast({ message: 'ペーストしました', type: 'success' })
-    } catch (e) {
-      setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
-    }
-  }
-  handlePasteRef.current = handlePaste
-
-  const handleClipboardReplaceConfirm = useCallback(async () => {
-    if (!clipboardReplace) return
-    try {
-      const { snapshot, targetCellId } = clipboardReplace
-      const before = await buildCellSnapshot(targetCellId)  // 上書き前の貼り付け先状態
-      await pasteSnapshotReplacing(snapshot, targetCellId)
-      useClipboardStore.getState().clear()
-      reloadAll()
-      pushUndo({
-        description: 'ペースト',
-        undo: async () => { await pasteSnapshotReplacing(before, targetCellId); reloadAll() },
-        redo: async () => { await pasteSnapshotReplacing(snapshot, targetCellId); reloadAll() },
-      })
-      setToast({ message: 'クリップボードの内容で上書きしました', type: 'success' })
-    } catch (e) {
-      setToast({ message: `上書き失敗: ${(e as Error).message}`, type: 'error' })
-    } finally {
-      setClipboardReplace(null)
-    }
-  }, [clipboardReplace, reloadAll, pushUndo])
 
   // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
   // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。
@@ -3167,43 +2973,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseLeave={() => setContextMenu(null)}
         >
-          {contextMenu.kind === 'cell' && (
-            <>
-              <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between">
-                カット <span className="text-neutral-400 dark:text-neutral-500">⌘X</span>
-              </button>
-              <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between">
-                コピー <span className="text-neutral-400 dark:text-neutral-500">⌘C</span>
-              </button>
-              <button
-                onClick={() => handleContextAction('paste')}
-                disabled={!clipboard.sourceCellId && !clipboard.snapshot}
-                className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
-              </button>
-              <button onClick={() => handleContextAction('stock')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800">
-                ストックに追加
-              </button>
-              <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-b-xl">
-                ここにインポート
-              </button>
-            </>
-          )}
-          {contextMenu.kind === 'slot' && (
-            <>
-              <button
-                onClick={() => handleContextAction('paste')}
-                disabled={!clipboard.sourceCellId && !clipboard.snapshot}
-                className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
-              </button>
-              <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-b-xl">
-                ここにインポート
-              </button>
-            </>
-          )}
+          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-xl">
+            ここにインポート
+          </button>
         </div>
       )}
 
@@ -3225,14 +2997,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         targetText={replaceConfirm?.targetText}
         onCancel={() => setReplaceConfirm(null)}
         onConfirm={handleReplaceConfirm}
-      />
-
-      {/* クリップボードのカット → 入力ありセル paste の上書き確認 */}
-      <ReplaceConfirmDialog
-        open={clipboardReplace !== null}
-        targetText={clipboardReplace?.targetText}
-        onCancel={() => setClipboardReplace(null)}
-        onConfirm={handleClipboardReplaceConfirm}
       />
 
       {/* シュレッダー drop 確認 */}

@@ -322,7 +322,6 @@ Supabase 側も同じ schema 変更 (`parent_cell_id` DROP → `center_cell_id T
 
 - `deleteMandalart` → cells / grids / mandalarts の順に UPDATE で `deleted_at` をセット
 - `deleteGrid` → 子孫の cells / grids を再帰的にソフトデリート
-- `pasteCell` cut モード → 子グリッドを `deleteGrid` で論理削除
 
 ---
 
