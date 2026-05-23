@@ -46,7 +46,7 @@ ios/
 │   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree / permanentDeleteGrid)
 │   │   ├── StockService.swift    Stock CRUD (addToStock / moveCellToStock = cut / pasteFromStock、CellSnapshot/GridSnapshot は desktop と互換)
 │   │   ├── CellCheckboxService.swift done トグル + サブツリー down 伝播 + 親方向 up 伝播 (desktop toggleCellDone と等価、centerCellId ベース)。recomputeDoneUpward = シュレッダー / cut 後の中心 done 再計算
-│   │   ├── CellSwapService.swift     周辺セル入れ替え (text/imagePath/color + grids の parentCellId/centerCellId を双方向 swap、自グリッド除外、done 除外)
+│   │   ├── CellSwapService.swift     周辺セル入れ替え (text/imagePath/color/done + grids の parentCellId/centerCellId を双方向 swap、自グリッド除外、done も内容に付随)
 │   │   ├── TransferService.swift Export/Import (JSON / Markdown / IndentText)。round-trip で位置保存
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll

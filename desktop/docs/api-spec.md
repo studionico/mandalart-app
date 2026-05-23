@@ -207,7 +207,8 @@ updateCell(
   params: { text?: string; image_path?: string | null; color?: string | null }
 ): Promise<Cell>
 
-// 2 つのセルの内容 (text / image_path / color) のみを入れ替える
+// 2 つのセルの内容 (text / image_path / color / done) のみを入れ替える
+// done もチェックボックス状態としてセルに付随して swap する (同一 grid 内 swap なので done 集合不変 → 中心 done 再計算不要)
 // サブツリー (子グリッド) は移動しない
 swapCellContent(cellIdA: string, cellIdB: string): Promise<void>
 

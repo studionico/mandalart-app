@@ -110,10 +110,13 @@ export async function swapCellContent(cellIdA: string, cellIdB: string): Promise
   ])
   const ca = a[0]; const cb = b[0]
   const ts = now()
-  await execute('UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
-    [cb.text, cb.image_path, cb.color, ts, cellIdA])
-  await execute('UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
-    [ca.text, ca.image_path, ca.color, ts, cellIdB])
+  // done も content と一緒に swap する (チェックボックス状態をセルに付随させる)。
+  // swap は同一グリッド内の周辺↔周辺のみなので done 値の集合は不変 → 中心セル done は変化せず
+  // 親方向の再計算は不要 (areDescendantsAllDone の判定母数が swap 前後で同一)。
+  await execute('UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
+    [cb.text, cb.image_path, cb.color, cb.done ? 1 : 0, ts, cellIdA])
+  await execute('UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
+    [ca.text, ca.image_path, ca.color, ca.done ? 1 : 0, ts, cellIdB])
 }
 
 /**

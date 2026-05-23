@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
 import { createMandalart } from '@/lib/api/mandalarts'
 import { getRootGrids, createGrid, getGrid } from '@/lib/api/grids'
-import { upsertCellAt, swapCellSubtree, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
+import { upsertCellAt, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
 
 let db: Database.Database
 
@@ -98,6 +98,29 @@ describe('swapCellSubtree (周辺 ↔ 周辺、両方サブツリー有り)', ()
       .prepare("SELECT id FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL AND id != ?")
       .all(A.id, root.id) as { id: string }[]
     expect(gridsCenteredOnA).toHaveLength(0)
+  })
+
+  it('done も content と一緒に swap される (チェックボックス状態がセルに付随)', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    const A = await upsertCellAt(root.id, 0, { text: 'A-text' })
+    const B = await upsertCellAt(root.id, 1, { text: 'B-text' })
+    // A だけ done 化 (周辺 2 つのうち 1 つなので中心は done にならない)
+    await toggleCellDone(A.id)
+
+    const doneOf = (id: string) =>
+      Number((db.prepare('SELECT done FROM cells WHERE id = ?').get(id) as { done: number }).done)
+    expect(doneOf(A.id)).toBe(1)
+    expect(doneOf(B.id)).toBe(0)
+
+    // swap → done が text と一緒に入れ替わる
+    await swapCellContent(A.id, B.id)
+    expect(doneOf(A.id)).toBe(0)
+    expect(doneOf(B.id)).toBe(1)
+    // text も入れ替わっていること (回帰確認)
+    const after = (await getGrid(root.id)).cells
+    expect(after.find((c) => c.id === A.id)?.text).toBe('B-text')
+    expect(after.find((c) => c.id === B.id)?.text).toBe('A-text')
   })
 })
 

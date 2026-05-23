@@ -8,8 +8,9 @@ import SwiftData
 /// (desktop `resolveDndAction` の rule と整合、落とし穴 #15)。
 ///
 /// **入れ替え対象**:
-/// - cells: `text` / `imagePath` / `color` (3 フィールド)。**`done` は入れ替えない** —
-///   done 状態はポジション付随で残り、内容だけ移動する (= desktop と同挙動)
+/// - cells: `text` / `imagePath` / `color` / `done` (4 フィールド)。done も内容に付随して swap する
+///   (= チェックボックス状態がセルと一緒に移動。desktop swapCellContent と同挙動)。
+///   swap は同一グリッド内の周辺↔周辺のみで done 値の集合が不変なので中心セル done の再計算は不要。
 /// - grids: 配下 sub-grid 群の `parentCellId` と `centerCellId` を双方向で付け替え。
 ///   自グリッド (= cell が center を担当している grid 行自身) は除外して root 自己参照を保つ
 ///
@@ -67,17 +68,22 @@ enum CellSwapService {
             g.updatedAt = ts
         }
 
-        // 3. content swap (text / imagePath / color)。done は swap しない (= ポジション付随)
+        // 3. content swap (text / imagePath / color / done)。done も内容に付随して swap する。
+        //    swap は同一グリッド内の周辺↔周辺のみで done 値の集合が不変なので、中心セル done の
+        //    再計算は不要 (areDescendantsAllDone の判定母数が swap 前後で同一)。
         let srcText = source.text
         let srcImage = source.imagePath
         let srcColor = source.color
+        let srcDone = source.done
         source.text = target.text
         source.imagePath = target.imagePath
         source.color = target.color
+        source.done = target.done
         source.updatedAt = ts
         target.text = srcText
         target.imagePath = srcImage
         target.color = srcColor
+        target.done = srcDone
         target.updatedAt = ts
 
         try context.save()
