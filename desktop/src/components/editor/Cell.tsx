@@ -18,7 +18,6 @@ type Props = {
   cell: CellType
   isCenter: boolean
   isDisabled: boolean
-  isCut: boolean
   isDragSource: boolean  // ドラッグ中のセル（半透明）
   isDragOver: boolean    // ドロップ候補（リングハイライト）
   childCount: number
@@ -62,7 +61,7 @@ type Props = {
 const CLICK_DELAY = CLICK_DELAY_MS    // single vs double click 判定 (ms)
 
 export default function Cell({
-  cell, isCenter, isDisabled, isCut, isDragSource, isDragOver, childCount, fontScale,
+  cell, isCenter, isDisabled, isDragSource, isDragOver, childCount, fontScale,
   isInlineEditing, userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
   onDrill,
@@ -371,7 +370,7 @@ export default function Cell({
               : `rounded-lg border ${isLocked ? 'border-neutral-200 dark:border-neutral-800' : 'border-neutral-300 dark:border-neutral-700'} shadow-sm`
         }
         ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}
-        ${isCut || isDragSource ? 'opacity-40' : ''}
+        ${isDragSource ? 'opacity-40' : ''}
         ${isDragOver && !isDisabled ? 'ring-2 ring-neutral-500 dark:ring-neutral-400 ring-offset-1' : ''}
         group
       `}

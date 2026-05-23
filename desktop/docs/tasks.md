@@ -173,9 +173,10 @@
 ## フェーズ 17: カット＆ペースト ✅
 
 - [x] 右クリックコンテキストメニュー（カット / コピー / ペースト / ストックに追加）
-- [x] カット後のセルをグレーアウト表示（clipboardStore）
+- [x] ~~カット後のセルをグレーアウト表示（clipboardStore）~~ → **廃止**: カットは即削除 + snapshot 退避方式に変更（下記）
 - [x] ⌘X / ⌘C / ⌘V キーボードショートカット実装（hover セル検出）
-- [x] ペースト操作の完全実装（`pasteCell` — サブツリーコピー + cut モードで source クリア）
+- [x] ペースト操作の完全実装（copy は `pasteCell`、cut は `pasteSnapshot`）
+- [x] **カット = 即削除 + snapshot 退避**: ⌘X で元セルを即空にし内容を clipboardStore に snapshot 保持（貼らなければシュレッダー、貼れば移動）。安全網として undo 登録（⌘Z 復元）、中心セル保護（`isSelfCenterWithPeripheralContent`）、入力ありセルへは上書き確認ダイアログ
 
 ---
 

@@ -7,6 +7,7 @@ import {
   isGridEmpty,
   isGridContentEmpty,
   cellMap,
+  canPasteIntoPeripheral,
 } from '../grid'
 import { CENTER_POSITION, GRID_CELL_COUNT, PERIPHERAL_POSITIONS } from '@/constants/grid'
 import type { Cell, Grid } from '@/types'
@@ -77,6 +78,33 @@ describe('hasPeripheralContent', () => {
   it('中央に入力があっても周辺が空なら false (中央はカウントしない)', () => {
     const cells = [cell(CENTER_POSITION, { text: 'c' })]
     expect(hasPeripheralContent(cells)).toBe(false)
+  })
+})
+
+describe('canPasteIntoPeripheral', () => {
+  it('target が中心セル (position=4) → 常に true (中心の空判定は対象外)', () => {
+    const cells = [cell(CENTER_POSITION)]  // 中心も空
+    expect(canPasteIntoPeripheral(cell(CENTER_POSITION), cells)).toBe(true)
+  })
+
+  it('中心セル非空 → 周辺 paste 許可 (true)', () => {
+    const cells = [cell(CENTER_POSITION, { text: 'center' }), cell(0)]
+    expect(canPasteIntoPeripheral(cell(0), cells)).toBe(true)
+  })
+
+  it('中心セル空 → 周辺 paste 不可 (false)', () => {
+    const cells = [cell(CENTER_POSITION), cell(0)]
+    expect(canPasteIntoPeripheral(cell(0), cells)).toBe(false)
+  })
+
+  it('回帰: drilled child の merged 中心セル (grid_id が表示グリッドと異なるが内容あり) でも許可される', () => {
+    // X=C drilled child: 表示グリッド id は 'child'、中心セルは親由来で grid_id='parent' のまま、
+    // ただし merge により position=4 にセットされている (落とし穴 #10)。
+    // grid_id 一致で探す旧実装はこれを取り逃して誤ブロックしていた。
+    const mergedCenter = cell(CENTER_POSITION, { id: 'parent-peripheral', grid_id: 'parent', text: 'drilled' })
+    const peripheral = cell(0, { grid_id: 'child' })
+    const cells = [mergedCenter, peripheral]
+    expect(canPasteIntoPeripheral(peripheral, cells)).toBe(true)
   })
 })
 

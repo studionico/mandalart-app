@@ -11,7 +11,6 @@ type Props = {
    */
   gridId: string
   childCounts: Map<string, number>
-  cutCellId: string | null
   dragSourceId?: string | null
   dragOverId?: string | null
   fontScale: number
@@ -52,7 +51,7 @@ type Props = {
 }
 
 export default function GridView3x3({
-  cells, gridId, childCounts, cutCellId, dragSourceId, dragOverId,
+  cells, gridId, childCounts, dragSourceId, dragOverId,
   fontScale, inlineEditingCellId,
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate, onStartEmptySlotEdit,
@@ -119,7 +118,6 @@ export default function GridView3x3({
             cell={cell}
             isCenter={isCenter}
             isDisabled={isDisabled}
-            isCut={cell.id === cutCellId}
             isDragSource={cell.id === dragSourceId}
             isDragOver={cell.id === dragOverId}
             childCount={childCounts.get(cell.id) ?? 0}

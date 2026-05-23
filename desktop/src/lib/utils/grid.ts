@@ -21,6 +21,20 @@ export function hasPeripheralContent(cells: Cell[]): boolean {
   return getPeripheralCells(cells).some((c) => !isCellEmpty(c))
 }
 
+/**
+ * 周辺セルへの paste 可否。所属グリッドの中心セル (merged 9 cells の position=4) が非空なら true。
+ * 中心セル自身は常に true。
+ *
+ * X=C drilled child grid では中心セルが親グリッド由来で grid_id が子グリッドと一致しないため、
+ * `grid_id` 一致で探すと取り逃す (落とし穴 #10)。`getCenterCell` (position===CENTER_POSITION) で引く。
+ * `gridCells` は表示中グリッドの merge 済 9 要素配列を想定 (中心は親 grid 由来含む)。
+ */
+export function canPasteIntoPeripheral(target: Pick<Cell, 'position'>, gridCells: Cell[]): boolean {
+  if (target.position === CENTER_POSITION) return true
+  const center = getCenterCell(gridCells)
+  return !!center && !isCellEmpty(center)
+}
+
 /** 9セルの配列から position → Cell のマップを作る */
 export function cellMap(cells: Cell[]): Map<number, Cell> {
   return new Map(cells.map((c) => [c.position, c]))

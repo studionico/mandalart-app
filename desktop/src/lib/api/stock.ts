@@ -50,6 +50,19 @@ export async function moveCellToStock(cellId: string): Promise<StockItem> {
  * 呼出側 (EditorLayout) で確認 dialog を経由するのが前提。
  */
 export async function pasteFromStockReplacing(stockItemId: string, targetCellId: string): Promise<void> {
+  const rows = await query<RawStockItem>('SELECT * FROM stock_items WHERE id = ?', [stockItemId])
+  if (!rows[0]) return
+  const snapshot: CellSnapshot = JSON.parse(rows[0].snapshot)
+  await pasteSnapshotReplacing(snapshot, targetCellId)
+}
+
+/**
+ * detached な CellSnapshot を入力ありセルに置換ペーストする。
+ *
+ * 既存の cell content + 配下サブグリッド (parent_cell_id = targetCellId の grids) を破棄してから
+ * 通常の `pasteSnapshot` を実行する。クリップボードのカット (snapshot 保持) からの paste でも流用する。
+ */
+export async function pasteSnapshotReplacing(snapshot: CellSnapshot, targetCellId: string): Promise<void> {
   // 1. ターゲットセルを drill 元とする全 grids (primary + 並列) を再帰削除
   const subGrids = await query<{ id: string }>(
     'SELECT id FROM grids WHERE parent_cell_id = ? AND deleted_at IS NULL',
@@ -59,7 +72,7 @@ export async function pasteFromStockReplacing(stockItemId: string, targetCellId:
     await deleteGrid(g.id)
   }
   // 2. 通常の paste で content + 新サブグリッドを上書き挿入
-  await pasteFromStock(stockItemId, targetCellId)
+  await pasteSnapshot(snapshot, targetCellId)
 }
 
 /**
@@ -73,7 +86,16 @@ export async function pasteFromStock(stockItemId: string, targetCellId: string):
   const rows = await query<RawStockItem>('SELECT * FROM stock_items WHERE id = ?', [stockItemId])
   if (!rows[0]) return
   const snapshot: CellSnapshot = JSON.parse(rows[0].snapshot)
+  await pasteSnapshot(snapshot, targetCellId)
+}
 
+/**
+ * detached な CellSnapshot をターゲットセルに挿入する (content 上書き + 子グリッド再帰挿入)。
+ *
+ * ストック ([pasteFromStock]) とクリップボードのカット (snapshot 保持) からの paste で共用する。
+ * 周辺セルなのに中心セルが空ならペースト不可 (防御チェック)。
+ */
+export async function pasteSnapshot(snapshot: CellSnapshot, targetCellId: string): Promise<void> {
   const targetCells = await query<{ grid_id: string; position: number }>(
     'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL', [targetCellId],
   )
@@ -253,7 +275,7 @@ async function insertGridSnapshot(
 
 // ── snapshot 構築 ──
 
-async function buildCellSnapshot(cellId: string): Promise<CellSnapshot> {
+export async function buildCellSnapshot(cellId: string): Promise<CellSnapshot> {
   const cells = await query<Pick<Cell, 'text' | 'image_path' | 'color' | 'position' | 'grid_id'>>(
     'SELECT text, image_path, color, position, grid_id FROM cells WHERE id = ? AND deleted_at IS NULL',
     [cellId],

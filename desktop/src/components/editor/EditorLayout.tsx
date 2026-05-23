@@ -25,13 +25,13 @@ import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { WarningIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
-import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
+import { pasteCell, toggleCellDone, upsertCellAt, shredCellSubtree, isSelfCenterWithPeripheralContent } from '@/lib/api/cells'
 import { getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
-import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
+import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock, buildCellSnapshot, pasteSnapshot, pasteSnapshotReplacing } from '@/lib/api/stock'
 import { uploadCellImage } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
-import { isCellEmpty, hasPeripheralContent, getCenterCell, isGridContentEmpty } from '@/lib/utils/grid'
+import { isCellEmpty, hasPeripheralContent, getCenterCell, isGridContentEmpty, canPasteIntoPeripheral } from '@/lib/utils/grid'
 import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
 import { nextTabPosition } from '@/constants/tabOrder'
 import {
@@ -55,7 +55,7 @@ import {
   OUTER_GRID_GAP_PX,
   SIDE_BUTTON_RESERVE_PX,
 } from '@/constants/layout'
-import type { Cell, Grid, StockItem } from '@/types'
+import type { Cell, Grid, StockItem, CellSnapshot } from '@/types'
 
 type Props = {
   mandalartId: string
@@ -790,6 +790,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // ストック → 入力ありの周辺セル drop: 確認 dialog を開く
   const [replaceConfirm, setReplaceConfirm] = useState<{ stockItemId: string; targetCellId: string; targetText: string } | null>(null)
 
+  // クリップボードのカット (snapshot) → 入力ありセルへの paste: 上書き確認 dialog を開く
+  const [clipboardReplace, setClipboardReplace] = useState<{ snapshot: CellSnapshot; targetCellId: string; targetText: string } | null>(null)
+
   const handleStockReplaceDrop = useCallback((stockItemId: string, targetCellId: string) => {
     if (isLocked) return  // ロック中は確認 dialog も開かない
     const target = dndCells.find((c) => c.id === targetCellId)
@@ -1075,6 +1078,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   dndCellsRef.current = dndCells
   // 最新の handlePaste を保持（useEffect の []-deps クロージャ越しでも最新参照を使うため）
   const handlePasteRef = useRef<(target: Cell) => Promise<void>>(async () => {})
+  const handleCutRef = useRef<(cell: Cell) => Promise<void>>(async () => {})
   // 最新の isLocked を keydown listener (deps=[]) から参照するための ref (migration 011)
   const isLockedRef = useRef(isLocked)
   isLockedRef.current = isLocked
@@ -1101,17 +1105,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       if (e.key === 'c' || e.key === 'x') {
         const cell = getHoveredCell()
         if (!cell || isCellEmpty(cell)) return
-        // ロック中は ⌘X (cut = 元セル空化を伴う) を block。⌘C は通す (migration 011)。
+        // ロック中は ⌘X (cut = 元セル即削除を伴う) を block。⌘C は通す (migration 011)。
         if (e.key === 'x' && isLockedRef.current) return
         e.preventDefault()
-        const mode = e.key === 'x' ? 'cut' : 'copy'
-        useClipboardStore.getState().set(mode, cell.id)
-        setToast({ message: mode === 'cut' ? 'カットしました' : 'コピーしました', type: 'info' })
+        if (e.key === 'x') {
+          handleCutRef.current(cell)  // 即削除 + snapshot 退避 + undo 登録
+        } else {
+          useClipboardStore.getState().setCopy(cell.id)
+          setToast({ message: 'コピーしました', type: 'info' })
+        }
       } else if (e.key === 'v') {
         const cell = getHoveredCell()
         if (!cell) return
         const cb = useClipboardStore.getState()
-        if (!cb.sourceCellId || !cb.mode) return
+        if (!cb.mode || (!cb.sourceCellId && !cb.snapshot)) return
         if (isLockedRef.current) return  // ロック中は ⌘V (paste) を block
         e.preventDefault()
         handlePasteRef.current(cell)
@@ -1979,13 +1986,12 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     const cell = menu.cell
     switch (action) {
       case 'copy':
-        clipboard.set('copy', cell.id)
+        clipboard.setCopy(cell.id)
         setToast({ message: 'コピーしました', type: 'info' })
         break
       case 'cut':
-        if (isLocked) return  // ロック中は cut (paste 時に source 削除) を block
-        clipboard.set('cut', cell.id)
-        setToast({ message: 'カットしました', type: 'info' })
+        // 即削除 + snapshot 退避 + undo 登録。ロック中 block / 中心セル保護は handleCut が担う。
+        await handleCut(cell)
         break
       case 'paste':
         await handlePaste(cell)
@@ -2006,26 +2012,68 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }
 
+  // カット: 即座に元セルを空にして内容を detached snapshot としてクリップボードに退避する。
+  // 貼れば移動、貼らなければ消えたまま (= シュレッダー)。安全網として undo に積み ⌘Z で復元できる。
+  async function handleCut(cell: Cell) {
+    if (isLocked) return  // ロック中は cut (即削除を伴う) を block (migration 011)
+    if (isCellEmpty(cell)) return  // 空セルはカット対象にしない
+    // 中心セル保護: 自グリッドの中心 + 周辺非空なら、中心を空にすると周辺が孤立するため block。
+    if (await isSelfCenterWithPeripheralContent(cell.id)) {
+      setToast({ message: '周辺セルがあるため中心セルはカットできません', type: 'info' })
+      return
+    }
+    try {
+      const snap = await buildCellSnapshot(cell.id)
+      await shredCellSubtree(cell.id)
+      useClipboardStore.getState().setCut(snap)
+      pushUndo({
+        description: 'カット',
+        undo: async () => { await pasteSnapshot(snap, cell.id); reload(); reloadSubGrids() },
+        redo: async () => { await shredCellSubtree(cell.id); reload(); reloadSubGrids() },
+      })
+      reload()
+      reloadSubGrids()
+      setToast({ message: 'カットしました（⌘V で貼り付け / ⌘Z で取り消し）', type: 'info' })
+    } catch (e) {
+      setToast({ message: `カット失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }
+  handleCutRef.current = handleCut
+
   async function handlePaste(target: Cell) {
     if (isLocked) return  // ロック中は paste を block (migration 011)
-    if (!clipboard.sourceCellId || !clipboard.mode) {
+    if (!clipboard.mode || (!clipboard.sourceCellId && !clipboard.snapshot)) {
       setToast({ message: 'クリップボードが空です', type: 'info' })
       return
     }
-    if (clipboard.sourceCellId === target.id) return
-    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可
-    if (!isCenterPosition(target.position)) {
-      const center = dndCells.find(
-        (c) => c.grid_id === target.grid_id && c.position === CENTER_POSITION,
-      )
-      if (!center || isCellEmpty(center)) {
-        setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
+    if (clipboard.mode === 'copy' && clipboard.sourceCellId === target.id) return
+    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可。
+    // drilled child grid では中心の grid_id が異なるため canPasteIntoPeripheral (getCenterCell ベース) で判定。
+    if (!canPasteIntoPeripheral(target, dndCells)) {
+      setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
+      return
+    }
+    // cut: detached snapshot から復元。入力ありセルへは上書き確認 dialog を経由する。
+    if (clipboard.mode === 'cut' && clipboard.snapshot) {
+      if (!isCellEmpty(target)) {
+        setClipboardReplace({ snapshot: clipboard.snapshot, targetCellId: target.id, targetText: target.text })
         return
       }
+      try {
+        await pasteSnapshot(clipboard.snapshot, target.id)
+        clipboard.clear()
+        reload()
+        reloadSubGrids()
+        setToast({ message: 'ペーストしました', type: 'success' })
+      } catch (e) {
+        setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
+      }
+      return
     }
+    // copy: 元セルを live 参照して複製 (元セルは残る)
+    if (!clipboard.sourceCellId) return
     try {
-      await pasteCell(clipboard.sourceCellId, target.id, clipboard.mode)
-      if (clipboard.mode === 'cut') clipboard.clear()
+      await pasteCell(clipboard.sourceCellId, target.id, 'copy')
       reload()
       reloadSubGrids()
       setToast({ message: 'ペーストしました', type: 'success' })
@@ -2034,6 +2082,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
   }
   handlePasteRef.current = handlePaste
+
+  const handleClipboardReplaceConfirm = useCallback(async () => {
+    if (!clipboardReplace) return
+    try {
+      await pasteSnapshotReplacing(clipboardReplace.snapshot, clipboardReplace.targetCellId)
+      useClipboardStore.getState().clear()
+      reloadAll()
+      setToast({ message: 'クリップボードの内容で上書きしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `上書き失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setClipboardReplace(null)
+    }
+  }, [clipboardReplace, reloadAll])
 
   // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
   // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。
@@ -2063,16 +2125,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       setInlineEditingCellId(newCell.id)
       setPendingEdit(null)
     }
-    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可
+    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可 (drilled child は getCenterCell ベース判定)
     const targetCell = dndCells.find((c) => c.id === targetCellId)
-    if (targetCell && !isCenterPosition(targetCell.position)) {
-      const center = dndCells.find(
-        (c) => c.grid_id === targetCell.grid_id && c.position === CENTER_POSITION,
-      )
-      if (!center || isCellEmpty(center)) {
-        setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
-        return
-      }
+    if (targetCell && !canPasteIntoPeripheral(targetCell, dndCells)) {
+      setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
+      return
     }
     try {
       await pasteFromStock(item.id, targetCellId)
@@ -2316,7 +2373,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                 cell={cell}
                                 isCenter={isInnerCenter}
                                 isDisabled={isDisabled}
-                                isCut={false}
                                 isDragSource={false}
                                 isDragOver={false}
                                 childCount={0}
@@ -2349,7 +2405,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                 cell={rootCell}
                                 isCenter={true}
                                 isDisabled={false}
-                                isCut={false}
                                 isDragSource={false}
                                 isDragOver={false}
                                 childCount={0}
@@ -2415,7 +2470,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                             cells={viewSwitch.rootCells}
                             gridId={viewSwitch.rootCells[0]?.grid_id ?? ''}
                             childCounts={viewSwitch.childCountsByCellId}
-                            cutCellId={null}
                             dragSourceId={null}
                             dragOverId={null}
                             fontScale={fontScale}
@@ -2452,7 +2506,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                       cell={cell}
                                       isCenter={isInnerCenter}
                                       isDisabled={isDisabled}
-                                      isCut={false}
                                       isDragSource={false}
                                       isDragOver={false}
                                       childCount={viewSwitch!.childCountsByCellId.get(cell.id) ?? 0}
@@ -2551,7 +2604,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                               cell={cell}
                               isCenter={isCenter}
                               isDisabled={isDisabled}
-                              isCut={false}
                               isDragSource={false}
                               isDragOver={false}
                               childCount={
@@ -2610,7 +2662,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           cells={cells}
                           gridId={cells[0]?.grid_id ?? ''}
                           childCounts={childCounts}
-                          cutCellId={null}
                           dragSourceId={null}
                           dragOverId={null}
                           fontScale={fontScale}
@@ -2630,7 +2681,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           rootCells={cells}
                           subGrids={subGrids}
                           childCounts={childCounts}
-                          cutCellId={null}
                           dragSourceId={null}
                           dragOverId={null}
                           fontScale={fontScale}
@@ -2756,7 +2806,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                           cell={cell}
                           isCenter={isCenter}
                           isDisabled={isDisabled}
-                          isCut={false}
                           isDragSource={false}
                           isDragOver={false}
                           childCount={orbit.childCountsByCellId.get(cell.id) ?? 0}
@@ -2875,7 +2924,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                     cell={cell}
                                     isCenter={isInnerCenter}
                                     isDisabled={isDisabled}
-                                    isCut={false}
                                     isDragSource={false}
                                     isDragOver={false}
                                     childCount={orbit9.childCountsByCellId.get(cell.id) ?? 0}
@@ -2915,7 +2963,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                     cell={cell}
                                     isCenter={isInnerCenter}
                                     isDisabled={isDisabled}
-                                    isCut={false}
                                     isDragSource={false}
                                     isDragOver={false}
                                     childCount={0}
@@ -2948,7 +2995,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                                     cell={rootCell}
                                     isCenter={true}
                                     isDisabled={false}
-                                    isCut={false}
                                     isDragSource={false}
                                     isDragOver={false}
                                     childCount={0}
@@ -2977,7 +3023,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       cells={cellsForRender}
                       gridId={gridData.id}
                       childCounts={childCounts}
-                      cutCellId={clipboard.mode === 'cut' ? clipboard.sourceCellId : null}
                       dragSourceId={dragSourceId}
                       dragOverId={dragOverId}
                       fontScale={fontScale}
@@ -3008,7 +3053,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                       // 9×9 はナビゲーション専用。cut 表示や drag 状態も伝えない
                       // (そもそも drag / cut は 9×9 から開始できないので常に null だが、
                       //  view 切替時に 3×3 の状態が残るのを防ぐために明示的に null)
-                      cutCellId={null}
                       dragSourceId={null}
                       dragOverId={null}
                       fontScale={fontScale}
@@ -3112,7 +3156,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               </button>
               <button
                 onClick={() => handleContextAction('paste')}
-                disabled={!clipboard.sourceCellId}
+                disabled={!clipboard.sourceCellId && !clipboard.snapshot}
                 className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
@@ -3129,7 +3173,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             <>
               <button
                 onClick={() => handleContextAction('paste')}
-                disabled={!clipboard.sourceCellId}
+                disabled={!clipboard.sourceCellId && !clipboard.snapshot}
                 className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl flex justify-between disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 ペースト <span className="text-neutral-400 dark:text-neutral-500">⌘V</span>
@@ -3160,6 +3204,14 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         targetText={replaceConfirm?.targetText}
         onCancel={() => setReplaceConfirm(null)}
         onConfirm={handleReplaceConfirm}
+      />
+
+      {/* クリップボードのカット → 入力ありセル paste の上書き確認 */}
+      <ReplaceConfirmDialog
+        open={clipboardReplace !== null}
+        targetText={clipboardReplace?.targetText}
+        onCancel={() => setClipboardReplace(null)}
+        onConfirm={handleClipboardReplaceConfirm}
       />
 
       {/* シュレッダー drop 確認 */}

@@ -252,6 +252,30 @@ export async function pasteCell(
 }
 
 /**
+ * cellId が「自グリッドの中心」(root / 独立並列の center_cell_id が指す = cells テーブル上 position=4 の行)
+ * であり、かつそのグリッドの周辺セルが 1 つでも非空かを返す。
+ *
+ * true のとき、中心セルを destructive 操作 (即削除カット等) すると周辺セルが空中心のまま孤立して
+ * 中心セル保護不変則 (周辺非空なら中心の destructive 禁止) を破るため、呼出側で block する。
+ *
+ * X=C drilled child grid の中心は cells 上 position!=4 (親 peripheral) なので false を返す
+ * (この場合 shredCellSubtree が parent_cell_id 経由で subtree ごと削除するため孤立は起きない)。
+ */
+export async function isSelfCenterWithPeripheralContent(cellId: string): Promise<boolean> {
+  const rows = await query<{ grid_id: string; position: number }>(
+    'SELECT grid_id, position FROM cells WHERE id = ? AND deleted_at IS NULL',
+    [cellId],
+  )
+  const c = rows[0]
+  if (!c || c.position !== CENTER_POSITION) return false
+  const peripherals = await query<{ text: string; image_path: string | null }>(
+    'SELECT text, image_path FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL',
+    [c.grid_id, CENTER_POSITION],
+  )
+  return peripherals.some((p) => !isCellEmpty(p))
+}
+
+/**
  * source のサブツリー (drilled 子グリッド群) + content を target に複製する。
  */
 /**

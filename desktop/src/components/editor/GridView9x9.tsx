@@ -13,7 +13,6 @@ type Props = {
   rootCells: Cell[]
   subGrids: Map<string, SubGrid>
   childCounts: Map<string, number>
-  cutCellId: string | null
   dragSourceId?: string | null
   dragOverId?: string | null
   fontScale: number
@@ -42,7 +41,7 @@ type Props = {
 }
 
 export default function GridView9x9({
-  rootCells, subGrids, childCounts, cutCellId, dragSourceId, dragOverId,
+  rootCells, subGrids, childCounts, dragSourceId, dragOverId,
   fontScale, inlineEditingCellId,
   userId, mandalartId, onCellSave,
   onStartInlineEdit, onCommitInlineEdit, onInlineNavigate,
@@ -84,7 +83,6 @@ export default function GridView9x9({
                     cell={cell}
                     isCenter={isInnerCenter}
                     isDisabled={isDisabled}
-                    isCut={cell.id === cutCellId}
                     isDragSource={cell.id === dragSourceId}
                     isDragOver={cell.id === dragOverId}
                     childCount={childCounts.get(cell.id) ?? 0}
@@ -141,7 +139,6 @@ export default function GridView9x9({
                     cell={cell}
                     isCenter={isSubCenter}
                     isDisabled={isDisabled}
-                    isCut={cell.id === cutCellId}
                     isDragSource={cell.id === dragSourceId}
                     isDragOver={cell.id === dragOverId}
                     childCount={childCounts.get(cell.id) ?? 0}
@@ -173,7 +170,6 @@ export default function GridView9x9({
                     cell={rootCell}
                     isCenter={true}
                     isDisabled={false}
-                    isCut={rootCell.id === cutCellId}
                     isDragSource={rootCell.id === dragSourceId}
                     isDragOver={rootCell.id === dragOverId}
                     childCount={childCounts.get(rootCell.id) ?? 0}
