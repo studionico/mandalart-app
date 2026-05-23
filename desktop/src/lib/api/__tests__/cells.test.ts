@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
 import { createMandalart } from '@/lib/api/mandalarts'
 import { getRootGrids, createGrid, getGrid } from '@/lib/api/grids'
-import { upsertCellAt, swapCellSubtree } from '@/lib/api/cells'
+import { upsertCellAt, swapCellSubtree, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
 
 let db: Database.Database
 
@@ -98,5 +98,49 @@ describe('swapCellSubtree (周辺 ↔ 周辺、両方サブツリー有り)', ()
       .prepare("SELECT id FROM grids WHERE center_cell_id = ? AND deleted_at IS NULL AND id != ?")
       .all(A.id, root.id) as { id: string }[]
     expect(gridsCenteredOnA).toHaveLength(0)
+  })
+})
+
+describe('shredCellSubtree (done 上方再計算)', () => {
+  function doneOf(id: string): number {
+    const row = db.prepare('SELECT done FROM cells WHERE id = ?').get(id) as { done: number }
+    return Number(row.done)
+  }
+
+  it('未 done の周辺セルを shred すると、残った全周辺が done のとき中心セルも done になる', async () => {
+    // setup: root の周辺 X を drill → child grid (center = X)。child に P1 / P2 を非空作成。
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    const X = await upsertCellAt(root.id, 0, { text: 'X' })
+    const child = await createGrid({
+      mandalartId: m.id, parentCellId: X.id, centerCellId: X.id, sortOrder: 0,
+    })
+    const p1 = await upsertCellAt(child.id, 0, { text: 'P1' })
+    const p2 = await upsertCellAt(child.id, 1, { text: 'P2' })
+
+    // P1 を done に → P2 が未 done なので中心 X はまだ done にならない
+    await toggleCellDone(p1.id)
+    expect(doneOf(p1.id)).toBe(1)
+    expect(doneOf(X.id)).toBe(0)
+
+    // P2 を shred → 残る非空周辺は P1 (done) のみ → 中心 X が done になるべき
+    await shredCellSubtree(p2.id)
+    expect(doneOf(X.id)).toBe(1)
+  })
+
+  it('regression: 残った周辺が未 done のままなら中心セルは done にならない', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    const X = await upsertCellAt(root.id, 0, { text: 'X' })
+    const child = await createGrid({
+      mandalartId: m.id, parentCellId: X.id, centerCellId: X.id, sortOrder: 0,
+    })
+    const p1 = await upsertCellAt(child.id, 0, { text: 'P1' })
+    const p2 = await upsertCellAt(child.id, 1, { text: 'P2' })
+
+    // どちらも未 done のまま P2 を shred → 残る P1 が未 done なので中心は done にならない
+    await shredCellSubtree(p2.id)
+    expect(doneOf(p1.id)).toBe(0)
+    expect(doneOf(X.id)).toBe(0)
   })
 })

@@ -338,6 +338,12 @@ enum GridRepository {
                 context.delete(grid)
             }
         }
+
+        // 4) セル内容を空にしたので親 (中心セル) の done を再計算する (上方伝播)。
+        //    空になったセルは done 判定の母数から外れるため「残った非空周辺が全て done なら中心も done」。
+        //    desktop cells.ts shredCellSubtree 末尾の propagateDoneUp と対称。
+        CellCheckboxService.recomputeDoneUpward(fromCellId: cellId, in: context)
+
         try context.save()
     }
 

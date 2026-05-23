@@ -226,7 +226,8 @@ copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
 
 // セルの内容を空クリア + 配下サブグリッド (parent_cell_id = cellId の grids) を再帰削除する。
 // シュレッダー (確認後実行) / 移動 (snapshot 保存後実行) などから呼ばれる。
-// deleteGrid 経由で local hard / soft 自動分岐 + cloud 同期も追従
+// deleteGrid 経由で local hard / soft 自動分岐 + cloud 同期も追従。
+// 末尾で propagateDoneUp を呼び、空になったセルを除いて「残り周辺が全て done なら中心も done」を上方再計算する
 shredCellSubtree(cellId: string): Promise<void>
 
 // グリッド単位 done フラグ操作 (チェックボックス機能)。

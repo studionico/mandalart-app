@@ -453,10 +453,15 @@ export async function shredCellSubtree(cellId: string): Promise<void> {
     await deleteGrid(g.id)
   }
   // 2. セル本体の content をクリア
+  const ts = now()
   await execute(
     'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
-    ['', null, null, 0, now(), cellId],
+    ['', null, null, 0, ts, cellId],
   )
+  // 3. セル内容を空にすると done 判定 (areDescendantsAllDone) の母数から外れるので、
+  //    親 (中心セル) の done を再計算する。「残った非空周辺セルが全て done なら中心も done」を
+  //    上方伝播する。シュレッダーはセル除去のみで非 done セルを増やさないため propagateDoneUp で十分。
+  await propagateDoneUp(cellId, ts)
 }
 
 // ---------------------------------------------------------------------------

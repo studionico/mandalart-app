@@ -36,6 +36,16 @@ enum CellCheckboxService {
         try? context.save()
     }
 
+    /// シュレッダー / cut でセル内容が空になった後、親 (中心セル) の done を再計算する。
+    /// 空になったセルは done 判定 (`areDescendantsAllDone`) の母数から外れるため、
+    /// 「残った非空周辺セルが全て done なら中心も done」を上方伝播する。シュレッダーはセル除去のみで
+    /// 非 done セルを増やさないため `propagateDoneUp` で十分 (`propagateUndoneUp` は不要)。
+    /// `context.save()` は呼出側で行う前提 (このメソッド内では save しない)。desktop の
+    /// [`shredCellSubtree`](../../../desktop/src/lib/api/cells.ts) 末尾の `propagateDoneUp` と対称。
+    static func recomputeDoneUpward(fromCellId cellId: String, in context: ModelContext) {
+        propagateDoneUp(cellId: cellId, ts: Date(), in: context)
+    }
+
     // MARK: - subtree (down)
 
     /// 自身 + 配下の全 peripheral cells を `done` に揃える。
