@@ -63,6 +63,41 @@ final class SyncEngine {
         try? context.save()
     }
 
+    /// 同一 `(gridId, position)` を持つ複数 Cell を `updatedAt` 最新 1 行に集約し、他を hard delete する。
+    ///
+    /// **背景**: cloud cells テーブルは `UNIQUE(grid_id, position)` を持ち、desktop は local SQLite にも
+    /// 同制約があるため重複が物理的に作れない。一方 **SwiftData は複合 unique を宣言できない** ため、
+    /// pull の id-only 突合 (`upsertCell`) が「同 (gridId, position) に別 id」を新規 INSERT して
+    /// local 重複を作ってしまう経路が過去に存在した。重複が残ったまま push すると、
+    /// batch upsert の配列内に同 (grid_id, position) が複数入って Postgres 21000
+    /// (ON CONFLICT DO UPDATE cannot affect row a second time) を誘発する。
+    ///
+    /// このメソッドは sanitizeZombies (親なし行削除) の **直後** に呼び、生き残った cell の重複を解消する。
+    /// 残すのは `updatedAt` 最新 (同値なら syncedAt 済 = cloud 一致を優先 → id 安定ソート)。
+    /// 負けた行の text / 画像は失われるが last-write-wins の本来挙動と一致するので許容する。
+    private func dedupCellsByPosition(in context: ModelContext) {
+        guard let cells = try? context.fetch(FetchDescriptor<Cell>()) else { return }
+        var groups: [String: [Cell]] = [:]
+        for c in cells {
+            groups["\(c.gridId)#\(c.position)", default: []].append(c)
+        }
+        var removed = 0
+        for (_, group) in groups where group.count > 1 {
+            let survivor = group.max {
+                ($0.updatedAt, $0.syncedAt ?? .distantPast, $0.id)
+                    < ($1.updatedAt, $1.syncedAt ?? .distantPast, $1.id)
+            }!
+            for c in group where c.id != survivor.id {
+                context.delete(c)
+                removed += 1
+            }
+        }
+        if removed > 0 {
+            print("[sync] deduped cells by (gridId,position): \(removed)")
+            try? context.save()
+        }
+    }
+
     /// `CloudDeleteTombstone` に積まれた mandalart id について cloud cascade delete を再試行する。
     /// 成功した id は tombstone から除去。失敗した id は残しておき、次回の pullAll でリトライ。
     /// サインインしていない場合は no-op (tombstone は維持)。
@@ -101,6 +136,8 @@ final class SyncEngine {
 
         // 0a. 参照整合性サニタイズ: 親が消えた zombie grid / cell を hard delete (落とし穴 #12)
         sanitizeZombies(in: context)
+        // 0a'. (gridId, position) 重複を解消 (SwiftData は複合 unique 不可、push 23505/21000 防止)
+        dedupCellsByPosition(in: context)
 
         // 0b. tombstone drain: オフライン / 未サインイン中に permanent delete された
         //     マンダラートを cloud から cascade delete する。これがないと次の fetch で
@@ -240,6 +277,19 @@ final class SyncEngine {
             local.deletedAt = parseDate(c.deleted_at)
             local.syncedAt = cloudUpdated
         } else {
+            // id 一致なし = 新規候補。INSERT 前に同 (gridId, position) を持つ別 id の local を削除する
+            // (= pull は cloud 勝ち、cloud の id 体系に local を寄せる)。SwiftData は複合 unique を
+            // 宣言できないので、これをやらないと local に (gridId, position) 重複が生まれ、次の push で
+            // 23505 / 21000 を再発させる。updatedAt 比較はここでは挟まない (挟むと同 position に 2 行
+            // 残り得るため)。local の新しい編集は push 時の onConflict 経路で既に cloud に反映済の前提。
+            let gid = c.grid_id
+            let pos = c.position
+            let posDesc = FetchDescriptor<Cell>(
+                predicate: #Predicate { $0.gridId == gid && $0.position == pos }
+            )
+            if let conflicting = try? context.fetch(posDesc) {
+                for old in conflicting { context.delete(old) }
+            }
             let cell = Cell(
                 id: c.id, gridId: c.grid_id, position: c.position,
                 text: c.text, color: c.color, imagePath: c.image_path,
@@ -265,6 +315,9 @@ final class SyncEngine {
         // pushPending を直接呼ぶ経路 (scene .background 等) でも参照整合性を保証する。
         // pullAll → push の流れで来る場合は冗長だが、save() のみで何もしない時は no-op。
         sanitizeZombies(in: context)
+        // (gridId, position) 重複を解消してから push する (= pendingCells 内に同 (grid_id, position)
+        // を入れない → batch upsert + onConflict での Postgres 21000 を防ぐ)。
+        dedupCellsByPosition(in: context)
 
         let folderRows: [Folder] = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
         let mandalartRows: [Mandalart] = (try? context.fetch(FetchDescriptor<Mandalart>())) ?? []
@@ -289,7 +342,18 @@ final class SyncEngine {
             for g in pendingGrids { g.syncedAt = g.updatedAt }
         }
         if !pendingCells.isEmpty {
-            try await client.from("cells").upsert(pendingCells.map(cellPayload)).execute()
+            // cells のみ onConflict を (grid_id, position) に指定する (desktop push.ts と対称)。
+            // 複数デバイス / 歴史的な sync ズレで同じ (grid_id, position) に local と cloud で
+            // 異なる cell id が並ぶケースがあり、PK (id) ベースの upsert だと INSERT 扱いになって
+            // cloud の UNIQUE(grid_id, position) 制約に弾かれる (code 23505)。onConflict で一意制約
+            // 側を指定すると「同じ (grid_id, position) の既存行を local 内容で UPDATE」= local 勝ち
+            // になる。cells は leaf で他テーブルから id 参照されない (grids.center_cell_id は grid 単位
+            // 1 行) ため cloud 側 id が変わっても整合性に影響なし。
+            // batch upsert なので push 前に dedupCellsByPosition で local の (grid_id, position) 重複を
+            // 解消しておく (= pendingCells 内に同 (grid_id, position) を入れない → Postgres 21000 回避)。
+            try await client.from("cells")
+                .upsert(pendingCells.map(cellPayload), onConflict: "grid_id,position")
+                .execute()
             for c in pendingCells { c.syncedAt = c.updatedAt }
         }
         try context.save()

@@ -268,6 +268,23 @@ guard displayPosition != GridConstants.centerPosition else { ... }
 
 **関連**: desktop 共通の落とし穴 #10 / iOS 落とし穴 #4 / memory `feedback_desktop_merged_cell_grid_id` (grid_id でも同種の問題)。
 
+### #14. SwiftData は複合 unique を宣言できない → cells (grid_id, position) 重複は SyncEngine が担保
+
+**症状**: iPhone で「今すぐ同期」すると `失敗: duplicate key value violates unique constraint "cells_grid_id_position_unique"` (Postgres `code 23505`)。
+
+**原因**: cloud cells は `UNIQUE(grid_id, position)` を持つ。desktop は local SQLite にも同制約があるため重複を物理的に作れないが、**SwiftData の `@Attribute(.unique)` は単一 attribute のみで複合 unique を宣言できない**。このため:
+- push が PK (id) ベース upsert だと、同 (grid_id, position) で別 id の cloud 行があるとき INSERT 扱いになり 23505。
+- pull の `upsertCell` が id のみで突合していたため、cloud cell id=B が (G,4) にあり local に別 id=C が (G,4) にあると新規 INSERT して **local に (grid_id, position) 重複** を作る。重複が残ると batch upsert で同 (grid_id, position) が複数入り Postgres `21000` (ON CONFLICT DO UPDATE cannot affect row a second time) も誘発する。
+
+**対処** (3 段構え、すべて [`SyncEngine.swift`](../Mandalart/Services/SyncEngine.swift)):
+1. **push に `onConflict: "grid_id,position"`** (cells のみ、desktop [`push.ts`](../../desktop/src/lib/sync/push.ts) と対称) → 同位置・別 id の cloud 行を local 値で UPDATE (local 勝ち)。cells は leaf なので id が変わっても整合性 OK。
+2. **`dedupCellsByPosition`** を `sanitizeZombies` 直後 (pull / push 両冒頭) で呼び、同 (gridId, position) を `updatedAt` 最新 1 行に集約 (既存 corrupt の healing + batch 21000 防止)。
+3. **`upsertCell` の reconcile**: cloud cell INSERT 前に同 (gridId, position) の別 id local を削除 (pull は cloud 勝ち) → 新規重複の発生経路を塞ぐ。
+
+実行順序: **sanitizeZombies → dedupCellsByPosition → (pull: upsertCell reconcile) → push (onConflict)**。詳細は [`sync.md`](sync.md) 「(grid_id, position) 重複の dedup / reconcile」節。
+
+**関連**: desktop 落とし穴 #12 (zombie cleanup) / #2 (FK 制約)、desktop [`push.ts`](../../desktop/src/lib/sync/push.ts) の cells onConflict コメント。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。
