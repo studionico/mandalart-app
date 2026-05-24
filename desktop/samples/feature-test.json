@@ -1,0 +1,175 @@
+{
+  "grid": {
+    "sort_order": 0,
+    "memo": "# 機能検証ボード (ルート)\nこのマンダラートはインポート機能で生成されました。\n\n- **太字** / _斜体_ / `inline code` の Markdown 記号が壊れないか\n- 複数行メモが折り返し・改行保持されるか\n- 引用記号 > や箇条書き - * # が混在しても OK か\n\n> 各周辺セルをドリルダウンすると個別の検証項目が展開します。"
+  },
+  "cells": [
+    { "position": 0, "text": "🎨 色の全種", "image_path": null, "color": "red-100" },
+    { "position": 1, "text": "🖼 画像表示", "image_path": "images/test-fixture-blue.png", "color": null },
+    { "position": 2, "text": "📝 メモ検証", "image_path": null, "color": "blue-100" },
+    { "position": 3, "text": "🌳 深い階層", "image_path": null, "color": "green-100" },
+    { "position": 4, "text": "✅ 機能検証ボード", "image_path": null, "color": null },
+    { "position": 5, "text": "🔀 並列グリッド", "image_path": null, "color": "purple-100" },
+    { "position": 6, "text": "🔤 特殊文字 & 長文", "image_path": null, "color": "orange-100" },
+    { "position": 7, "text": "⬜ 空セル+メモ保持", "image_path": null, "color": "teal-100" },
+    { "position": 8, "text": "🎯 複合(画像+色+文字)", "image_path": "images/test-fixture-orange.png", "color": "pink-100" }
+  ],
+  "children": [
+    {
+      "grid": { "sort_order": 0, "memo": "プリセットカラー 10 種 + 無効キーfallback + null の表示確認" },
+      "parentPosition": 0,
+      "cells": [
+        { "position": 0, "text": "赤 red-100", "image_path": null, "color": "red-100" },
+        { "position": 1, "text": "オレンジ orange-100", "image_path": null, "color": "orange-100" },
+        { "position": 2, "text": "黄 yellow-100", "image_path": null, "color": "yellow-100" },
+        { "position": 3, "text": "緑 green-100", "image_path": null, "color": "green-100" },
+        { "position": 4, "text": "🎨 色の全種", "image_path": null, "color": null },
+        { "position": 5, "text": "ティール teal-100", "image_path": null, "color": "teal-100" },
+        { "position": 6, "text": "青 blue-100", "image_path": null, "color": "blue-100" },
+        { "position": 7, "text": "インディゴ indigo-100", "image_path": null, "color": "indigo-100" },
+        { "position": 8, "text": "紫 purple-100", "image_path": null, "color": "purple-100" }
+      ],
+      "children": [
+        {
+          "grid": { "sort_order": 0, "memo": "残り 2 色 (pink/gray) + 無効キー + null のフォールバック検証" },
+          "parentPosition": 0,
+          "cells": [
+            { "position": 0, "text": "ピンク pink-100", "image_path": null, "color": "pink-100" },
+            { "position": 1, "text": "グレー gray-100", "image_path": null, "color": "gray-100" },
+            { "position": 2, "text": "無効キー→既定色に戻る", "image_path": null, "color": "lavender-999" },
+            { "position": 3, "text": "色なし null", "image_path": null, "color": null },
+            { "position": 4, "text": "赤 red-100", "image_path": null, "color": null }
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "grid": { "sort_order": 0, "memo": "画像の各パターン: 画像のみ / 画像+文字 / 画像+文字+色" },
+      "parentPosition": 1,
+      "cells": [
+        { "position": 0, "text": "", "image_path": "images/test-fixture-red.png", "color": null },
+        { "position": 1, "text": "画像+文字", "image_path": "images/test-fixture-green.png", "color": null },
+        { "position": 2, "text": "画像+文字+色", "image_path": "images/test-fixture-orange.png", "color": "yellow-100" },
+        { "position": 3, "text": "画像のみ(色付き枠)", "image_path": "images/test-fixture-blue.png", "color": "indigo-100" },
+        { "position": 4, "text": "🖼 画像表示", "image_path": null, "color": null },
+        { "position": 5, "text": "存在しない画像参照", "image_path": "images/__missing__.png", "color": null }
+      ],
+      "children": []
+    },
+    {
+      "grid": {
+        "sort_order": 0,
+        "memo": "## メモのリッチ表示検証\nグリッド単位メモは Markdown としてレンダリングされます。\n\n1. 番号付きリスト\n2. 二項目目\n\n- 箇条書き\n  - ネスト箇条書き\n\n```\nコードブロック\n  インデント保持\n```\n\n| 表 | ヘッダ |\n|---|---|\n| a | b |\n\n長い段落も折り返し確認のために十分な文字数を入れておきます。日本語の禁則処理や英語 word-wrap が混在しても破綻しないかを見ます。"
+      },
+      "parentPosition": 2,
+      "cells": [
+        { "position": 4, "text": "📝 メモ検証", "image_path": null, "color": null },
+        { "position": 0, "text": "このグリッドのメモを開く", "image_path": null, "color": "yellow-100" }
+      ],
+      "children": []
+    },
+    {
+      "grid": { "sort_order": 0, "memo": "第2階層" },
+      "parentPosition": 3,
+      "cells": [
+        { "position": 0, "text": "L2: 深掘りA", "image_path": null, "color": "red-100" },
+        { "position": 4, "text": "🌳 深い階層", "image_path": null, "color": null }
+      ],
+      "children": [
+        {
+          "grid": { "sort_order": 0, "memo": "第3階層" },
+          "parentPosition": 0,
+          "cells": [
+            { "position": 0, "text": "L3: 深掘りB", "image_path": null, "color": "green-100" },
+            { "position": 4, "text": "L2: 深掘りA", "image_path": null, "color": null }
+          ],
+          "children": [
+            {
+              "grid": { "sort_order": 0, "memo": "第4階層 (ドリルダウンの限界深度検証)" },
+              "parentPosition": 0,
+              "cells": [
+                { "position": 0, "text": "L4: 最深部", "image_path": null, "color": "blue-100" },
+                { "position": 4, "text": "L3: 深掘りB", "image_path": null, "color": null }
+              ],
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "grid": { "sort_order": 0, "memo": "このグリッド配下に並列グリッドを 2 枚ぶら下げる (中心テーマ共有しない独立グリッド)" },
+      "parentPosition": 5,
+      "cells": [
+        { "position": 0, "text": "ドリル親", "image_path": null, "color": null },
+        { "position": 4, "text": "🔀 並列グリッド", "image_path": null, "color": null }
+      ],
+      "children": [
+        {
+          "grid": { "sort_order": 1, "memo": "並列ビュー B-1 (独立 center)" },
+          "cells": [
+            { "position": 0, "text": "並列B1-視点1", "image_path": null, "color": "teal-100" },
+            { "position": 1, "text": "並列B1-視点2", "image_path": null, "color": null },
+            { "position": 4, "text": "並列ビュー B-1", "image_path": null, "color": null }
+          ],
+          "children": []
+        },
+        {
+          "grid": { "sort_order": 2, "memo": "並列ビュー B-2 (独立 center)" },
+          "cells": [
+            { "position": 0, "text": "並列B2-視点1", "image_path": null, "color": "pink-100" },
+            { "position": 4, "text": "並列ビュー B-2", "image_path": null, "color": null }
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "grid": { "sort_order": 0, "memo": "特殊文字・絵文字・長文・URL・エスケープ記号の表示崩れ検証" },
+      "parentPosition": 6,
+      "cells": [
+        { "position": 0, "text": "絵文字 😀🎉🚀🍣🐢🌏", "image_path": null, "color": null },
+        { "position": 1, "text": "記号 < > & \" ' \\ / { } [ ] # * _ ` |", "image_path": null, "color": "gray-100" },
+        { "position": 2, "text": "URL https://example.com/path?q=1&r=2", "image_path": null, "color": null },
+        { "position": 3, "text": "改行を\\nで含む行1\\n行2\\n行3", "image_path": null, "color": null },
+        { "position": 4, "text": "🔤 特殊文字 & 長文", "image_path": null, "color": null },
+        { "position": 5, "text": "非常に長いテキストをセル内に入れて折り返しと省略表示のどちらが効くかを確認するためのサンプル文章です。さらに続けて文字数を稼ぎます。", "image_path": null, "color": "orange-100" },
+        { "position": 6, "text": "ﾊﾝｶｸ ＦＵＬＬＷＩＤＴＨ ½ ⅓ ™ ® ©", "image_path": null, "color": null },
+        { "position": 7, "text": "한국어 中文 العربية Ελληνικά", "image_path": null, "color": "indigo-100" },
+        { "position": 8, "text": "数式 a²+b²=c²  ∑ ∞ √ π ≠ ≤", "image_path": null, "color": null }
+      ],
+      "children": []
+    },
+    {
+      "grid": {
+        "sort_order": 0,
+        "memo": "# 空セル + メモ保持の検証\n周辺セルをすべて空にしても、このメモがあるためグリッドは自動削除されません (pitfall #12 / isGridContentEmpty)。\nlazy cell creation により空セルは DB 行を作らない挙動も併せて確認します。"
+      },
+      "parentPosition": 7,
+      "cells": [
+        { "position": 4, "text": "⬜ 空セル+メモ保持", "image_path": null, "color": null }
+      ],
+      "children": []
+    },
+    {
+      "grid": { "sort_order": 1, "memo": "ルート並列ビュー #1 — 同じ中心テーマを別視点で展開した独立グリッド" },
+      "cells": [
+        { "position": 0, "text": "並列ルート1-A", "image_path": null, "color": "red-100" },
+        { "position": 1, "text": "並列ルート1-B", "image_path": null, "color": "green-100" },
+        { "position": 2, "text": "並列ルート1-C", "image_path": null, "color": "blue-100" },
+        { "position": 4, "text": "✅ 機能検証ボード (並列1)", "image_path": null, "color": null },
+        { "position": 8, "text": "並列ルート1-D", "image_path": "images/test-fixture-green.png", "color": null }
+      ],
+      "children": []
+    },
+    {
+      "grid": { "sort_order": 2, "memo": "ルート並列ビュー #2" },
+      "cells": [
+        { "position": 0, "text": "並列ルート2-A", "image_path": null, "color": "yellow-100" },
+        { "position": 4, "text": "✅ 機能検証ボード (並列2)", "image_path": null, "color": null }
+      ],
+      "children": []
+    }
+  ]
+}
