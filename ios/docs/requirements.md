@@ -66,6 +66,13 @@ Landscape 2 ペイン構成 (`HStack` ベース):
   3. **それ以外** (周辺 / X=C drilled 中心): [`GridRepository.shredCellSubtree`](../Mandalart/Services/GridRepository.swift) で cell content クリア + 配下 sub-grid 再帰削除 → 中心セルなら drill-up、周辺はその場に留まる
 - 旧「内容をクリア」(eraser icon、cell.text/imagePath/color のみリセット) は撤去 (= desktop と仕様統一)
 
+## 周辺セルのクリア (中心セル限定)
+
+- **アクセス経路**: CellView 長押し context menu の「周辺セルのクリア」項目 (中心セル + 周辺に 1 つ以上入力あり + 非ロック時のみ表示、赤文字 destructive、icon `eraser`)。desktop の中心セル右クリック「周辺セルのクリア」と等価。
+- **動作**: 表示中グリッドの周辺 8 セル + その配下サブグリッドを一括クリア。**中心セルは保持**。各周辺セルに [`GridRepository.shredCellSubtree`](../Mandalart/Services/GridRepository.swift) を適用する [`GridRepository.clearGridPeripherals`](../Mandalart/Services/GridRepository.swift) を呼ぶ。
+- **確認ダイアログ**: [`ClearPeripheralsConfirmModifier`](../Mandalart/Views/Components/ClearPeripheralsConfirmModifier.swift) (`.confirmationDialog`、「元に戻せません」warning)。**Undo 非対象** (= シュレッダーと同方針)。
+- **gridId の扱い**: クリア対象は表示中グリッド id (CellView の `gridId` prop)。子グリッドの中心セルは `cell.gridId` が親グリッドを指すため使わない (落とし穴 #10)。中心判定も `cell.position` ではなく display slot position。
+
 ## 空マンダラートの自動破棄 (hard delete)
 
 - Dashboard の「新規作成」カード tap で生成され、ユーザーが Editor で何も入力せずに戻った場合 (= 中心セル text trim 空 かつ imagePath nil、root grid 単一) は **自動 hard delete** (ローカル物理削除 + cloud cascade DELETE)。ゴミ箱には入らない

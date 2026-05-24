@@ -48,6 +48,9 @@ struct GridView3x3: View {
     let onCenterTapRequest: (() -> Void)?
     /// context menu「シュレッダー」tap で破壊操作要求を上位 EditorView へ通知。pass-through。
     let onShredRequest: ((Cell) -> Void)?
+    /// context menu「周辺セルのクリア」tap で破壊操作要求を上位 EditorView へ通知。pass-through。
+    /// 引数は表示中グリッド id (= `gridId`)。中心セル限定で CellView 側が発火する。
+    let onClearPeripheralsRequest: ((String) -> Void)?
     /// Dashboard → Editor 遷移時に渡す morph 完了までの待機時間 (ms)。CellView へ pass-through。
     /// drill / drill-up / 並列ナビでは 0 が渡され、既存挙動と完全一致。
     let initialDelayMs: Int
@@ -75,6 +78,7 @@ struct GridView3x3: View {
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
         onShredRequest: ((Cell) -> Void)? = nil,
+        onClearPeripheralsRequest: ((String) -> Void)? = nil,
         initialDelayMs: Int = 0,
         convergeNamespace: Namespace.ID? = nil
     ) {
@@ -97,6 +101,7 @@ struct GridView3x3: View {
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
         self.onShredRequest = onShredRequest
+        self.onClearPeripheralsRequest = onClearPeripheralsRequest
         self.initialDelayMs = initialDelayMs
         self.convergeNamespace = convergeNamespace
     }
@@ -142,6 +147,7 @@ struct GridView3x3: View {
                     onEditRequest: onEditRequest,
                     onCenterTapRequest: onCenterTapRequest,
                     onShredRequest: onShredRequest,
+                    onClearPeripheralsRequest: onClearPeripheralsRequest,
                     initialDelayMs: initialDelayMs,
                     convergeNamespace: convergeNamespace
                 )

@@ -83,6 +83,11 @@ struct CellView: View {
     /// その他) で desktop と同等 3 分岐の destructive 操作を実行する。
     /// ロック中 / 空セル / readOnly では context menu 自体が出ないので発火しない。
     let onShredRequest: ((Cell) -> Void)?
+    /// context menu「周辺セルのクリア」tap で破壊操作要求を上位 EditorView へ通知する callback。
+    /// **引数は表示中グリッド id (= `gridId` prop)**。子グリッドの中心セルは `cell.gridId` が
+    /// 親グリッドを指すため、クリア対象は cell.gridId ではなく表示中 grid (この prop) を使う。
+    /// 中心セル + 周辺非空 + 非ロックのときだけ menu に出るので、それ以外では発火しない。
+    let onClearPeripheralsRequest: ((String) -> Void)?
     /// Dashboard → Editor 遷移時に渡される morph 完了までの待機時間 (ms)。
     /// この値分だけ全 cell の delay を後ろにずらすことで、morph 中は周辺セルが opacity 0 を維持。
     /// drill / drill-up / 並列ナビでは 0 が渡され、既存挙動と完全一致。
@@ -125,6 +130,7 @@ struct CellView: View {
         onEditRequest: ((Cell) -> Void)? = nil,
         onCenterTapRequest: (() -> Void)? = nil,
         onShredRequest: ((Cell) -> Void)? = nil,
+        onClearPeripheralsRequest: ((String) -> Void)? = nil,
         initialDelayMs: Int = 0,
         convergeNamespace: Namespace.ID? = nil
     ) {
@@ -149,6 +155,7 @@ struct CellView: View {
         self.onEditRequest = onEditRequest
         self.onCenterTapRequest = onCenterTapRequest
         self.onShredRequest = onShredRequest
+        self.onClearPeripheralsRequest = onClearPeripheralsRequest
         self.initialDelayMs = initialDelayMs
         self.convergeNamespace = convergeNamespace
         _loadedImage = State(initialValue: ImageStorage.loadImage(at: cell?.imagePath))
@@ -543,6 +550,17 @@ struct CellView: View {
                 Label("ストックに移動", systemImage: "tray.and.arrow.up")
             }
             .disabled(isEmpty)
+
+            // 周辺セルのクリア: 中心セル限定。表示中グリッドの周辺 8 セル + 配下を一括クリア
+            // (中心は保持)。周辺が全空 / 中心でない / ロック中 (= このブロック自体が出ない) では非表示。
+            // クリア対象は cell.gridId ではなく表示中 gridId prop (子グリッド中心は cell.gridId が親を指すため)。
+            if isCenter, hasNonEmptyPeripheralCells {
+                Button(role: .destructive) {
+                    onClearPeripheralsRequest?(gridId)
+                } label: {
+                    Label("周辺セルのクリア", systemImage: "eraser")
+                }
+            }
 
             Divider()
 

@@ -347,6 +347,26 @@ enum GridRepository {
         try context.save()
     }
 
+    /// グリッドの周辺セル (position != centerPosition) とその配下サブグリッドを一括クリアする。
+    /// 中心セルは対象外 (内容を保持)。各周辺セルに `shredCellSubtree` を適用する
+    /// (content クリア + 配下サブグリッド再帰削除 + done 再計算)。
+    ///
+    /// 子 X=C グリッドの中心セルは `gridId` が親グリッドのため、この predicate に入らず自然に除外される
+    /// (= 中心セル右クリックの「周辺セルのクリア」は表示中グリッドの周辺だけを消し、親由来の中心は無傷)。
+    /// desktop `cells.ts` の `clearGridPeripherals` と対称。
+    static func clearGridPeripherals(gridId: String, in context: ModelContext) throws {
+        let center = GridConstants.centerPosition
+        let descriptor = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> {
+                $0.gridId == gridId && $0.position != center && $0.deletedAt == nil
+            }
+        )
+        let peripherals = try context.fetch(descriptor)
+        for c in peripherals {
+            try shredCellSubtree(cellId: c.id, in: context)
+        }
+    }
+
     /// 指定 grid を物理削除 (= 自所属 cells + 配下 grids 含めた cascade hard-delete)。
     /// 用途: シュレッダー (並列 grid を 1 本まるごと消す)。
     ///

@@ -72,6 +72,12 @@ struct EditorView: View {
     /// 破壊操作を実行する。desktop の `ShredConfirmDialog` 相当。
     @State private var shredTarget: Cell?
 
+    /// 「周辺セルのクリア」(中心セル context menu) の確認ダイアログ対象グリッド id。
+    /// nil でない間 `.confirmationDialog` を表示し、確認後に `performClearPeripherals(_:)` が
+    /// 表示中グリッドの周辺 8 セル + 配下を一括クリアする (中心は保持)。desktop の
+    /// `ClearPeripheralsConfirmDialog` 相当。
+    @State private var clearPeripheralsGridId: String?
+
     /// マンダラート単位の文字サイズ調整 (UserDefaults 永続、per-device)。
     /// `init` で `MandalartFontPreference.load(for: mandalartId)` から取得し、
     /// 値変更時は `.onChange` で per-mandalart key に persist。CellView へは
@@ -281,6 +287,11 @@ struct EditorView: View {
                 Task { @MainActor in await performShred(cell) }
             }
         ))
+        // 周辺セルのクリア確認ダイアログ (= desktop の ClearPeripheralsConfirmDialog 相当)。
+        .modifier(ClearPeripheralsConfirmModifier(
+            targetGridId: $clearPeripheralsGridId,
+            onConfirm: { gid in performClearPeripherals(gid) }
+        ))
         // セル編集の全画面 sheet (Landscape キーボード覆い対策)。
         // NavigationStack + TextField の中で iOS 自動 keyboard avoidance が効く。
         .fullScreenCover(isPresented: Binding(
@@ -387,6 +398,7 @@ struct EditorView: View {
                             onEditRequest: { cell in beginEditing(cell: cell) },
                             onCenterTapRequest: { handleCenterTap() },
                             onShredRequest: { cell in shredTarget = cell },
+                            onClearPeripheralsRequest: { gid in clearPeripheralsGridId = gid },
                             // Dashboard 由来の初回表示時のみ converge 完了まで cell stagger を遅延 (= morph 中 opacity 0 維持)。
                             // drill / drill-up / 並列ナビでは lastTransitionKind が変化するので 0 になり既存挙動維持。
                             initialDelayMs: lastTransitionKind == .initial ? TimingConstants.convergeDurationMs : 0,
@@ -1083,6 +1095,20 @@ struct EditorView: View {
         } catch {
             print("[editor] shred failed:", error)
             validationAlert = "削除に失敗しました: \(error.localizedDescription)"
+        }
+    }
+
+    /// 「周辺セルのクリア」確定時: 表示中グリッドの周辺 8 セル + 配下サブグリッドを一括クリアする
+    /// (中心セルは保持)。Undo 非対象。クリア対象は context menu から渡される表示中 gridId。
+    /// 周辺セルはその場に留まり @Query 反映で UI 更新される (= performShred と同じ)。
+    private func performClearPeripherals(_ gridId: String) {
+        defer { clearPeripheralsGridId = nil }
+        guard let m = mandalart, !m.locked else { return }
+        do {
+            try GridRepository.clearGridPeripherals(gridId: gridId, in: modelContext)
+        } catch {
+            print("[editor] clearGridPeripherals failed:", error)
+            validationAlert = "周辺セルのクリアに失敗しました: \(error.localizedDescription)"
         }
     }
 

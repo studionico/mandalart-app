@@ -35,7 +35,8 @@ ios/
 │   │       ├── EditingSheet.swift `.fullScreenCover` 共通 sheet (セル / メモ編集を統一、Landscape kbd 覆い対策)
 │   │       ├── ThemeToggle.swift ライト/システム/ダーク切替 (capsule = Editor 右上 / Dashboard toolbar、segmented = SettingsView Form)
 │   │       ├── ShredderIcon.swift   desktop ShredderIcon SVG を SwiftUI Path で移植したベクター icon (24×24 viewBox、シュレッダー context menu の icon slot で使用)
-│   │       └── ShredConfirmModifier.swift シュレッダー確認 `.confirmationDialog` を切り出した ViewModifier (EditorView body chain type-check timeout 回避 / 落とし穴 #12 対策)
+│   │       ├── ShredConfirmModifier.swift シュレッダー確認 `.confirmationDialog` を切り出した ViewModifier (EditorView body chain type-check timeout 回避 / 落とし穴 #12 対策)
+│   │       └── ClearPeripheralsConfirmModifier.swift 中心セル「周辺セルのクリア」確認 `.confirmationDialog` を切り出した ViewModifier (同 #12 対策)
 │   ├── ViewModels/
 │   │   └── AuthStore.swift       @Observable / @MainActor / supabase-swift Auth ラッパ
 │   ├── Services/
@@ -43,7 +44,7 @@ ios/
 │   │   ├── MandalartFactory.swift create / duplicate / softDelete / restore / permanentDelete (cascade) / deleteFromCloud (cloud cascade + tombstone)
 │   │   ├── FolderRepository.swift ensureInboxFolder (重複 system folder 統合) / adoptOrphansToInbox
 │   │   ├── ImageStorage.swift     セル画像のローカル保存 (Application Support/images/、JPEG 圧縮、cross-device 非同期)
-│   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree / permanentDeleteGrid)
+│   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree / clearGridPeripherals / permanentDeleteGrid)
 │   │   ├── StockService.swift    Stock CRUD (addToStock / moveCellToStock = cut / pasteFromStock、CellSnapshot/GridSnapshot は desktop と互換)
 │   │   ├── CellCheckboxService.swift done トグル + サブツリー down 伝播 + 親方向 up 伝播 (desktop toggleCellDone と等価、centerCellId ベース)。recomputeDoneUpward = シュレッダー後の中心 done 再計算 / propagateUndoneUpward = 新規入力 (空→非空) 時の親 done 解除
 │   │   ├── CellSwapService.swift     周辺セル入れ替え (text/imagePath/color/done + grids の parentCellId/centerCellId を双方向 swap、自グリッド除外、done も内容に付随)
