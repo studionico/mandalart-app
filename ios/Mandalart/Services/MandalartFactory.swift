@@ -4,6 +4,23 @@ import Supabase
 
 @MainActor
 enum MandalartFactory {
+    /// 指定 folder 内で「先頭に並ぶ」sortOrder 値を返す。
+    /// desktop lib/api/mandalarts.ts:nextTopSortOrder と等価:
+    /// 既存（deletedAt == nil）の `MIN(sortOrder) - 1`、該当なし / 全 nil なら -1。
+    /// 新規 / インポート / ストック作成でこれを sortOrder に入れると、
+    /// 並べ替え済み（sortOrder 0..N）の既存カードより前に並ぶ。
+    ///
+    /// 注: SwiftData の `#Predicate` で `min()` は表現できないため folder 内カードを
+    /// fetch してから Swift 側で `compactMap.min()` する（少数想定で問題なし）。
+    static func nextTopSortOrder(folderId: String, in context: ModelContext) -> Int {
+        let fetch = FetchDescriptor<Mandalart>(
+            predicate: #Predicate<Mandalart> { $0.folderId == folderId && $0.deletedAt == nil }
+        )
+        let existing = (try? context.fetch(fetch)) ?? []
+        let minSort = existing.compactMap { $0.sortOrder }.min()
+        return (minSort ?? 0) - 1
+    }
+
     /// Create a new mandalart with its root grid + center cell.
     /// Mirrors desktop's lib/api/mandalarts.ts:createMandalart.
     ///
@@ -47,6 +64,7 @@ enum MandalartFactory {
             title: title,
             rootCellId: rootCellId,
             lastGridId: nil,
+            sortOrder: nextTopSortOrder(folderId: resolvedFolderId, in: context),
             folderId: resolvedFolderId
         )
 

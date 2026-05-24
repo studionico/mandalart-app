@@ -722,6 +722,7 @@ enum TransferService {
             title: centerText,
             rootCellId: rootCenterCellId,
             lastGridId: nil,
+            sortOrder: MandalartFactory.nextTopSortOrder(folderId: resolvedFolderId, in: context),
             folderId: resolvedFolderId,
             createdAt: now,
             updatedAt: now
