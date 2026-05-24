@@ -42,6 +42,8 @@ enum LayoutConstants {
     /// iPad regular size class では default で開き、iPhone Landscape では default 折り畳み。
     /// LazyVGrid `.adaptive` minimum がこの幅引いた viewport で再計算される。
     static let dashboardStockAsideWidth: CGFloat = 280
+    /// 現在地マップアイコン (パンくず置換) の 1 マスの一辺 (pt)。3×3 で全体 ~24pt 角。
+    static let locationMapCellSize: CGFloat = 7
 }
 
 enum TimingConstants {

@@ -1,96 +1,84 @@
 import SwiftUI
 
-/// EditorView の右ペイン上部に表示する階層パンくずリスト。
+/// EditorView の右ペイン上部に表示する階層パンくず (= 現在地マップアイコン列)。
 /// 各アイテムをタップで `onNavigate(index)` が呼ばれて drill-up する。
 ///
-/// **3 階層以下**: 全項目を chevron 区切りで横並び表示。
-/// **4 階層以上**: `[root] > [...] menu > [N-1] > [N]` の 5 要素 (= 4 文 + 3 chevron) に折りたたみ、
-/// `[...]` をタップすると Menu で省略中間階層 (index 1〜N-3) を一覧表示、選択で drill-up。
+/// 各項目はテキストではなく **3×3 ミニマップアイコン** で表す。アイコンはその階層で
+/// 「展開したセルの position」を 1 マスだけ塗る:
+///  - ルート (position = nil) は中心 (centerPosition) を塗る
+///  - 以降の階層は親グリッドで展開した周辺セルの position を塗る
+/// 横に並ぶと「ルート中心 → 展開した周辺 → …」という現在地の経路マップになる。
 ///
-/// 各 label は `lineLimit(1)` + `truncationMode(.tail)` + `frame(maxWidth: 120)` で個別 truncate。
-/// 長いセル文字でも右ペイン (240pt) に収まる。
+/// アイコンは小さく均一なので折りたたみはせず、全項目を chevron 区切りで横スクロール表示する。
+/// 元のセルテキストは `.accessibilityLabel` に退避する。
 struct Breadcrumb: View {
     let items: [BreadcrumbItem]
     let onNavigate: (Int) -> Void
 
-    /// label の最大幅 (pt)。iPhone Pro Landscape の memoW=240 から逆算 (root + chevron + ... +
-    /// chevron + 末尾 2 項 + chevron = ~120pt 余裕)。実機で testing して微調整可。
-    private static let labelMaxWidth: CGFloat = 120
-
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                if items.count <= 3 {
-                    // 3 階層以下: 全項目を従来通り表示
-                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                        labelButton(item: item, index: index, isCurrent: index == items.count - 1)
-                        if index < items.count - 1 {
-                            chevron
-                        }
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    mapButton(item: item, index: index, isCurrent: index == items.count - 1)
+                    if index < items.count - 1 {
+                        chevron
                     }
-                } else {
-                    // 4 階層以上: root + Menu(...) + 末尾 2 項 に折りたたみ
-                    let rootIndex = 0
-                    let lastIndex = items.count - 1
-                    let secondLastIndex = items.count - 2
-                    let middleRange = 1..<(items.count - 2)  // Menu に格納する index 群
-
-                    labelButton(item: items[rootIndex], index: rootIndex, isCurrent: false)
-                    chevron
-                    middleMenu(middleRange: middleRange)
-                    chevron
-                    labelButton(item: items[secondLastIndex], index: secondLastIndex, isCurrent: false)
-                    chevron
-                    labelButton(item: items[lastIndex], index: lastIndex, isCurrent: true)
                 }
             }
         }
     }
 
-    /// 1 つの breadcrumb ラベルボタン。`isCurrent` で末尾 (現在地) を強調表示。
+    /// 1 つの breadcrumb マップアイコンボタン。`isCurrent` で末尾 (現在地) を強調表示。
     @ViewBuilder
-    private func labelButton(item: BreadcrumbItem, index: Int, isCurrent: Bool) -> some View {
+    private func mapButton(item: BreadcrumbItem, index: Int, isCurrent: Bool) -> some View {
         Button {
             // 末尾 (= 現在地) は nav しても何も起きないが、UI は active 状態で残す
             if !isCurrent {
                 onNavigate(index)
             }
         } label: {
-            Text(item.label.isEmpty ? "(無題)" : item.label)
-                .font(isCurrent ? .headline : .subheadline)
-                .foregroundStyle(isCurrent ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: Self.labelMaxWidth, alignment: .leading)
+            LocationMapIcon(position: item.position ?? GridConstants.centerPosition)
         }
         .buttonStyle(.plain)
-    }
-
-    /// 折りたたまれた中間階層 (= index 1〜N-3) を Menu で展開するボタン。
-    /// label は `…` アイコン、選択で `onNavigate(originalIndex)` 呼び出し。
-    @ViewBuilder
-    private func middleMenu(middleRange: Range<Int>) -> some View {
-        Menu {
-            ForEach(middleRange, id: \.self) { index in
-                Button {
-                    onNavigate(index)
-                } label: {
-                    Text(items[index].label.isEmpty ? "(無題)" : items[index].label)
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 28, minHeight: 24)
-        }
-        .accessibilityLabel("省略された中間階層を表示")
+        .accessibilityLabel(item.label.isEmpty ? "(無題)" : item.label)
     }
 
     private var chevron: some View {
         Image(systemName: "chevron.right")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(.secondary)
+    }
+}
+
+/// 現在地マップアイコン。1 つの正方形を縦 2 本・横 2 本の線で 3×3 に区切り、
+/// その階層で「展開したセルの position」の 1 マスだけを塗りつぶす。
+private struct LocationMapIcon: View {
+    let position: Int
+
+    private static let unit = LayoutConstants.locationMapCellSize
+    private var side: CGFloat { Self.unit * CGFloat(GridConstants.gridSide) }
+
+    var body: some View {
+        let col = CGFloat(position % GridConstants.gridSide)
+        let row = CGFloat(position / GridConstants.gridSide)
+        Canvas { ctx, size in
+            let u = Self.unit
+            // 塗りつぶしセル
+            let cell = CGRect(x: col * u, y: row * u, width: u, height: u)
+            ctx.fill(Path(cell), with: .color(.primary))
+            // 外枠 + 内側の区切り線 (縦 2 / 横 2)
+            var grid = Path()
+            grid.addRect(CGRect(x: 0.5, y: 0.5, width: size.width - 1, height: size.height - 1))
+            for i in 1..<GridConstants.gridSide {
+                let p = CGFloat(i) * u
+                grid.move(to: CGPoint(x: p, y: 0))
+                grid.addLine(to: CGPoint(x: p, y: size.height))
+                grid.move(to: CGPoint(x: 0, y: p))
+                grid.addLine(to: CGPoint(x: size.width, y: p))
+            }
+            ctx.stroke(grid, with: .color(.secondary), lineWidth: 1)
+        }
+        .frame(width: side, height: side)
     }
 }
 
@@ -98,5 +86,6 @@ struct BreadcrumbItem: Identifiable, Hashable {
     let gridId: String
     let cellId: String?  // nil = root
     let label: String
+    let position: Int?   // nil = root(中心), それ以外 = 展開した周辺セル position 0-8
     var id: String { gridId }
 }

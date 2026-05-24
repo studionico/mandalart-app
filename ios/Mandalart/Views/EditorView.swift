@@ -856,7 +856,8 @@ struct EditorView: View {
                 BreadcrumbItem(
                     gridId: g.id,
                     cellId: g.parentCellId,
-                    label: labelForGrid(g, mandalart: mandalart)
+                    label: labelForGrid(g, mandalart: mandalart),
+                    position: positionForGrid(g)
                 )
             }
         } else {
@@ -864,7 +865,8 @@ struct EditorView: View {
             breadcrumb = [BreadcrumbItem(
                 gridId: root.id,
                 cellId: nil,
-                label: mandalart.title.isEmpty ? "(無題)" : mandalart.title
+                label: mandalart.title.isEmpty ? "(無題)" : mandalart.title,
+                position: nil
             )]
         }
         refreshParallelState(for: mandalart)
@@ -923,7 +925,8 @@ struct EditorView: View {
         breadcrumb.append(BreadcrumbItem(
             gridId: target.id,
             cellId: cell.id,
-            label: cell.text.isEmpty ? "(無題)" : cell.text
+            label: cell.text.isEmpty ? "(無題)" : cell.text,
+            position: cell.position
         ))
         currentGridId = target.id
         // lastGridId / updatedAt 更新は書き込み → ロック中はスキップ (sync dirty 化を避ける)
@@ -968,7 +971,8 @@ struct EditorView: View {
             breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
                 gridId: nextGrid.id,
                 cellId: last.cellId,
-                label: last.label
+                label: last.label,
+                position: last.position
             )
         }
         if !mandalart.locked {
@@ -1006,7 +1010,8 @@ struct EditorView: View {
                 breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
                     gridId: newGrid.id,
                     cellId: last.cellId,
-                    label: last.label
+                    label: last.label,
+                    position: last.position
                 )
             }
             mandalart.lastGridId = newGrid.id
@@ -1097,7 +1102,8 @@ struct EditorView: View {
         breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
             gridId: target.id,
             cellId: targetCell.id,
-            label: targetCell.text.isEmpty ? "(無題)" : targetCell.text
+            label: targetCell.text.isEmpty ? "(無題)" : targetCell.text,
+            position: targetCell.position
         )
         if !mandalart.locked {
             mandalart.lastGridId = target.id
@@ -1135,6 +1141,13 @@ struct EditorView: View {
             return parent.text.isEmpty ? "(無題)" : parent.text
         }
         return "(無題)"
+    }
+
+    /// breadcrumb 現在地マップアイコン用に「この grid に入るため展開した親セルの position」を返す。
+    /// ルート (parentCellId == nil) は nil (= 中心扱い)。drill-down 復元経路で使う。
+    private func positionForGrid(_ grid: Grid) -> Int? {
+        guard let parentId = grid.parentCellId else { return nil }
+        return allCells.first(where: { $0.id == parentId })?.position
     }
 
     // MARK: - Shredder
@@ -1241,7 +1254,8 @@ struct EditorView: View {
                 breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
                     gridId: next.id,
                     cellId: last.cellId,
-                    label: last.label
+                    label: last.label,
+                    position: last.position
                 )
             }
             if !mandalart.locked {
