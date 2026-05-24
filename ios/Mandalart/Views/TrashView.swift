@@ -10,6 +10,8 @@ import SwiftData
 /// - **完全削除** (`permanentDelete`): cells / grids / mandalart を物理削除 + cloud cascade。
 ///   2 段階確認 (.alert) で誤操作防止。Tauri の `window.confirm` 不可問題は iOS には無いので
 ///   SwiftUI 標準 alert で OK
+/// - **すべて削除** (`deleteAll`): ゴミ箱内の全マンダラートを一括完全削除。1 段階 .alert 確認。
+///   desktop の `handleDeleteAll` 相当 (StockTab の「すべて削除」と同じ native pattern)
 struct TrashView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +23,7 @@ struct TrashView: View {
     private var deletedMandalarts: [Mandalart]
 
     @State private var pendingPermanentDelete: Mandalart?
+    @State private var showDeleteAllAlert = false
 
     var body: some View {
         NavigationStack {
@@ -51,6 +54,12 @@ struct TrashView: View {
                 } message: { m in
                     Text("「\(m.title)」を完全に削除します。この操作は取り消せません。")
                 }
+                .alert("すべて削除しますか?", isPresented: $showDeleteAllAlert) {
+                    Button("削除", role: .destructive) { deleteAll() }
+                    Button("キャンセル", role: .cancel) { }
+                } message: {
+                    Text("\(deletedMandalarts.count) 件をすべて完全に削除します。この操作は取り消せません。")
+                }
         }
     }
 
@@ -60,8 +69,22 @@ struct TrashView: View {
             emptyState
         } else {
             List {
-                ForEach(deletedMandalarts) { m in
-                    row(for: m)
+                Section {
+                    ForEach(deletedMandalarts) { m in
+                        row(for: m)
+                    }
+                } header: {
+                    HStack {
+                        Spacer()
+                        Button(role: .destructive) {
+                            showDeleteAllAlert = true
+                        } label: {
+                            Text("すべて削除 (\(deletedMandalarts.count))")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red)
+                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -112,6 +135,21 @@ struct TrashView: View {
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    // MARK: - Actions
+
+    /// ゴミ箱内の全マンダラートを一括完全削除する (desktop の `handleDeleteAll` 相当)。
+    /// ロック中マンダラートは `softDelete` 段階で弾かれるためそもそもゴミ箱に入らない
+    /// (= ここに到達する対象は全て unlocked)。個別失敗は握りつぶす
+    /// (= desktop の `Promise.allSettled` 相当) ことで残りの削除を継続する。
+    private func deleteAll() {
+        let targets = deletedMandalarts
+        Task {
+            for m in targets {
+                try? await MandalartFactory.permanentDelete(m, in: modelContext)
+            }
         }
     }
 }

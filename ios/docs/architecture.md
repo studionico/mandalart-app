@@ -22,7 +22,7 @@ ios/
 │   ├── Views/
 │   │   ├── DashboardView.swift   ホーム (LazyVGrid + 新規作成カード + 検索 + フォルダタブ + ゴミ箱 / インポート toolbar)
 │   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state + 不変条件 enforcement + 空マンダラート自動 hard delete)
-│   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除、desktop の TrashDialog 等価)
+│   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除 / すべて削除、desktop の TrashDialog 等価)
 │   │   ├── DashboardTransferSupport.swift Dashboard の Export/Import modifier 切り出し (SourceKit timeout 回避、pitfalls.md #12)
 │   │   ├── SettingsView.swift    アカウント / 同期ボタン
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
