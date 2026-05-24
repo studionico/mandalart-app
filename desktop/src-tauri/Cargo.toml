@@ -14,6 +14,13 @@ edition = "2021"
 name = "desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# 出力バイナリ名を MandalArt にする (package name は内部識別子として desktop のまま据え置き)。
+# これにより `tauri dev` 実行時の macOS Dock / プロセス名も MandalArt になる
+# (build 済 .app は productName 由来で元々 MandalArt)。
+[[bin]]
+name = "MandalArt"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

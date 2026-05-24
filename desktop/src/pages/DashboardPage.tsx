@@ -514,8 +514,6 @@ export default function DashboardPage() {
   return (
     <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
       <header className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-6 py-4 flex items-center justify-between gap-4 shrink-0">
-        <h1 className="text-lg font-bold shrink-0">マンダラート</h1>
-
         <div className="flex-1 flex items-center gap-2 max-w-xl">
           <input
             type="text"

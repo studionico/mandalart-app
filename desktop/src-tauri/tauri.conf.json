@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mandalart",
+  "productName": "MandalArt",
   "version": "0.1.7",
   "identifier": "jp.mandalart.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Mandalart",
+        "title": "MandalArt",
         "width": 1280,
         "height": 720,
         "minWidth": 800,
