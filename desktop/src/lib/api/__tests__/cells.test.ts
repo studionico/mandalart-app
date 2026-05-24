@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { createTestDb, bindTestDb, unbindTestDb } from '@/test/setupTestDb'
 import { createMandalart } from '@/lib/api/mandalarts'
 import { getRootGrids, createGrid, getGrid } from '@/lib/api/grids'
-import { upsertCellAt, updateCell, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree } from '@/lib/api/cells'
+import { upsertCellAt, updateCell, swapCellSubtree, swapCellContent, toggleCellDone, shredCellSubtree, clearGridPeripherals } from '@/lib/api/cells'
 
 let db: Database.Database
 
@@ -197,5 +197,57 @@ describe('updateCell (新規入力セルは必ず未完了)', () => {
 
     await updateCell(cell.id, { text: 'task (edited)' })
     expect(doneOf(cell.id)).toBe(1)
+  })
+})
+
+describe('clearGridPeripherals (周辺セル + 配下を一括クリア / 中心は保持)', () => {
+  const gridAlive = (id: string) =>
+    !!(db.prepare('SELECT id FROM grids WHERE id = ? AND deleted_at IS NULL').get(id))
+
+  it('周辺セルの content をクリアし配下サブグリッドを削除、中心セルは残す', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    // 中心セルを埋める (root は自グリッドに position=4 を持つ)
+    const center = await upsertCellAt(root.id, 4, { text: 'center' })
+    // 周辺セル 2 つに content、うち 1 つは drill 済 (子グリッド有り)
+    const p0 = await upsertCellAt(root.id, 0, { text: 'p0' })
+    const p1 = await upsertCellAt(root.id, 1, { text: 'p1' })
+    const childP0 = await createGrid({
+      mandalartId: m.id, parentCellId: p0.id, centerCellId: p0.id, sortOrder: 0,
+    })
+    await upsertCellAt(childP0.id, 0, { text: 'p0-child' })
+    expect(gridAlive(childP0.id)).toBe(true)
+
+    await clearGridPeripherals(root.id)
+
+    // assert: 周辺セルは空 (content クリア)
+    const after = (await getGrid(root.id)).cells
+    expect(after.find((c) => c.id === p0.id)?.text).toBe('')
+    expect(after.find((c) => c.id === p1.id)?.text).toBe('')
+    // assert: 配下サブグリッドは削除済み
+    expect(gridAlive(childP0.id)).toBe(false)
+    // assert: 中心セルは保持
+    expect(after.find((c) => c.id === center.id)?.text).toBe('center')
+  })
+
+  it('子 X=C グリッドでは中心 (親 peripheral) を消さず自グリッド周辺のみクリアする', async () => {
+    const m = await createMandalart('test')
+    const root = (await getRootGrids(m.id))[0]
+    await upsertCellAt(root.id, 4, { text: 'root-center' })
+    // root の周辺 X を drill して子グリッド (X=C: center_cell_id = X.id) を作る
+    const X = await upsertCellAt(root.id, 0, { text: 'X' })
+    const child = await createGrid({
+      mandalartId: m.id, parentCellId: X.id, centerCellId: X.id, sortOrder: 0,
+    })
+    // 子グリッドの周辺に content
+    const cp = await upsertCellAt(child.id, 1, { text: 'child-p' })
+
+    await clearGridPeripherals(child.id)
+
+    // 子グリッド周辺はクリア
+    const childCells = (await getGrid(child.id)).cells
+    expect(childCells.find((c) => c.id === cp.id)?.text).toBe('')
+    // 中心 (= 親 peripheral X) は無傷 (grid_id が異なるため対象外)
+    expect(childCells.find((c) => c.id === X.id)?.text).toBe('X')
   })
 })

@@ -115,7 +115,8 @@ src/
 │   │   ├── DragActionPanel.tsx   # D&D 中の右パネル アクションアイコン (シュレッダー / 移動 / コピー / エクスポート、ロック中は destructive 2 つ非表示)
 │   │   ├── MemoTab.tsx           # メモタブ (Markdown エディタ)
 │   │   ├── StockTab.tsx          # ストックタブ (保管セル一覧 + ConvergeOverlay polling target)
-│   │   └── ImportDialog.tsx      # インポートダイアログ (新規 / 既存セル配下)
+│   │   ├── ImportDialog.tsx      # インポートダイアログ (新規 / 既存セル配下)
+│   │   └── ClearPeripheralsConfirmDialog.tsx  # 中心セル右クリック「周辺セルのクリア」の確認 (Undo 非対象)
 │   │
 │   └── ui/                   # 汎用 UI コンポーネント
 │       ├── Button.tsx        # primary / secondary / ghost / danger バリアント (dark 対応)

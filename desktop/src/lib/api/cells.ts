@@ -439,6 +439,22 @@ export async function shredCellSubtree(cellId: string): Promise<void> {
   await propagateDoneUp(cellId, ts)
 }
 
+/**
+ * グリッドの周辺セル (position != CENTER_POSITION) とその配下サブグリッドを一括クリアする。
+ * 中心セルは対象外 (内容を保持)。各周辺セルに shredCellSubtree を適用する
+ * (content クリア + サブグリッド再帰削除 + done 再計算)。
+ * 子 X=C グリッドでも中心セルは grid_id が親グリッドのため、この WHERE 句に入らず自然に除外される。
+ */
+export async function clearGridPeripherals(gridId: string): Promise<void> {
+  const peripherals = await query<{ id: string }>(
+    'SELECT id FROM cells WHERE grid_id = ? AND position != ? AND deleted_at IS NULL',
+    [gridId, CENTER_POSITION],
+  )
+  for (const c of peripherals) {
+    await shredCellSubtree(c.id)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // チェックボックス (done) 関連
 // ---------------------------------------------------------------------------

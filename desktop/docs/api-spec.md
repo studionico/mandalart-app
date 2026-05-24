@@ -229,6 +229,11 @@ copyCellSubtree(sourceCellId: string, targetCellId: string): Promise<void>
 // 末尾で propagateDoneUp を呼び、空になったセルを除いて「残り周辺が全て done なら中心も done」を上方再計算する
 shredCellSubtree(cellId: string): Promise<void>
 
+// グリッドの周辺セル (grid_id = gridId かつ position != CENTER_POSITION) とその配下サブグリッドを
+// 一括クリアする (中心セルは対象外)。各周辺セルに shredCellSubtree を適用。中心セル右クリックの
+// 「周辺セルのクリア」から確認ダイアログ経由で呼ばれる。子 X=C グリッドの中心は grid_id が親のため自然に除外。
+clearGridPeripherals(gridId: string): Promise<void>
+
 // cellId が「自グリッドの中心」(cells 上 position=4 の行) でかつ周辺セルが 1 つでも非空かを返す。
 // true のとき中心の destructive 操作 (即削除カット等) は周辺を孤立させるため呼出側で block する。
 // X=C drilled child の中心は cells 上 position!=4 なので false (shredCellSubtree が subtree ごと削除するため)。

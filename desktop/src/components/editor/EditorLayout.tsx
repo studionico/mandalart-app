@@ -17,6 +17,7 @@ import SidePanel from './SidePanel'
 import ImportDialog from './ImportDialog'
 import ReplaceConfirmDialog from './ReplaceConfirmDialog'
 import ShredConfirmDialog from './ShredConfirmDialog'
+import ClearPeripheralsConfirmDialog from './ClearPeripheralsConfirmDialog'
 import ExportFormatPicker, { type ExportFormat } from './ExportFormatPicker'
 import type { ActionDropType } from '@/hooks/useDragAndDrop'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -24,13 +25,13 @@ import Toast from '@/components/ui/Toast'
 import Button from '@/components/ui/Button'
 import { WarningIcon } from '@/components/ui/icons'
 import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
-import { toggleCellDone, upsertCellAt, shredCellSubtree } from '@/lib/api/cells'
+import { toggleCellDone, upsertCellAt, shredCellSubtree, clearGridPeripherals } from '@/lib/api/cells'
 import { getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
 import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
 import { uploadCellImage } from '@/lib/api/storage'
 import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
 import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
-import { isCellEmpty, hasPeripheralContent, getCenterCell, isGridContentEmpty, canPasteIntoPeripheral } from '@/lib/utils/grid'
+import { isCellEmpty, hasPeripheralContent, getCenterCell, getPeripheralCells, isGridContentEmpty, canPasteIntoPeripheral } from '@/lib/utils/grid'
 import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
 import { nextTabPosition } from '@/constants/tabOrder'
 import {
@@ -786,6 +787,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
   // ストック → 入力ありの周辺セル drop: 確認 dialog を開く
   const [replaceConfirm, setReplaceConfirm] = useState<{ stockItemId: string; targetCellId: string; targetText: string } | null>(null)
+
+  // 中心セル右クリック「周辺セルのクリア」: 確認 dialog を開く
+  const [clearPeripheralsConfirm, setClearPeripheralsConfirm] = useState(false)
 
   const handleStockReplaceDrop = useCallback((stockItemId: string, targetCellId: string) => {
     if (isLocked) return  // ロック中は確認 dialog も開かない
@@ -1899,6 +1903,15 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     if (!contextMenu) return
     const menu = contextMenu
     setContextMenu(null)
+
+    if (action === 'clear-peripherals') {
+      // 中心セル限定。実行可否 (中心判定 / 周辺非空 / 非ロック) はメニュー表示条件で担保済みだが、
+      // ロック中は保険でここでも block する。実体クリアは確認ダイアログ確定後 (handleClearPeripheralsConfirm)。
+      if (isLocked) return
+      setClearPeripheralsConfirm(true)
+      return
+    }
+
     if (action !== 'import') return
     if (isLocked) return  // ロック中は import (cell 編集) を block
 
@@ -1923,6 +1936,20 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       cellLabel: cell.text || `セル ${cell.position + 1}`,
     })
   }
+
+  // 「周辺セルのクリア」確定: 表示中グリッドの周辺 8 セル + 配下を一括クリア (中心は保持)。Undo 非対象。
+  const handleClearPeripheralsConfirm = useCallback(async () => {
+    if (!currentGridId) { setClearPeripheralsConfirm(false); return }
+    try {
+      await clearGridPeripherals(currentGridId)
+      reloadAll()
+      setToast({ message: '周辺セルをクリアしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `クリア失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setClearPeripheralsConfirm(false)
+    }
+  }, [currentGridId, reloadAll])
 
   // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
   // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。
@@ -2967,17 +2994,30 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       </div>
 
       {/* コンテキストメニュー */}
-      {contextMenu && (
-        <div
-          className="fixed bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onMouseLeave={() => setContextMenu(null)}
-        >
-          <button onClick={() => handleContextAction('import')} className="w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-xl">
-            ここにインポート
-          </button>
-        </div>
-      )}
+      {contextMenu && (() => {
+        // 「周辺セルのクリア」は表示中グリッドの中心セル右クリック時のみ。周辺が全空 / ロック中は出さない
+        // (落とし穴 #10 回避のため中心判定は cell.position ではなく getCenterCell の id 一致で行う)。
+        const showClear = contextMenu.kind === 'cell'
+          && getCenterCell(dndCells)?.id === contextMenu.cell.id
+          && getPeripheralCells(dndCells).some((c) => !isCellEmpty(c))
+          && !isLocked
+        return (
+          <div
+            className="fixed bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onMouseLeave={() => setContextMenu(null)}
+          >
+            {showClear && (
+              <button onClick={() => handleContextAction('clear-peripherals')} className="w-full text-left px-4 py-2 text-red-600 dark:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl">
+                周辺セルのクリア
+              </button>
+            )}
+            <button onClick={() => handleContextAction('import')} className={`w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${showClear ? 'rounded-b-xl' : 'rounded-xl'}`}>
+              ここにインポート
+            </button>
+          </div>
+        )
+      })()}
 
       {/* インポートダイアログ（セル配下へ） */}
       <ImportDialog
@@ -3007,6 +3047,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         isPrimaryRoot={shredConfirm?.isPrimaryRoot}
         onCancel={() => setShredConfirm(null)}
         onConfirm={handleShredConfirm}
+      />
+
+      {/* 周辺セルのクリア確認 */}
+      <ClearPeripheralsConfirmDialog
+        open={clearPeripheralsConfirm}
+        onCancel={() => setClearPeripheralsConfirm(false)}
+        onConfirm={handleClearPeripheralsConfirm}
       />
 
       {/* エクスポート形式選択 */}
