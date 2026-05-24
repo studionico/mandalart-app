@@ -368,12 +368,23 @@ struct EditorView: View {
                 // 左ペイン: 3×3 (chevron + grid + chevron/+) / 9×9 (chevron なし、grid 単体)
                 HStack(spacing: leftInnerSpacing) {
                     if viewMode == .grid3x3 {
-                        parallelNavButton(
-                            systemName: "chevron.left",
-                            visible: parallelIndex > 0,
-                            accessibilityLabel: "前の並列グリッドへ"
-                        ) {
-                            handleParallelNav(direction: -1, mandalart: mandalart)
+                        // 左スロット: 兄弟セルナビ (二重シェブロン) を並列ナビ (単一シェブロン) の上に縦積み。
+                        // 兄弟ナビ = 親グリッドの隣の周辺セルのサブグリッドへ横移動 (breadcrumb 2 段以上で可視)。
+                        VStack(spacing: leftInnerSpacing) {
+                            parallelNavButton(
+                                systemName: "chevron.left.2",
+                                visible: breadcrumb.count >= 2,
+                                accessibilityLabel: "前の周辺セルのサブグリッドへ"
+                            ) {
+                                handleSiblingNav(direction: -1, mandalart: mandalart)
+                            }
+                            parallelNavButton(
+                                systemName: "chevron.left",
+                                visible: parallelIndex > 0,
+                                accessibilityLabel: "前の並列グリッドへ"
+                            ) {
+                                handleParallelNav(direction: -1, mandalart: mandalart)
+                            }
                         }
                         let cells = GridRepository.displayCells(for: grid, in: modelContext)
                         GridView3x3(
@@ -407,7 +418,17 @@ struct EditorView: View {
                         )
                         .frame(width: gridSize, height: gridSize)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
-                        rightSlotButton(mandalart: mandalart, grid: grid)
+                        // 右スロット: 兄弟セルナビ (二重シェブロン) を並列ナビ/+ (rightSlotButton) の上に縦積み。
+                        VStack(spacing: leftInnerSpacing) {
+                            parallelNavButton(
+                                systemName: "chevron.right.2",
+                                visible: breadcrumb.count >= 2,
+                                accessibilityLabel: "次の周辺セルのサブグリッドへ"
+                            ) {
+                                handleSiblingNav(direction: 1, mandalart: mandalart)
+                            }
+                            rightSlotButton(mandalart: mandalart, grid: grid)
+                        }
                     } else {
                         // 9×9 mode: chevron 非表示で grid を中央に。chevron 分の空白を予約して
                         // 3×3 と同じ grid 中心位置を保つ (= 切替時の視覚ぶれを抑える)。
@@ -426,7 +447,7 @@ struct EditorView: View {
                 // 右ペイン: breadcrumb / tab picker / memo or stock。高さ = grid と同じ (bottom 揃え)
                 VStack(alignment: .leading, spacing: 8) {
                     if horizontalSizeClass == .regular {
-                        // iPad: 従来通り breadcrumb 全階層表示
+                        // iPad: 従来通り breadcrumb 全階層表示 (兄弟セルナビはグリッド左右スロットに集約)
                         Breadcrumb(items: breadcrumb) { index in
                             navigateToBreadcrumb(index, mandalart: mandalart)
                         }
@@ -995,6 +1016,99 @@ struct EditorView: View {
         } catch {
             print("[editor] add parallel grid failed:", error)
         }
+    }
+
+    // MARK: - Sibling cell navigation
+
+    /// 親グリッド G の周辺 8 セルを時計回り (`peripheralPositionsByTab`) に巡回し、隣の周辺セルの
+    /// 子サブグリッドへ横移動する。並列グリッド (`handleParallelNav`、`parent_cell_id` 同一の代替) とは
+    /// 別軸 (= G の異なる周辺セルを横断) で、両者は直交し共存する。
+    /// 深さは変わらないので breadcrumb は末尾エントリを差し替えるだけ (append しない)。
+    ///
+    /// 仕様: 中心以外の 8 セル全てを循環巡回。子グリッド未作成の周辺セルは着地時に X=C で作成し、
+    /// 空 position は cell 行も lazy 作成する (= CellView.lazyCreateEmptyCell と同じ手当て)。通過/
+    /// 離脱した空サブグリッドは末尾の cleanupGridIfEmpty が回収する (並列ナビと同じ流儀)。
+    /// ロック中は新規作成不可なので、既に子グリッドを持つ周辺セルだけを巡回する。
+    ///
+    /// `direction = -1` → 前 / `+1` → 次。
+    private func handleSiblingNav(direction: Int, mandalart: Mandalart) {
+        guard viewMode == .grid3x3 else { return }       // 3×3 限定 (9×9 は対象外)
+        guard breadcrumb.count >= 2 else { return }      // ルートグリッド編集中は親がいない
+        let lastEntry = breadcrumb[breadcrumb.count - 1]
+        let parentGridId = breadcrumb[breadcrumb.count - 2].gridId
+        guard let currentCellId = lastEntry.cellId else { return }
+
+        // 現在のドリル元セル P の position を取得
+        let pDesc = FetchDescriptor<Cell>(
+            predicate: #Predicate<Cell> { $0.id == currentCellId && $0.deletedAt == nil }
+        )
+        guard let pCell = (try? modelContext.fetch(pDesc))?.first else { return }
+        let order = GridConstants.peripheralPositionsByTab
+        guard let startIdx = order.firstIndex(of: pCell.position) else { return }
+        let step = direction >= 0 ? 1 : order.count - 1
+
+        // 着地可能な次の周辺セルを探す。non-locked では直近の隣 (n=1) に必ず着地する
+        // (空でも materialize/作成)。locked では既に子グリッドを持つセルだけを巡回。
+        // 現在位置 (n=order.count) は除外。
+        var target: Grid?
+        var targetCell: Cell?
+        for n in 1..<order.count {
+            let pos = order[(startIdx + step * n) % order.count]
+            let qDesc = FetchDescriptor<Cell>(
+                predicate: #Predicate<Cell> {
+                    $0.gridId == parentGridId && $0.position == pos && $0.deletedAt == nil
+                }
+            )
+            var q = (try? modelContext.fetch(qDesc))?.first
+            if q == nil {
+                // 空 position: cell 行が無い。locked では作成不可なのでスキップ。
+                if mandalart.locked { continue }
+                let now = Date()
+                let newCell = Cell(gridId: parentGridId, position: pos, text: "", createdAt: now, updatedAt: now)
+                modelContext.insert(newCell)
+                try? modelContext.save()
+                q = newCell
+            }
+            guard let cell = q else { continue }
+            if mandalart.locked {
+                if let child = GridRepository.findChildGrid(parentCellId: cell.id, in: modelContext) {
+                    target = child
+                    targetCell = cell
+                    break
+                }
+                // locked かつ子グリッド無し → 次の周辺セルへ
+            } else if let child = try? GridRepository.findOrCreateChildGrid(
+                parentCellId: cell.id,
+                mandalartId: mandalart.id,
+                in: modelContext
+            ) {
+                target = child
+                targetCell = cell
+                break
+            }
+        }
+        guard let target, let targetCell else { return }  // 着地先なし (例: locked で子を持つ兄弟が皆無)
+        let oldGridId = currentGridId
+        guard oldGridId != target.id else { return }       // 循環で自分自身に戻った場合は no-op
+
+        lastTransitionKind = .parallel
+        currentGridId = target.id
+        // breadcrumb 末尾エントリを差し替える (gridId / ドリル元 cell / ラベル)
+        breadcrumb[breadcrumb.count - 1] = BreadcrumbItem(
+            gridId: target.id,
+            cellId: targetCell.id,
+            label: targetCell.text.isEmpty ? "(無題)" : targetCell.text
+        )
+        if !mandalart.locked {
+            mandalart.lastGridId = target.id
+            mandalart.updatedAt = Date()
+            try? modelContext.save()
+        }
+        // 通過/離脱した旧 grid が空なら物理削除 (ロック中は cleanup も書き込みなのでスキップ)
+        if !mandalart.locked, let oldGridId, oldGridId != target.id {
+            _ = GridRepository.cleanupGridIfEmpty(gridId: oldGridId, in: modelContext)
+        }
+        refreshParallelState(for: mandalart)
     }
 
     /// 9×9 view 用 layout (= 9 ブロック分の `(Grid?, displayCells)`)。

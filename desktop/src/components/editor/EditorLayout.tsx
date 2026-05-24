@@ -83,6 +83,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
   // "0" が描画される罠 (落とし穴 #16) を踏む。
   const isLocked = useEditorStore((s) => !!s.currentMandalart?.locked)
 
+  // 兄弟セルナビ (隣のテーマ) の表示可否。サブグリッド編集中 (breadcrumb 2 段以上) かつ 3×3 のみ。
+  // 表示中はグリッド両脇スロットの「並列ナビ枠」を常に確保し、並列ナビの有無で兄弟ボタンの
+  // 縦位置がぶれないようにする (= iOS と同じ枠予約方針)。
+  const showSiblingNav = breadcrumb.length >= 2 && viewMode === '3x3'
+
   // セル左上 done チェックボックス UI の表示 ON/OFF。マンダラート単位で記憶 (migration 007)。
   // mandalartId 変更時に DB から復元、トグル時は楽観的更新 + DB 永続化。
   const [showCheckbox, setShowCheckbox] = useState(false)
@@ -1835,6 +1840,99 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     setSlide(null)
   }
 
+  // 兄弟セルナビゲーション (並列グリッドとは直交する別軸)
+  //
+  // 親グリッド G の周辺 8 セルを ORBIT_ORDER_PERIPHERAL (時計回り) で巡回し、隣の周辺セルの
+  // 子サブグリッドへ横移動する。並列グリッド (handleParallelNav) が「同一周辺セル配下の代替
+  // (parent_cell_id 同一)」を切替えるのに対し、こちらは「親 G の異なる周辺セル」を横断する。
+  // 深さは変わらないので breadcrumb は末尾エントリを差し替えるだけ (push しない)。
+  //
+  // 仕様 (確定): 中心以外の 8 セル全てを循環巡回し、子グリッド未作成の周辺セルは着地時に
+  // X=C モデルで作成する (空 position は cell 行も lazy 作成)。通過/離脱した空サブグリッドは
+  // 末尾で cleanupGridIfEmpty が回収する (並列ナビ / drill-up と同じ流儀)。
+  async function handleSiblingNav(dir: 'prev' | 'next') {
+    if (slide) return // アニメーション中は無視
+    if (viewMode !== '3x3') return // 3×3 限定 (9×9 は対象外)
+    if (breadcrumb.length < 2) return // ルートグリッド編集中は親がいない
+    if (!gridData) return
+
+    const lastEntry = breadcrumb[breadcrumb.length - 1]
+    const parentGridId = breadcrumb[breadcrumb.length - 2].gridId
+    const currentPos = lastEntry.highlightPosition
+    if (currentPos === null) return
+
+    const order = ORBIT_ORDER_PERIPHERAL
+    const startIdx = order.indexOf(currentPos)
+    if (startIdx < 0) return
+
+    // breadcrumb の cells は drill 時点のスナップショットで stale な可能性があるため
+    // 親グリッドを最新取得する (memory: denormalized field は信頼しない)。
+    const parentGrid = await getGrid(parentGridId)
+    const step = dir === 'next' ? 1 : order.length - 1
+
+    // 着地可能な次の周辺セルを探す。non-locked では直近の隣 (n=1) に必ず着地する
+    // (空でも materialize/作成する)。locked では新規作成できないので、既に子グリッドを
+    // 持つ周辺セルだけを巡回し、無ければ no-op になる。現在位置 (n=order.length) は除外。
+    let target: (Grid & { cells: Cell[] }) | null = null
+    let targetCell: Cell | null = null
+    let targetSiblings: Grid[] = []
+    for (let n = 1; n < order.length; n++) {
+      const pos = order[(startIdx + step * n) % order.length]
+      let q = parentGrid.cells.find((c) => c.position === pos) ?? null
+      if (!q) {
+        // 空 position: cell 行が無い。locked では作成不可なのでスキップ。
+        if (isLocked) continue
+        q = await upsertCellAt(parentGridId, pos, {})
+      }
+      const children = await getChildGrids(q.id)
+      if (children.length > 0) {
+        target = await getGrid(children[0].id)
+        targetSiblings = children
+        targetCell = q
+        break
+      }
+      if (!isLocked) {
+        const created = await createGrid({ mandalartId, parentCellId: q.id, centerCellId: q.id, sortOrder: 0 })
+        target = await getGrid(created.id)
+        targetSiblings = await getChildGrids(q.id)
+        targetCell = q
+        break
+      }
+      // locked かつ子グリッド無し → このセルには入れないので次の周辺セルへ
+    }
+    if (!target || !targetCell) return // 着地先なし (例: locked で子グリッドを持つ兄弟が皆無)
+
+    const oldGridId = gridData.id
+    if (oldGridId === target.id) return // 循環で自分自身に戻った場合は no-op
+
+    const fromCells = gridData.cells
+    const siblingIdx = targetSiblings.findIndex((g) => g.id === target!.id)
+
+    // breadcrumb 末尾エントリを差し替える (gridId / ドリル元 cell / ラベル / 強調位置)。
+    updateBreadcrumbItem(oldGridId, {
+      gridId: target.id,
+      cellId: targetCell.id,
+      label: targetCell.text,
+      imagePath: targetCell.image_path,
+      highlightPosition: targetCell.position,
+    })
+    setParallelGrids(targetSiblings.length > 0 ? targetSiblings : [target])
+    setParallelIndex(siblingIdx >= 0 ? siblingIdx : 0)
+    setCurrentGrid(target.id)
+
+    // スライド描画を開始し、終了後に state クリア
+    setSlide({
+      fromCells,
+      toCells: target.cells,
+      direction: dir === 'next' ? 'forward' : 'backward',
+    })
+    await new Promise((r) => setTimeout(r, SLIDE_DURATION_MS))
+    setSlide(null)
+
+    // 通過/離脱した旧グリッドが空 (memo も無し) なら hard-delete で回収する
+    await cleanupGridIfEmpty(oldGridId)
+  }
+
   // 表示モード切替: 3×3 ↔ 9×9 をアニメーション付きで切替える
   // - to-9x9: 現在の 3×3 を中央原点で scale(1)→scale(1/3) に縮小、同時に周辺 8 ブロックを
   //   時計回り stagger で fade-in
@@ -2138,9 +2236,23 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* グリッド表示（正方形・最大化） + 両脇に並列ナビボタン */}
           <div ref={gridAreaRef} className="flex-1 flex items-center justify-center overflow-hidden p-4 gap-4">
-            {/* 左側: 1 つ前の並列グリッドへ戻る「＜」 */}
-            <div className="w-12 flex items-center justify-center shrink-0">
-              {parallelIndex > 0 && (
+            {/* 左側スロット: 兄弟セルナビ「前のテーマ」(二重シェブロン) を並列ナビ「＜」(単一シェブロン)
+                の上に縦積み。兄弟ナビ = 親グリッドの隣の周辺セルのサブグリッドへ横移動 (iOS と共通配置)。
+                兄弟ナビ表示中は並列ナビが無くても 48px 枠を確保し、兄弟ボタンの縦位置を固定する。 */}
+            <div className="w-12 flex flex-col items-center justify-center gap-3 shrink-0">
+              {showSiblingNav && (
+                <button
+                  onClick={() => handleSiblingNav('prev')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                  title="前の周辺セルのサブグリッドへ（隣のテーマ）"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="13 17 8 12 13 7" />
+                    <polyline points="18 17 13 12 18 7" />
+                  </svg>
+                </button>
+              )}
+              {parallelIndex > 0 ? (
                 <button
                   onClick={() => handleParallelNav('prev')}
                   className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
@@ -2150,7 +2262,9 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                     <polyline points="15 18 9 12 15 6" />
                   </svg>
                 </button>
-              )}
+              ) : showSiblingNav ? (
+                <div className="w-12 h-12 shrink-0" aria-hidden="true" />
+              ) : null}
             </div>
 
             <div
@@ -2932,8 +3046,22 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
               )}
             </div>
 
-            {/* 右側: 次の並列グリッドへ進む「＞」、末尾にいる場合は新規追加「＋」 */}
-            <div className="w-12 flex items-center justify-center shrink-0">
+            {/* 右側スロット: 兄弟セルナビ「次のテーマ」(二重シェブロン) を並列ナビ「＞」/「＋」
+                の上に縦積み (iOS と共通配置)。兄弟ナビ表示中は下段 (並列/＋) が無くても
+                48px 枠を確保し、兄弟ボタンの縦位置を固定する。 */}
+            <div className="w-12 flex flex-col items-center justify-center gap-3 shrink-0">
+              {showSiblingNav && (
+                <button
+                  onClick={() => handleSiblingNav('next')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                  title="次の周辺セルのサブグリッドへ（隣のテーマ）"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="11 17 16 12 11 7" />
+                    <polyline points="6 17 11 12 6 7" />
+                  </svg>
+                </button>
+              )}
               {parallelIndex < parallelGrids.length - 1 ? (
                 <button
                   onClick={() => handleParallelNav('next')}
@@ -2949,11 +3077,13 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
                 // (中心セルは X=C 統一モデルで drilled grid なら常に親 X の値が入っているため、
                 //  中心空チェックは実質常に通ってしまい、ボタンが常時表示される問題を避ける。
                 //  また "空の並列" を作れないようにすることで、自動削除ルールとも整合する)
-                // 9×9 モードは入力・D&D ができないので、並列作成も禁止して整合を取る
-                if (viewMode === '9x9') return null
+                // 9×9 モードは入力・D&D ができないので、並列作成も禁止して整合を取る。
+                // 兄弟ナビ表示中 (= 3×3) は下段が空でも 48px 枠を確保して兄弟ボタン位置を固定する。
+                const placeholder = showSiblingNav ? <div className="w-12 h-12 shrink-0" aria-hidden="true" /> : null
+                if (viewMode === '9x9') return placeholder
                 const peripherals = gridData?.cells.filter((c) => c.position !== CENTER_POSITION) ?? []
                 const hasAnyPeripheralInput = peripherals.some((c) => !isCellEmpty(c))
-                if (!hasAnyPeripheralInput) return null
+                if (!hasAnyPeripheralInput) return placeholder
                 return (
                   <button
                     onClick={handleAddParallel}
