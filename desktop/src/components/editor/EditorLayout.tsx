@@ -2029,6 +2029,26 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     }
 
     const cell = menu.cell
+    // pending edit (空 slot をインライン編集中) の synthetic cell は DB に行が無く id が
+    // `pending:gridId:position` のため、そのまま importIntoCell に渡すと "Cell not found" になる。
+    // 右クリックで textarea が blur すると handleCellCommitInlineEdit が pendingEdit を null 化
+    // 済みなので、pendingEdit には依存せず synthetic cell 自身が保持する grid_id / position
+    // (cellsForRender で pendingEdit から設定済み) で upsertCellAt して実 row を作る。
+    if (cell.id.startsWith('pending:')) {
+      try {
+        const newCell = await upsertCellAt(cell.grid_id, cell.position, {})
+        refreshCell(newCell)
+        setPendingEdit(null)
+        setInlineEditingCellId(null)
+        setImportTarget({
+          cellId: newCell.id,
+          cellLabel: newCell.text || `セル ${newCell.position + 1}`,
+        })
+      } catch (err) {
+        setToast({ message: `操作失敗: ${(err as Error).message}`, type: 'error' })
+      }
+      return
+    }
     setImportTarget({
       cellId: cell.id,
       cellLabel: cell.text || `セル ${cell.position + 1}`,
@@ -3125,12 +3145,21 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
 
       {/* コンテキストメニュー */}
       {contextMenu && (() => {
-        // 「周辺セルのクリア」は表示中グリッドの中心セル右クリック時のみ。周辺が全空 / ロック中は出さない
-        // (落とし穴 #10 回避のため中心判定は cell.position ではなく getCenterCell の id 一致で行う)。
+        // 中心セル判定 (落とし穴 #10 回避のため cell.position ではなく getCenterCell の id 一致 /
+        // 空 slot は display slot position で判定)。
+        const isCenter = contextMenu.kind === 'cell'
+          ? getCenterCell(dndCells)?.id === contextMenu.cell.id
+          : contextMenu.position === CENTER_POSITION
+        // 「周辺セルのクリア」は表示中グリッドの中心セル右クリック時のみ。周辺が全空 / ロック中は出さない。
         const showClear = contextMenu.kind === 'cell'
-          && getCenterCell(dndCells)?.id === contextMenu.cell.id
+          && isCenter
           && getPeripheralCells(dndCells).some((c) => !isCellEmpty(c))
           && !isLocked
+        // 「ここにインポート」は周辺セル限定 (中心セルはそのグリッド自身のテーマなので drilled 子グリッドを
+        // 生やせない、importIntoCell が周辺セル専用ロジックのため)。
+        const showImport = !isCenter
+        // 表示できる項目が無い (= 周辺全空の中心セル) ときはメニュー枠自体を出さない。
+        if (!showClear && !showImport) return null
         return (
           <div
             className="fixed bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
@@ -3138,13 +3167,15 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
             onMouseLeave={() => setContextMenu(null)}
           >
             {showClear && (
-              <button onClick={() => handleContextAction('clear-peripherals')} className="w-full text-left px-4 py-2 text-red-600 dark:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-t-xl">
+              <button onClick={() => handleContextAction('clear-peripherals')} className={`w-full text-left px-4 py-2 text-red-600 dark:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${showImport ? 'rounded-t-xl' : 'rounded-xl'}`}>
                 周辺セルのクリア
               </button>
             )}
-            <button onClick={() => handleContextAction('import')} className={`w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${showClear ? 'rounded-b-xl' : 'rounded-xl'}`}>
-              ここにインポート
-            </button>
+            {showImport && (
+              <button onClick={() => handleContextAction('import')} className={`w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${showClear ? 'rounded-b-xl' : 'rounded-xl'}`}>
+                ここにインポート
+              </button>
+            )}
           </div>
         )
       })()}

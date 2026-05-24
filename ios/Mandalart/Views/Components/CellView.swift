@@ -468,14 +468,15 @@ struct CellView: View {
             Divider()
         }
         // Export は読み取り専用なのでロック中も許可。cell != nil の時に表示。
-        // Import は !isLocked のときのみ。
+        // Import は !isLocked かつ周辺セルのときのみ (中心セルはそのグリッド自身のテーマなので
+        // drilled 子グリッドを生やせない、importIntoCell が周辺セル専用ロジックのため。desktop と同等)。
         if let cell {
             Button {
                 onExportRequest?(cell)
             } label: {
                 Label("エクスポート", systemImage: "square.and.arrow.up")
             }
-            if !isLocked {
+            if !isLocked, !isCenter {
                 Button {
                     onImportRequest?(cell)
                 } label: {

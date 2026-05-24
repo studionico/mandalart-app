@@ -332,12 +332,20 @@ export async function importIntoCell(cellId: string, snapshot: GridSnapshot): Pr
   const cell = cells[0]
   if (!cell) throw new Error('Cell not found')
 
-  const grids = await query<{ mandalart_id: string }>(
-    'SELECT mandalart_id FROM grids WHERE id = ? AND deleted_at IS NULL',
+  const grids = await query<{ mandalart_id: string; center_cell_id: string }>(
+    'SELECT mandalart_id, center_cell_id FROM grids WHERE id = ? AND deleted_at IS NULL',
     [cell.grid_id],
   )
   const grid = grids[0]
   if (!grid) throw new Error('Grid not found')
+
+  // 中心セルへのインポートは不可 (中心セルはそのグリッド自身のテーマなので drilled 子グリッドを
+  // 生やせない)。UI 側で中心セルの import 項目は非表示にしているが、API 直叩き等の経路に備えた防御。
+  // center_cell_id === cellId は root / 独立並列の自グリッド中心セルを的確に捕捉する
+  // (X=C primary drilled の周辺セルは親 grid では周辺なので誤ブロックしない)。
+  if (grid.center_cell_id === cellId) {
+    throw new Error('中心セルにはインポートできません')
+  }
 
   // インポート先セルの内容を snapshot の root (position=4) と同期
   const root = snapshot.cells.find((c) => c.position === CENTER_POSITION)

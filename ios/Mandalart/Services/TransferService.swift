@@ -192,6 +192,13 @@ extension TransferService {
         guard let grid = try context.fetch(gridFetch).first else {
             throw TransferError.gridNotFound(gridId)
         }
+        // 中心セルへのインポートは不可 (中心セルはそのグリッド自身のテーマなので drilled 子グリッドを
+        // 生やせない)。UI 側で中心セルの import 項目は非表示にしているが、API 直叩き等の経路に備えた防御。
+        // grid.centerCellId == cellId は root / 独立並列の自グリッド中心セルを的確に捕捉する
+        // (X=C primary drilled の周辺セルは親 grid では周辺なので誤ブロックしない)。
+        if grid.centerCellId == cellId {
+            throw TransferError.centerCellNotAllowed
+        }
         let mandalartId = grid.mandalartId
         let now = Date()
 
@@ -845,6 +852,7 @@ enum TransferService {
         case rootGridNotFound(String)
         case parseEmpty
         case decodeFailed(String)
+        case centerCellNotAllowed
 
         var errorDescription: String? {
             switch self {
@@ -852,6 +860,7 @@ enum TransferService {
             case .rootGridNotFound(let id): return "Mandalart \(id) の root grid が見つかりません"
             case .parseEmpty: return "パース結果が空です"
             case .decodeFailed(let msg): return "JSON のデコードに失敗: \(msg)"
+            case .centerCellNotAllowed: return "中心セルにはインポートできません"
             }
         }
     }

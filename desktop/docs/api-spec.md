@@ -394,7 +394,9 @@ snapshotToIndentText(snapshot: GridSnapshot): string
 // で「インポート押下時の選択中フォルダ id」を渡す。
 importFromJSON(snapshot: GridSnapshot, targetFolderId?: string): Promise<Mandalart>
 
-// GridSnapshot を既存セルの配下に挿入
+// GridSnapshot を既存の「周辺セル」の配下に挿入 (中心セルは不可: そのグリッド自身の
+// テーマのため drilled 子グリッドを生やせず、cellId が自グリッドの center_cell_id と
+// 一致する場合は throw。UI でも中心セルでは「ここにインポート」を非表示)
 // ターゲットセルの内容はスナップショットのルート中心セルで上書きされる
 importIntoCell(cellId: string, snapshot: GridSnapshot): Promise<void>
 
