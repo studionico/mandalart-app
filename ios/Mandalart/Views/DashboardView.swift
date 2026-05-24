@@ -55,6 +55,10 @@ struct DashboardView: View {
 
     @State private var showTrash = false
 
+    /// タップ選択並べ替えの移動ソース。nil = 通常モード、非 nil = 移動モード中。
+    /// 移動モード中はカード tap が「ソースをその直前へ挿入」に切り替わる。
+    @State private var moveSourceId: String?
+
     /// 右 aside (StockTab) の表示状態。
     /// `.onAppear` で `horizontalSizeClass == .regular` (= iPad) なら true、それ以外は false。
     /// ツールバーの tray icon でユーザーがいつでもトグル可能。
@@ -101,6 +105,29 @@ struct DashboardView: View {
                 }
                 return lhs.createdAt > rhs.createdAt
             }
+    }
+
+    /// source を target の直前へ移動し、現フォルダの全カードに sortOrder 0..N を振り直す。
+    /// desktop `reorderMandalarts` / `reorderArray` と同じ move-and-shift (swap ではない)。
+    /// pinned カードは振り直し後も `sortedMandalarts` の `pinned DESC` が支配するため先頭に残る。
+    private func moveMandalart(sourceId: String, beforeTargetId: String) {
+        defer { moveSourceId = nil }
+        var ordered = sortedMandalarts(in: selectedFolderId)
+        guard let srcIdx = ordered.firstIndex(where: { $0.id == sourceId }),
+              ordered.contains(where: { $0.id == beforeTargetId })
+        else { return }
+        let moving = ordered.remove(at: srcIdx)
+        // remove 後に target index を取り直して直前に挿入。
+        let insertIdx = ordered.firstIndex(where: { $0.id == beforeTargetId }) ?? ordered.count
+        ordered.insert(moving, at: insertIdx)
+
+        let now = Date()
+        // 変わったカードだけ updatedAt を bump (LWW 同期での不要な churn を避ける)。
+        for (i, m) in ordered.enumerated() where m.sortOrder != i {
+            m.sortOrder = i
+            m.updatedAt = now
+        }
+        try? modelContext.save()
     }
 
     /// 検索バー open かつ query 非空のときのみ全 folder 横断 filter。
@@ -362,7 +389,9 @@ struct DashboardView: View {
                         // 検索バー open 中は新規作成カードを抑制し、検索結果の純粋な一覧にする。
                         if !isSearchPresented {
                             NewMandalartCard(squareSize: cardSquareSize) {
-                                handleCreateNewMandalart()
+                                // 移動モード中は新規作成せずキャンセル扱いにする。
+                                if moveSourceId != nil { moveSourceId = nil }
+                                else { handleCreateNewMandalart() }
                             }
                         }
                         ForEach(visibleMandalarts) { m in
@@ -375,8 +404,16 @@ struct DashboardView: View {
                                 }
                                 return textByCellId[m.rootCellId] ?? m.title
                             }()
-                            MandalartCard(mandalart: m, displayText: displayText, namespace: namespace)
-                                .onTapGesture { onOpenMandalart(m.id) }
+                            MandalartCard(mandalart: m, displayText: displayText,
+                                          namespace: namespace, isMoveSource: moveSourceId == m.id)
+                                .onTapGesture {
+                                    if let src = moveSourceId {
+                                        if src == m.id { moveSourceId = nil }          // 再タップでキャンセル
+                                        else { moveMandalart(sourceId: src, beforeTargetId: m.id) }
+                                    } else {
+                                        onOpenMandalart(m.id)                          // 通常タップ = 開く
+                                    }
+                                }
                                 .contextMenu { mandalartContextMenu(for: m) }
                         }
                     }
@@ -396,6 +433,17 @@ struct DashboardView: View {
         } label: {
             Label(m.pinned ? "ピン留めを外す" : "ピン留め",
                   systemImage: m.pinned ? "pin.slash" : "pin")
+        }
+
+        // 検索モード中 (全 folder 横断) や 1 件以下のときは並べ替え不能なので非表示。
+        // タップで移動ソースになり、別カードをタップするとその直前へ挿入される (tap-select 方式)。
+        if !(isSearchPresented && !query.isEmpty),
+           sortedMandalarts(in: selectedFolderId).count > 1 {
+            Button {
+                moveSourceId = m.id
+            } label: {
+                Label("移動", systemImage: "arrow.up.arrow.down")
+            }
         }
 
         Button {
@@ -722,6 +770,9 @@ private struct MandalartCard: View {
     /// Dashboard ↔ Editor 遷移の expand/converge 用 morph namespace。
     /// `id: "card-\(mandalart.id)"` で EditorView の grid 容器と matched され、tap → grid morph が走る。
     let namespace: Namespace.ID
+    /// タップ選択並べ替えの移動ソースとして選択中か。true のとき枠線を accent 色 + 太線で強調する
+    /// (banner は出さず source 表示元のハイライトだけで状態を示す方針)。
+    var isMoveSource: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -737,7 +788,9 @@ private struct MandalartCard: View {
                 .aspectRatio(1, contentMode: .fit)
                 .overlay {
                     RoundedRectangle(cornerRadius: LayoutConstants.cellCornerRadius)
-                        .strokeBorder(Color.primary.opacity(0.4), lineWidth: LayoutConstants.cellCenterBorder)
+                        .strokeBorder(isMoveSource ? Color.accentColor : Color.primary.opacity(0.4),
+                                      lineWidth: isMoveSource ? LayoutConstants.cellCenterBorder * 2
+                                                              : LayoutConstants.cellCenterBorder)
                 }
                 .matchedGeometryEffect(id: "card-\(mandalart.id)", in: namespace, anchor: .center)
                 .overlay(alignment: .topTrailing) {
