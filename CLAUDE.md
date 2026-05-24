@@ -49,6 +49,17 @@ desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
 - 機密ファイル (`.env`, `Secrets.swift`, credentials.json 等) を含めない
 - destructive な git 操作 (`reset --hard` / `push --force` / branch -D) は **明示指示** がない限り実行しない
 
+## 共通のデバッグ / 原因調査の方針
+
+バグ調査では **推測・憶測で修正を当てない**。原因が不確実なときは、まず実体を観測してから対処する:
+
+1. **診断ログを先に仕込む** — 失敗経路の catch で `console.error` (desktop) / `print`・`logger` (iOS) を使い、**raw error オブジェクト全体** (message だけでなく `error.code` / 失敗した SQL / 関連 id 等) を出す。曖昧なら複数の候補経路すべてに仕込む
+2. **再現させてエラー実体を確定** — 推定したエラー名 (例「database is locked」) が**本当にそれか**をログで確認してから修正する。表面的な現象 (「起動直後」「再現性が低い」) と真因 (実際は pending synthetic cell の id すり抜け) はしばしば無関係
+3. **影響範囲が広い箇所ほど慎重に** — core / DB / 同期など全体に効く修正は、仮説が強くても runtime 証拠を取ってから着手する ([`desktop/CLAUDE.md`](desktop/CLAUDE.md) 落とし穴 #3 / #12 の「database is locked」のように、もっともらしい仮説が外れることがある)
+4. **一時診断ログは原因特定後に撤去** — コメントに「診断用 (一時)」と明記し、修正完了時に削除する
+
+> 実例 (2026-05-24): 「周辺セルへのインポート失敗」を当初「起動時 syncAll との DB ロック競合」と推測したが、診断ログで真因が `pending:<gridId>:<position>` という synthetic cell の id を `importIntoCell` にそのまま渡していた (`Cell not found`) と判明し、的確に修正できた。
+
 ## 共通の Supabase ポリシー
 
 - desktop と iOS は同一 project を使う。ローカル env: desktop は [`desktop/.env`](desktop/.env)、iOS は [`ios/Mandalart/Services/Secrets.swift`](ios/Mandalart/Services/Secrets.swift) (gitignore 済、`Secrets.swift.template` をコピーして埋める)
