@@ -43,7 +43,7 @@ ios/
 │   │   ├── SupabaseService.swift 共有 SupabaseClient
 │   │   ├── MandalartFactory.swift create / duplicate / softDelete / restore / permanentDelete (cascade) / deleteFromCloud (cloud cascade + tombstone)
 │   │   ├── FolderRepository.swift ensureInboxFolder (重複 system folder 統合) / adoptOrphansToInbox
-│   │   ├── ImageStorage.swift     セル画像のローカル保存 (Application Support/images/、JPEG 圧縮、cross-device 非同期)
+│   │   ├── ImageStorage.swift     セル画像 = Application Support/images/ にローカル保存 (JPEG 圧縮) + Supabase Storage `cell-images` 同期 (uploadToCloud / downloadFromCloud / backfillUpload、キー `<userId 小文字>/<basename>`)
 │   │   ├── GridRepository.swift  drill / parallel helper (findOrCreateChildGrid / findChildGrid / displayCells / getGridAncestry / getSiblingGrids / createParallelGrid / cleanupGridIfEmpty / shredCellSubtree / clearGridPeripherals / permanentDeleteGrid)
 │   │   ├── StockService.swift    Stock CRUD (addToStock / moveCellToStock = cut / pasteFromStock、CellSnapshot/GridSnapshot は desktop と互換)
 │   │   ├── CellCheckboxService.swift done トグル + サブツリー down 伝播 + 親方向 up 伝播 (desktop toggleCellDone と等価、centerCellId ベース)。recomputeDoneUpward = シュレッダー後の中心 done 再計算 / propagateUndoneUpward = 新規入力 (空→非空) 時の親 done 解除
@@ -51,7 +51,7 @@ ios/
 │   │   ├── TransferService.swift Export/Import (JSON / Markdown / IndentText)。round-trip で位置保存
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
-│   │   ├── SyncEngine.swift      pullAll / pushPending / DTO
+│   │   ├── SyncEngine.swift      pullAll / pushPending / DTO / backfillImages (Storage 未アップロード画像の回収)
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template
 │   ├── Utils/
