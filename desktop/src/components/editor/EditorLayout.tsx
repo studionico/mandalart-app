@@ -1109,7 +1109,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       const cell = dndCellsRef.current.find((c) => c.id === cellId)
       if (!cell) return
       try {
-        const newPath = await uploadCellImage('', '', cellId, imageFile)
+        const newPath = await uploadCellImage(userId, '', cellId, imageFile)
         await updateCellLocal(cellId, { image_path: newPath })
         reloadAll()
         setToast({ message: '画像を追加しました', type: 'success' })

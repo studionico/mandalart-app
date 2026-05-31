@@ -40,6 +40,8 @@ struct SettingsView: View {
                                 do {
                                     let pull = try await SyncEngine.shared.pullAll(into: modelContext)
                                     let push = try await SyncEngine.shared.pushPending(from: modelContext)
+                                    // ローカル画像のうち Storage 未アップロード分を回収 (best-effort)
+                                    await SyncEngine.shared.backfillImages(from: modelContext)
                                     syncStatus = "Pull: \(pull.mandalarts) マンダラート / Push: \(push.mandalarts) マンダラート"
                                 } catch {
                                     syncStatus = "失敗: \(error.localizedDescription)"

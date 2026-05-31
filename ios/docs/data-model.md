@@ -54,7 +54,7 @@ SwiftData の `@Model` field は camelCase、Postgres / desktop SQLite は snake
 | `gridId` | `grid_id` | `String` | |
 | `position` | `position` | `Int` | 0-8 (中央=4) |
 | `text` | `text` | `String` | ⚠️ desktop は `text`、`content` ではない |
-| `imagePath` | `image_path` | `String?` | |
+| `imagePath` | `image_path` | `String?` | ローカル相対パス。画像本体は Storage `cell-images` に key `<userId(小文字)>/<basename>` で同期 ([sync.md](sync.md)) |
 | `color` | `color` | `String?` | hex / preset name |
 | `done` | `done` | `Bool` / `INTEGER` | migration 003 |
 | `createdAt` / `updatedAt` / `deletedAt` / `syncedAt` | (同上) | `Date` | |

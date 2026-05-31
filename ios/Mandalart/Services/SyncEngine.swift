@@ -303,6 +303,17 @@ final class SyncEngine {
         }
     }
 
+    // MARK: - Image backfill
+
+    /// ローカル画像のうち Storage 未アップロード分を回収する (fullSync / 手動同期の後に呼ぶ、best-effort)。
+    /// オフライン中に追加した画像を、オンライン復帰後にまとめて Storage へ上げる保険。
+    @MainActor
+    func backfillImages(from context: ModelContext) async {
+        let cells: [Cell] = (try? context.fetch(FetchDescriptor<Cell>())) ?? []
+        let paths = Array(Set(cells.compactMap { $0.imagePath }.filter { !$0.isEmpty }))
+        await ImageStorage.backfillUpload(localImagePaths: paths)
+    }
+
     // MARK: - Push
 
     @discardableResult

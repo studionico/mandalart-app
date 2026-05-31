@@ -285,6 +285,10 @@ guard displayPosition != GridConstants.centerPosition else { ... }
 
 **関連**: desktop 落とし穴 #12 (zombie cleanup) / #2 (FK 制約)、desktop [`push.ts`](../../desktop/src/lib/sync/push.ts) の cells onConflict コメント。
 
+### #15. 画像 Storage キーの userId は小文字化必須 (大文字のままだと RLS 403)
+
+セル画像を Storage `cell-images` に同期するとき、オブジェクトキーは `<userId>/<basename>`。この `userId` を `session.user.id.uuidString` のまま使うと **大文字 UUID** になり、RLS policy の `auth.uid()::text = (storage.foldername(name))[1]` (Postgres 側は小文字) と一致せず **upload が 403**、かつ desktop (supabase-js は小文字) と**キーが食い違って相互に download 不能**になる。**`.lowercased()` を必ず付ける** ([`ImageStorage.currentUserId`](../Mandalart/Services/ImageStorage.swift))。UUID 大文字小文字問題は desktop 落とし穴 #23 と同根。詳細フロー: [`sync.md`](sync.md) 「画像同期」節。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。

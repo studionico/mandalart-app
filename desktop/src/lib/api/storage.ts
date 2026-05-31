@@ -1,6 +1,10 @@
 import {
   writeFile, readFile, remove, mkdir, exists, BaseDirectory,
 } from '@tauri-apps/plugin-fs'
+import { useAuthStore } from '@/store/authStore'
+import {
+  compressImageToJpeg, uploadImageToCloud, downloadImageFromCloud, cacheImageLocally,
+} from '@/lib/api/imageSync'
 
 // AppData 配下の画像保存ディレクトリ（BaseDirectory.AppData からの相対）
 const IMAGES_SUBDIR = 'images'
@@ -15,12 +19,6 @@ async function ensureImagesDir(): Promise<void> {
   }
 }
 
-function pickExtension(name: string): string {
-  const dot = name.lastIndexOf('.')
-  if (dot === -1) return 'png'
-  return name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
-}
-
 async function copyBytesToAppData(bytes: Uint8Array, cellId: string, ext: string): Promise<string> {
   await ensureImagesDir()
   const name = `${cellId}-${Date.now()}.${ext}`
@@ -30,17 +28,20 @@ async function copyBytesToAppData(bytes: Uint8Array, cellId: string, ext: string
 }
 
 /**
- * ブラウザの File オブジェクト（CellEditModal のファイル選択）を AppData へコピー。
+ * ブラウザの File オブジェクト（CellEditModal のファイル選択）を圧縮して AppData へコピーし、
+ * 同じ bytes を Supabase Storage にもアップロードする（別デバイス表示用、best-effort）。
+ * 出力は常に JPEG。`userId` 未指定 / Supabase 未設定ならローカル保存のみ。
  */
 export async function uploadCellImage(
-  _userId: string,
+  userId: string,
   _mandalartId: string,
   cellId: string,
   file: File,
 ): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  const ext = pickExtension(file.name)
-  return copyBytesToAppData(bytes, cellId, ext)
+  const bytes = await compressImageToJpeg(file)
+  const relPath = await copyBytesToAppData(bytes, cellId, 'jpg')
+  await uploadImageToCloud(userId, relPath, bytes)
+  return relPath
 }
 
 /**
@@ -59,6 +60,8 @@ export function getCachedCellImageUrl(path: string | null | undefined): string |
 
 /**
  * image_path（AppData からの相対パス）を blob URL に変換して <img src> で表示できるようにする。
+ * ローカルに実ファイルが無い場合（別デバイスで追加された画像）は Supabase Storage から
+ * download してローカルにキャッシュしてから blob URL を返す。
  */
 export async function getCellImageUrl(path: string): Promise<string> {
   if (!path) return ''
@@ -67,16 +70,30 @@ export async function getCellImageUrl(path: string): Promise<string> {
 
   try {
     const bytes = await readFile(path, { baseDir: BaseDirectory.AppData })
-    const blob = new Blob([new Uint8Array(bytes)])
-    const url = URL.createObjectURL(blob)
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]))
     urlCache.set(path, url)
     return url
-  } catch (e) {
-    console.warn('getCellImageUrl failed:', path, e)
+  } catch {
+    // ローカルに無い → クラウドから取得を試みる（別デバイス作成の画像）
+    const userId = useAuthStore.getState().user?.id
+    if (userId) {
+      const bytes = await downloadImageFromCloud(userId, path)
+      if (bytes) {
+        await cacheImageLocally(path, bytes)
+        const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]))
+        urlCache.set(path, url)
+        return url
+      }
+    }
     return ''
   }
 }
 
+/**
+ * ローカルの画像ファイルを削除する（セルから画像を外したとき）。
+ * v1 では Storage 側は削除しない: copyCellSubtree / stock snapshot で image_path が
+ * 複数セルに共有されうるため、消すと共有先の表示が壊れる。Storage の orphan 整理は将来課題。
+ */
 export async function deleteCellImage(path: string): Promise<void> {
   if (!path) return
   const cached = urlCache.get(path)

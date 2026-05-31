@@ -80,6 +80,8 @@ struct MandalartApp: App {
         do {
             _ = try await SyncEngine.shared.pullAll(into: context)
             _ = try await SyncEngine.shared.pushPending(from: context)
+            // ローカル画像のうち Storage 未アップロード分を回収 (best-effort)
+            await SyncEngine.shared.backfillImages(from: context)
         } catch {
             print("[auto-sync] fullSync failed:", error)
         }

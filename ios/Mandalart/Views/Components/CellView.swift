@@ -345,6 +345,14 @@ struct CellView: View {
             // sync 経路 / context menu 経由の imagePath 変更を反映
             loadedImage = ImageStorage.loadImage(at: newPath)
         }
+        .task(id: cell?.imagePath) {
+            // ローカルに実ファイルが無い画像 (別デバイスで追加) はクラウドから取得する。
+            guard let path = cell?.imagePath, !path.isEmpty else { return }
+            if ImageStorage.loadImage(at: path) != nil { return }
+            if let img = await ImageStorage.downloadFromCloud(relPath: path) {
+                loadedImage = img
+            }
+        }
     }
 
     // MARK: - Checkbox

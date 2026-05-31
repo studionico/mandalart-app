@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS cells (
   grid_id     TEXT NOT NULL,                 -- FK 制約は張らない
   position    INTEGER NOT NULL CHECK (position BETWEEN 0 AND 8),
   text        TEXT NOT NULL DEFAULT '',
-  image_path  TEXT,                          -- `$APPDATA/images/...` への相対パス
+  image_path  TEXT,                          -- `$APPDATA/images/...` への相対パス。画像本体は Storage `cell-images` に key `<userId>/<basename>` で同期 (cloud-sync-setup.md)
   color       TEXT,                          -- プリセットカラーのキー (例: "red", "blue")
   done        INTEGER NOT NULL DEFAULT 0,    -- チェックボックス (0 = 未、1 = 完了)
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),

@@ -1,13 +1,18 @@
 import Foundation
 import UIKit
+import Supabase
 
-/// セル画像のローカルストレージ (Application Support / images/)。
+/// セル画像のローカルストレージ (Application Support / images/) + Supabase Storage 同期。
 ///
-/// **設計方針**: desktop の [`storage.ts`](../../../desktop/src/lib/api/storage.ts) と同じく
-/// **ローカル保存のみ**。Supabase Storage 経由の cross-device 画像同期は実装しない (容量 / 帯域 /
-/// Storage policy 設定の都合)。`Cell.imagePath` には **AppSupport 配下の相対パス**
-/// (例: `images/<cellId>-<timestamp>.jpg`) を保存。他デバイスでは imagePath があっても
-/// 実ファイルが存在しないため画像表示できない (= 既知の制約)。
+/// **設計方針**: `Cell.imagePath` には **AppSupport 配下の相対パス**
+/// (例: `images/<cellId>-<timestamp>.jpg`) を保存し、スキーマは変更しない。
+/// 画像本体は保存時に Supabase Storage バケット `cell-images` (非公開) にもアップロードする。
+/// Storage オブジェクトキーは `<userId>/<filename>` で実行時に導出する (RLS policy が
+/// 先頭フォルダ = auth.uid を要求するため)。**userId は小文字化する**: Postgres の
+/// `auth.uid()::text` は小文字 UUID だが `UUID.uuidString` は大文字を返すため (pitfall #23)。
+/// 別デバイスでは imagePath はあってもローカル実ファイルが無いので、`downloadFromCloud` で
+/// Storage から取得してローカルにキャッシュしてから表示する。
+/// Storage は Realtime Messages quota とは無関係 (緊急停止中の同期問題を悪化させない)。
 ///
 /// **圧縮**: 最大辺 `maxDimension` (= 1200pt) にリサイズし JPEG quality 0.7 で書き込む。
 /// 大きな写真も数百 KB 以下に収まる。
@@ -16,6 +21,7 @@ enum ImageStorage {
     private static let imagesSubdir = "images"
     private static let maxDimension: CGFloat = 1200
     private static let jpegQuality: CGFloat = 0.7
+    private static let bucket = "cell-images"
 
     /// メモリ cache (drill アニメ中の頻繁な remount でディスク I/O を抑える)。
     /// Phase 6 の orbit fade-in で CellView が grid 切替ごとに remount されるので、
@@ -57,6 +63,8 @@ enum ImageStorage {
         if let img = UIImage(data: processed) {
             cache.setObject(img, forKey: relPath as NSString)
         }
+        // Storage にも非同期でアップロード (別デバイス表示用、best-effort)。
+        Task { await uploadToCloud(relPath: relPath) }
         return relPath
     }
 
@@ -82,6 +90,82 @@ enum ImageStorage {
         cache.removeObject(forKey: relPath as NSString)
         let absURL = appSupport.appendingPathComponent(relPath)
         try? FileManager.default.removeItem(at: absURL)
+    }
+
+    // MARK: - Cloud sync (Supabase Storage)
+
+    /// 現在サインイン中ユーザーの id (小文字 UUID)。未サインインなら nil。
+    private static func currentUserId() async -> String? {
+        guard let session = try? await SupabaseService.shared.client.auth.session else { return nil }
+        return session.user.id.uuidString.lowercased()
+    }
+
+    /// image_path (相対) → Storage オブジェクトキー (`<userId>/<filename>`)。
+    private static func storageKey(userId: String, relPath: String) -> String {
+        let base = (relPath as NSString).lastPathComponent
+        return "\(userId)/\(base)"
+    }
+
+    /// ローカル保存済みの画像を Storage にアップロードする (best-effort)。
+    static func uploadToCloud(relPath: String) async {
+        guard let userId = await currentUserId(),
+              let appSupport = appSupportDir else { return }
+        let absURL = appSupport.appendingPathComponent(relPath)
+        guard let data = try? Data(contentsOf: absURL) else { return }
+        let key = storageKey(userId: userId, relPath: relPath)
+        do {
+            try await SupabaseService.shared.client.storage
+                .from(bucket)
+                .upload(key, data: data, options: FileOptions(contentType: "image/jpeg", upsert: true))
+        } catch {
+            print("ImageStorage.uploadToCloud failed: \(key) \(error)")
+        }
+    }
+
+    /// Storage から画像を取得し、ローカルにキャッシュして UIImage を返す。失敗時 nil。
+    /// (別デバイスで追加されローカルに実ファイルが無い画像の表示用)
+    static func downloadFromCloud(relPath: String) async -> UIImage? {
+        guard let userId = await currentUserId(),
+              let appSupport = appSupportDir else { return nil }
+        let key = storageKey(userId: userId, relPath: relPath)
+        do {
+            let data = try await SupabaseService.shared.client.storage
+                .from(bucket)
+                .download(path: key)
+            // ローカルにキャッシュ (次回以降は loadImage で同期取得できる)
+            try? ensureImagesDir()
+            let absURL = appSupport.appendingPathComponent(relPath)
+            try? data.write(to: absURL)
+            guard let img = UIImage(data: data) else { return nil }
+            cache.setObject(img, forKey: relPath as NSString)
+            return img
+        } catch {
+            print("ImageStorage.downloadFromCloud failed: \(key) \(error)")
+            return nil
+        }
+    }
+
+    /// ローカルにあるが Storage 未アップロードの画像を回収する (オフライン追加分の保険)。
+    /// `<userId>/` の既存キー一覧を 1 回取得し、差分だけ upload する。
+    /// `localImagePaths`: cells.imagePath の一覧 (SyncEngine から渡す)。
+    static func backfillUpload(localImagePaths: [String]) async {
+        guard let userId = await currentUserId(),
+              let appSupport = appSupportDir else { return }
+        let existing: Set<String>
+        do {
+            let files = try await SupabaseService.shared.client.storage.from(bucket).list(path: userId)
+            existing = Set(files.map { $0.name })
+        } catch {
+            print("ImageStorage.backfillUpload list failed: \(error)")
+            return
+        }
+        for relPath in localImagePaths where !relPath.isEmpty {
+            let base = (relPath as NSString).lastPathComponent
+            if existing.contains(base) { continue }
+            let absURL = appSupport.appendingPathComponent(relPath)
+            guard FileManager.default.fileExists(atPath: absURL.path) else { continue }
+            await uploadToCloud(relPath: relPath)
+        }
     }
 
     // MARK: - Compression

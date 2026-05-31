@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { syncAll, type SyncStats } from '@/lib/sync'
+import { backfillUploadLocalImages } from '@/lib/api/imageSync'
 // EMERGENCY STOP (2026-05-04): subscribe 経路を停止中だが、復帰時に必要なので import は残す。
 import { subscribeRemoteChanges } from '@/lib/realtime'
 import { useAuthStore } from '@/store/authStore'
@@ -32,6 +33,8 @@ export function useSync() {
       setLastSync(new Date())
       setStatus('idle')
       setReloadKey((k) => k + 1)
+      // ローカルにあるが Storage 未アップロードのセル画像を回収（best-effort、sync 状態に影響しない）
+      void backfillUploadLocalImages(user.id)
     } catch (e) {
       // Supabase の error は plain object でも来るので、複数経路で文字列化
       console.error('[sync] error:', e)

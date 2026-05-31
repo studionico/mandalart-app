@@ -47,7 +47,7 @@ VITE_SUPABASE_ANON_KEY=sb_publishable_xxxxxxxxxxxxxxxxxxxxxxxx
 3. `003_create_cells.sql`
 4. `004_create_stock_items.sql`
 5. `005_triggers_and_functions.sql`
-6. `006_storage.sql` (画像ストレージ用、cloud 画像同期を後で実装するときに必要)
+6. `006_storage.sql` (画像クラウド同期用 — 下記「必須: 画像同期用 Storage バケット」を参照)
 
 > **⚠️ 重要**: スキーマ適用後、下記の「必須スキーマ変更」を **全て** 実施してください。
 > 特に `done` カラムと `center_cell_id` (X=C 統一) への移行はローカル側 migration と整合させる必要があります。
@@ -57,6 +57,39 @@ VITE_SUPABASE_ANON_KEY=sb_publishable_xxxxxxxxxxxxxxxxxxxxxxxx
 > クラウド側は `_old_web/supabase/migrations/002_create_grids.sql` で FK (`grids_parent_cell_id_fkey`) を
 > 張っていましたが、後続の X=C 統一移行 (下記 `center_cell_id`) でカラム自体を入れ替えるため、
 > 旧 FK 制約は自動的に消滅します。
+
+### 必須: 画像同期用 Storage バケット (`cell-images`)
+
+セル画像を別デバイスでも表示するため、画像本体を Supabase Storage に置く。**この設定が未適用だと画像 upload が 403、別デバイスでの download が空振り**になる (PGRST204 thrash と同型の手動前提作業 — desktop 落とし穴 #17 参照)。Supabase SQL Editor で以下を実行 (= [`_old_web/supabase/migrations/006_storage.sql`](../../_old_web/supabase/migrations/006_storage.sql)):
+
+```sql
+-- cell-images バケット (非公開)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('cell-images', 'cell-images', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- 自分の user_id フォルダ配下のみ upload / read / delete 可
+CREATE POLICY "自分のファイルのみアップロード可"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'cell-images' AND auth.uid()::text = (storage.foldername(name))[1]);
+CREATE POLICY "自分のファイルのみ読み取り可"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'cell-images' AND auth.uid()::text = (storage.foldername(name))[1]);
+CREATE POLICY "自分のファイルのみ削除可"
+  ON storage.objects FOR DELETE
+  USING (bucket_id = 'cell-images' AND auth.uid()::text = (storage.foldername(name))[1]);
+```
+
+**設計** (desktop [`imageSync.ts`](../src/lib/api/imageSync.ts) / iOS [`ImageStorage.swift`](../../ios/Mandalart/Services/ImageStorage.swift) 共通):
+
+- `cells.image_path` は **ローカル相対パスのまま** (`images/<cellId>-<ts>.jpg`)。スキーマ変更なし。
+- Storage オブジェクトキーは実行時に **`<userId>/<basename(image_path)>`** で導出。RLS policy が先頭フォルダ = `auth.uid()` を要求するため。
+- **userId は小文字化必須**: Postgres の `auth.uid()::text` は小文字 UUID、iOS の `UUID.uuidString` は大文字 → 揃えないと RLS 403 + キー不一致 (落とし穴 #23)。
+- アップロード時に JPEG 圧縮 (desktop: 長辺 1600px/q0.8、iOS: 1200px/q0.7)。
+- 表示時、ローカルに実ファイルが無ければ Storage から download してローカルにキャッシュ。
+- サインイン直後の同期 + 手動「今すぐ同期」で backfill (ローカルにあるが Storage 未アップロードの画像を回収)。
+- 削除は v1 では Storage 側を消さない (`image_path` 共有あり)。orphan 整理は将来課題。
+- Storage は **Realtime Messages quota とは無関係** (緊急停止中の同期問題を悪化させない)。
 
 ### 必須スキーマ変更: ソフトデリート用の `deleted_at` カラム
 

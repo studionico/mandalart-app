@@ -340,9 +340,12 @@ pasteSnapshotReplacing(snapshot: CellSnapshot, targetCellId: string): Promise<vo
 ## lib/api/storage.ts
 
 ```typescript
-// ブラウザ File を $APPDATA/images/{cellId}-{ts}.{ext} にコピー
+// ブラウザ File を JPEG 圧縮 (長辺 1600px / q0.8) して
+// $APPDATA/images/{cellId}-{ts}.jpg にコピー + 同じ bytes を Supabase Storage
+// (`cell-images`、imageSync.uploadImageToCloud) にも upload する (best-effort)。
 // CellEditModal のファイル選択 / デスクトップから webview への HTML5 file drop
-// (EditorLayout の window-level dataTransfer.files listener) 共通の入口
+// (EditorLayout の window-level dataTransfer.files listener) 共通の入口。
+// userId 未指定 / Supabase 未設定ならローカル保存のみ。
 uploadCellImage(
   userId: string,
   mandalartId: string,
@@ -350,8 +353,11 @@ uploadCellImage(
   file: File
 ): Promise<string>   // 相対パス (AppData/images/...) を返す
 
-// 相対パスを blob URL に変換 (cache 付き)
-// Cell コンポーネントが <img src={blobUrl}> で表示するために使う
+// 相対パスを blob URL に変換 (cache 付き)。
+// Cell コンポーネントが <img src={blobUrl}> で表示するために使う。
+// ローカルに実ファイルが無ければ Supabase Storage から download → ローカルキャッシュ
+// (imageSync.downloadImageFromCloud + cacheImageLocally) してから blob URL を返す
+// = 別デバイスで追加された画像も表示可能。
 getCellImageUrl(path: string): Promise<string>
 
 // 同期版: メモリキャッシュを直接覗く。未キャッシュは null を返す。
@@ -359,8 +365,49 @@ getCellImageUrl(path: string): Promise<string>
 // orbit アニメ後の remount 時にキャッシュ済み画像を 1 frame目から描画してまばたきを防ぐ。
 getCachedCellImageUrl(path: string | null | undefined): string | null
 
-// ローカルファイルを削除 + blob URL をキャッシュから破棄
+// ローカルファイルを削除 + blob URL をキャッシュから破棄。
+// v1 では Storage 側は消さない (copyCellSubtree / stock snapshot で image_path が
+// 複数セルに共有されうるため、消すと共有先の表示が壊れる。Storage orphan 整理は将来課題)。
 deleteCellImage(path: string): Promise<void>
+```
+
+---
+
+## lib/api/imageSync.ts
+
+セル画像本体の Supabase Storage 同期。`cells.image_path` のスキーマは不変
+(`images/<cellId>-<ts>.jpg` のローカル相対パスのまま)。Storage オブジェクトキーは
+実行時に `<userId 小文字>/<basename>` で導出 (RLS policy が先頭フォルダ = `auth.uid()`
+を要求するため)。バケット設定 / RLS policy 手順は [`cloud-sync-setup.md`](cloud-sync-setup.md)
+「必須: 画像同期用 Storage バケット」、設計背景は CLAUDE.md 落とし穴 #25 を参照。
+
+```typescript
+// image_path (AppData 相対) → Storage オブジェクトキー (`<userId>/<filename>`)。
+// userId は必ず .toLowerCase() — Postgres auth.uid()::text は小文字 UUID、iOS の
+// UUID.uuidString は大文字を返すため、揃えないと RLS 403 + 相互 download 不能
+// (落とし穴 #23 / #25)。
+storageKeyFor(userId: string, relPath: string): string
+
+// File を長辺 max 1600px に縮小 + JPEG q0.8 で再エンコード。WebView canvas 実装。
+// JPEG はアルファを持たないので透過 PNG は白背景で塗りつぶす。変換失敗時は原 bytes。
+compressImageToJpeg(file: File): Promise<Uint8Array>
+
+// 画像 bytes を `cell-images` バケットに upsert upload (best-effort、失敗は warn のみ)。
+// userId 未指定 / Supabase 未設定なら no-op。
+uploadImageToCloud(userId: string, relPath: string, bytes: Uint8Array): Promise<void>
+
+// `cell-images` から bytes を取得。失敗 / 不在 / 未設定時は null。
+downloadImageFromCloud(userId: string, relPath: string): Promise<Uint8Array | null>
+
+// オフライン中に追加した画像を、オンライン復帰後にまとめて Storage へ上げる保険。
+// `<userId>/` 配下の既存キー一覧を 1 回 list → DB の cells.image_path と差分突合 →
+// 未アップロード分だけ upload。サインイン直後の syncAll 後 (useSync) + 手動「今すぐ
+// 同期」後に呼ぶ。
+backfillUploadLocalImages(userId: string): Promise<void>
+
+// download fallback で取得した bytes を AppData/images/ に書き込み、次回以降は
+// loadImage の同期パスで読めるようにする。
+cacheImageLocally(relPath: string, bytes: Uint8Array): Promise<void>
 ```
 
 ---
