@@ -100,6 +100,7 @@ export default function MemoTab({ gridId, initialMemo, isReadOnly = false }: Pro
         <textarea
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
+          onBlur={() => setPreview(true)}
           placeholder={MEMO_PLACEHOLDER}
           readOnly={isReadOnly}
           // textarea は cols 属性のデフォルト (~20ch) で intrinsic 幅を持つので w-full を明示。

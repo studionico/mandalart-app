@@ -82,6 +82,13 @@ struct MemoTab: View {
                 onCommit: { commitEditor() }
             )
         }
+        .onChange(of: showEditor) { _, isShowing in
+            // 入力エリア (EditingSheet 内 TextEditor) を抜けた = 編集を一区切りした、と扱い
+            // 自動でプレビュー表示に戻す (desktop MemoTab.tsx の textarea onBlur と等価挙動)。
+            if !isShowing {
+                mode = .preview
+            }
+        }
     }
 
     /// 編集 mode は **表示専用** (= 現在の memo を読み取り表示)。tap で全画面 sheet に遷移。

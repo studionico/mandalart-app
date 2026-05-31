@@ -30,7 +30,7 @@ ios/
 │   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / シュレッダー context menu、編集中以外は overlay で hit テスト)
 │   │       ├── GridView3x3.swift 3×3 (`displayCells: [Cell?]` 9 要素受け取り、id で grid 切替時 remount)
 │   │       ├── Breadcrumb.swift  右ペイン上部の階層 navigation (タップで drill-up)
-│   │       ├── MemoTab.swift     右ペイン下部のメモタブ (編集 / プレビュー切替、grid.memo を 1 秒 debounce で auto-save)
+│   │       ├── MemoTab.swift     右ペイン下部のメモタブ (編集 / プレビュー segmented picker、EditingSheet 閉鎖時に自動でプレビューへ復帰、grid.memo を 1 秒 debounce で auto-save)
 │   │       ├── StockTab.swift    右ペイン下部のストックタブ (3 列タイル grid + ペースト / 削除 / 全削除)
 │   │       ├── EditingSheet.swift `.fullScreenCover` 共通 sheet (セル / メモ編集を統一、Landscape kbd 覆い対策)
 │   │       ├── ThemeToggle.swift ライト/システム/ダーク切替 (capsule = Editor 右上 / Dashboard toolbar、segmented = SettingsView Form)
