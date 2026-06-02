@@ -1,5 +1,12 @@
 import { STORAGE_KEYS } from '@/constants/storage'
-import { dryRunCompareVaultToDb, exportAllToVault, type DryRunReport, type ExportReport } from './_vaultSync'
+import {
+  dryRunCompareVaultToDb,
+  exportAllToVault,
+  reconcileVaultToDb,
+  type DryRunReport,
+  type ExportReport,
+} from './_vaultSync'
+import type { ApplyReport } from './applyToDb'
 import { watchVault } from './io'
 import { saveVaultConfig } from './config'
 
@@ -26,6 +33,8 @@ type VaultDevApi = {
   dryRun: () => Promise<DryRunReport | null>
   /** DB 全マンダラートを vault に一方向書き出し (ファイルのみ、DB 無改変、非破壊)。 */
   exportToVault: () => Promise<ExportReport | null>
+  /** vault→DB 再構築 (**実 DB 書込み**)。deleteMissing=true で vault に無いマンダラートも削除。 */
+  rebuildFromVault: (deleteMissing?: boolean) => Promise<ApplyReport | null>
   /** vault ルートを watch して変更パスをログ。 */
   startWatch: () => Promise<void>
   /** watch 停止。 */
@@ -67,6 +76,15 @@ export function initVaultDevMode(): void {
       // Stage 3b で使う永続 config にパスを記録 (vaultMode はまだ立てない = canonical 反転しない)
       await saveVaultConfig({ vaultMode: false, vaultPath: p })
       return report
+    },
+    rebuildFromVault: async (deleteMissing = false) => {
+      const p = vaultPath()
+      if (!p) {
+        console.warn(`[vault] ${STORAGE_KEYS.vaultDevPath} に vault ルートを設定してください`)
+        return null
+      }
+      console.warn('[vault] ⚠️ vault→DB 再構築を実行します (実 DB 書込み)')
+      return reconcileVaultToDb(p, { deleteMissingMandalarts: deleteMissing })
     },
     startWatch: async () => {
       const p = vaultPath()

@@ -4,6 +4,8 @@ import { scanVault, ensureDir, writeVaultFile } from './io'
 import { mandalartToVaultFiles, vaultFilesToRows } from './vaultModel'
 import { diffFiles } from './reconcile'
 import { loadMandalartRows, loadAllMandalartIds } from './dbRows'
+import { applyVaultRowsToDb, type ApplyOptions, type ApplyReport } from './applyToDb'
+import type { MandalartRows } from './types'
 
 /**
  * Stage 2/3a の vault リコンシリエーション。
@@ -91,5 +93,23 @@ export async function exportAllToVault(vaultRoot: string): Promise<ExportReport>
   }
   const report: ExportReport = { mandalartCount: ids.length, fileCount }
   console.info('[vault] export DB→vault (ファイルのみ、DB 無改変):', report)
+  return report
+}
+
+/**
+ * vault→DB 再構築 (**実 DB 書込み**)。vault をスキャン → parse → applyVaultRowsToDb。
+ * 本番経路からは未呼び出し (vaultMode 反転は別ステップ)。dev / Stage 3b-final の起動時再構築で使う。
+ * `deleteMissingMandalarts` は既定 false (空 vault 誤適用での全消し防止)。
+ */
+export async function reconcileVaultToDb(
+  vaultRoot: string,
+  opts: ApplyOptions = {},
+): Promise<ApplyReport> {
+  const dirs = await scanVault(vaultRoot)
+  const all = dirs
+    .map((d) => vaultFilesToRows(d.files))
+    .filter((r): r is MandalartRows => r !== null)
+  const report = await applyVaultRowsToDb(all, opts)
+  console.warn('[vault] file→DB 再構築 (実 DB 書込み):', report)
   return report
 }
