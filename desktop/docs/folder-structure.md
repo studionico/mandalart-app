@@ -187,9 +187,12 @@ src/
 │   │   ├── vaultFormat.ts      # md-mandalart-v1: grid 行/cell 行 ⇄ <gridId>.md、_mandalart.md の build/parse、gridKind 導出
 │   │   ├── vaultModel.ts       # DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows、I/O なし)
 │   │   ├── reconcile.ts        # hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho (ピュアな差分計画)
-│   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write 薄ラッパ、Rust notify 不要)
-│   │   ├── _vaultSync.ts       # read-only dry-run 比較 (DB 無改変、Stage 2)。Stage 3 で双方向 flush 本配線
-│   │   └── dev.ts              # dev フラグ (localStorage) で window.__vault を生やす Stage 2 エントリ (本番オフ)
+│   │   ├── dbRows.ts           # plugin-fs 非依存の DB 行ローダ (loadMandalartRows / loadAllMandalartIds、setupTestDb でテスト可)
+│   │   ├── applyToDb.ts        # file→DB 適用 (applyVaultRowsToDb、ON CONFLICT upsert + 削除、実 DB 書込み)
+│   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write/remove 薄ラッパ、Rust notify 不要)
+│   │   ├── config.ts           # vault 設定 (vaultMode / vaultPath) を AppData の vault-config.json に永続化 (plugin-store 不使用)
+│   │   ├── _vaultSync.ts       # dry-run 比較 / DB→vault 書き出し (export・flush) / file→DB 再構築 (reconcile) のオーケストレーション
+│   │   └── dev.ts              # dev フラグ (localStorage) で window.__vault を生やし双方向ループを手動ドッグフード (本番オフ)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり、frontmatter なし fallback)
 │   ├── markdown-frontmatter.ts # md-lossless-v1: GridSnapshot ⇄ YAML frontmatter (build/extract、ロスレス Markdown)
 │   ├── realtime.ts           # Supabase Realtime (postgres_changes) 購読

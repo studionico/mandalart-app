@@ -4,6 +4,7 @@ import {
   writeTextFile,
   mkdir,
   exists,
+  remove,
   watch,
   type UnwatchFn,
 } from '@tauri-apps/plugin-fs'
@@ -56,6 +57,11 @@ export async function ensureDir(absPath: string): Promise<void> {
 /** 1 ファイルを書く (親フォルダは事前に ensureDir すること)。 */
 export async function writeVaultFile(absPath: string, content: string): Promise<void> {
   await writeTextFile(absPath, content)
+}
+
+/** 1 ファイルを削除する (flush の差分削除で使用)。 */
+export async function removeVaultFile(absPath: string): Promise<void> {
+  await remove(absPath)
 }
 
 /**

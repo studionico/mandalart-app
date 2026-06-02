@@ -1,11 +1,11 @@
 import { join } from '@tauri-apps/api/path'
 import { query } from '@/lib/db'
-import { scanVault, ensureDir, writeVaultFile } from './io'
+import { scanVault, ensureDir, writeVaultFile, removeVaultFile } from './io'
 import { mandalartToVaultFiles, vaultFilesToRows } from './vaultModel'
 import { diffFiles } from './reconcile'
 import { loadMandalartRows, loadAllMandalartIds } from './dbRows'
 import { applyVaultRowsToDb, type ApplyOptions, type ApplyReport } from './applyToDb'
-import type { MandalartRows } from './types'
+import type { MandalartRows, VaultFile } from './types'
 
 /**
  * Stage 2/3a の vault リコンシリエーション。
@@ -93,6 +93,50 @@ export async function exportAllToVault(vaultRoot: string): Promise<ExportReport>
   }
   const report: ExportReport = { mandalartCount: ids.length, fileCount }
   console.info('[vault] export DB→vault (ファイルのみ、DB 無改変):', report)
+  return report
+}
+
+export type FlushReport = { mandalartCount: number; written: number; deleted: number }
+
+/**
+ * DB→vault の差分 flush (ファイルのみ書込み)。各 DB マンダラートについて、既存 vault フォルダ
+ * (mandalart id 一致で探す。無ければ新規 dirName) 内のファイルと desired を diff し、変化分だけ
+ * 書き、不要になった `.md` を削除する。フォルダ名は cosmetic なので既存があればそれを再利用
+ * (title 変更で dir が乱立しない)。DB で消えたマンダラートのフォルダは**削除しない** (非破壊、
+ * 別途レビュー)。dev のドッグフードで「アプリ編集 → flush → ファイル反映」を回すのに使う。
+ */
+export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
+  await ensureDir(vaultRoot)
+  const dirs = await scanVault(vaultRoot)
+  const existingById = new Map<string, { dirName: string; files: VaultFile[] }>()
+  for (const d of dirs) {
+    const rows = vaultFilesToRows(d.files)
+    if (rows) existingById.set(rows.mandalart.id, { dirName: d.dirName, files: d.files })
+  }
+
+  const ids = await loadAllMandalartIds()
+  let written = 0
+  let deleted = 0
+  for (const id of ids) {
+    const rows = await loadMandalartRows(id)
+    if (!rows) continue
+    const desired = mandalartToVaultFiles(rows)
+    const existing = existingById.get(id)
+    const dirAbs = await join(vaultRoot, existing?.dirName ?? desired.dirName)
+    await ensureDir(dirAbs)
+    const plan = diffFiles(existing?.files ?? [], desired.files)
+    for (const f of plan.write) {
+      await writeVaultFile(await join(dirAbs, f.path), f.content)
+      written++
+    }
+    for (const p of plan.deletePaths) {
+      await removeVaultFile(await join(dirAbs, p))
+      deleted++
+    }
+  }
+
+  const report: FlushReport = { mandalartCount: ids.length, written, deleted }
+  console.info('[vault] flush DB→vault (差分書き出し):', report)
   return report
 }
 

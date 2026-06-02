@@ -2,28 +2,34 @@ import { STORAGE_KEYS } from '@/constants/storage'
 import {
   dryRunCompareVaultToDb,
   exportAllToVault,
+  flushDbToVault,
   reconcileVaultToDb,
   type DryRunReport,
   type ExportReport,
+  type FlushReport,
 } from './_vaultSync'
 import type { ApplyReport } from './applyToDb'
 import { watchVault } from './io'
 import { saveVaultConfig } from './config'
 
 /**
- * Phase 2 Stage 2 の dev 専用エントリ (本番挙動オフ)。
+ * Phase 2 vault モードの dev 専用エントリ (本番挙動オフ)。
  *
- * `localStorage['mandalart.vaultDevMode'] === '1'` のときだけ `window.__vault` に read-only の
- * ヘルパを生やす。vault ルートは `localStorage['mandalart.vaultDevPath']` (fs:scope 内、$HOME 配下等)。
- * DB は一切書き換えず、dry-run 比較と watch ログのみ行う。Stage 3 でフォルダ選択ダイアログ +
- * 永続 config + 双方向 flush に置き換える。
+ * `localStorage['mandalart.vaultDevMode'] === '1'` のときだけ `window.__vault` にヘルパを生やす。
+ * vault ルートは `localStorage['mandalart.vaultDevPath']` (fs:scope 内、$HOME 配下等)。
+ * これで「アプリ編集 → flush → ファイル / Obsidian 編集 → startWatch・rebuildFromVault → DB」の
+ * 双方向ループを手動でドッグフードできる。ユーザー向けの Settings トグル + フォルダ選択ダイアログ +
+ * 起動時自動反転 + auto-flush は実機手動検証後に productize する (= 本ファイルはまだ自動反転しない)。
  *
  * 使い方 (DevTools コンソール):
  *   localStorage.setItem('mandalart.vaultDevMode','1')
  *   localStorage.setItem('mandalart.vaultDevPath','/Users/me/Documents/mandalart-vault')
  *   // リロード後
- *   await window.__vault.dryRun()
- *   await window.__vault.startWatch()
+ *   await window.__vault.exportToVault()    // 初回: DB 全体を vault に書き出し
+ *   await window.__vault.flush()            // 以降: 差分だけ vault に反映 (DB→file)
+ *   await window.__vault.startWatch()       // Obsidian 等の外部編集を監視
+ *   await window.__vault.rebuildFromVault() // file→DB 再構築 (実 DB 書込み)
+ *   await window.__vault.dryRun()           // DB ⇄ vault 差分の確認 (無改変)
  */
 
 type VaultDevApi = {
@@ -33,6 +39,8 @@ type VaultDevApi = {
   dryRun: () => Promise<DryRunReport | null>
   /** DB 全マンダラートを vault に一方向書き出し (ファイルのみ、DB 無改変、非破壊)。 */
   exportToVault: () => Promise<ExportReport | null>
+  /** DB→vault の差分 flush (変化したファイルだけ書く / 不要 .md を消す、DB 無改変)。 */
+  flush: () => Promise<FlushReport | null>
   /** vault→DB 再構築 (**実 DB 書込み**)。deleteMissing=true で vault に無いマンダラートも削除。 */
   rebuildFromVault: (deleteMissing?: boolean) => Promise<ApplyReport | null>
   /** vault ルートを watch して変更パスをログ。 */
@@ -76,6 +84,14 @@ export function initVaultDevMode(): void {
       // Stage 3b で使う永続 config にパスを記録 (vaultMode はまだ立てない = canonical 反転しない)
       await saveVaultConfig({ vaultMode: false, vaultPath: p })
       return report
+    },
+    flush: async () => {
+      const p = vaultPath()
+      if (!p) {
+        console.warn(`[vault] ${STORAGE_KEYS.vaultDevPath} に vault ルートを設定してください`)
+        return null
+      }
+      return flushDbToVault(p)
     },
     rebuildFromVault: async (deleteMissing = false) => {
       const p = vaultPath()
