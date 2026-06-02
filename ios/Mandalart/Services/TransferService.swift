@@ -135,7 +135,8 @@ extension TransferService {
                 position: GridConstants.centerPosition,
                 text: cell.text,
                 imagePath: cell.imagePath,
-                color: cell.color
+                color: cell.color,
+                done: cell.done
             )],
             parentPosition: nil,
             children: []
@@ -156,7 +157,7 @@ extension TransferService {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             data = try encoder.encode(snapshot)
         case .markdown:
-            data = snapshotToMarkdown(snapshot).data(using: .utf8) ?? Data()
+            data = snapshotToMarkdownFile(snapshot).data(using: .utf8) ?? Data()
         case .indentText:
             data = snapshotToIndentText(snapshot).data(using: .utf8) ?? Data()
         }
@@ -207,10 +208,12 @@ extension TransferService {
             let hasContent = !root.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || root.imagePath != nil
                 || root.color != nil
+                || (root.done ?? false)
             if hasContent {
                 cell.text = root.text
                 cell.imagePath = root.imagePath
                 cell.color = root.color
+                cell.done = root.done ?? false
                 cell.updatedAt = now
             }
         }
@@ -299,7 +302,8 @@ enum TransferService {
                     position: pos,
                     text: c.text,
                     imagePath: c.imagePath,
-                    color: c.color
+                    color: c.color,
+                    done: c.done
                 )
             }
             snapCells.sort { $0.position < $1.position }
@@ -380,13 +384,13 @@ enum TransferService {
         return try encoder.encode(snapshot)
     }
 
-    /// マンダラートを Markdown String に変換する。memo は blockquote 出力。
+    /// マンダラートを Markdown ロスレス形式 (md-lossless-v1: frontmatter + 本文) に変換する。
     static func exportMandalartToMarkdown(
         _ mandalart: Mandalart,
         in context: ModelContext
     ) throws -> String {
         let snapshot = try snapshotForMandalart(mandalart, in: context)
-        return snapshotToMarkdown(snapshot)
+        return snapshotToMarkdownFile(snapshot)
     }
 
     /// マンダラートを 2-space インデントテキストに変換する (memo は省略)。
@@ -455,6 +459,72 @@ enum TransferService {
         }
         walk(root, depth: 0)
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Markdown ロスレス (md-lossless-v1) frontmatter
+
+    /// Markdown ロスレス形式の識別子 (= desktop `markdown-frontmatter.ts` と一致)。
+    static let mdLosslessFormat = "md-lossless-v1"
+
+    /// `GridSnapshot` を md-lossless-v1 の YAML frontmatter ブロックに直列化する (閉じ `---` まで)。
+    ///
+    /// `data` は block-scalar (`|-`) に compact JSON 1 行を 2 スペース字下げで格納する。block-scalar は
+    /// 内容をリテラル扱いするのでエスケープ不要。JSON.stringify 相当 (改行は `\n` にエスケープ) なので
+    /// 物理改行は混ざらず 1 行に収まる。desktop の `buildFrontmatter` と等価。
+    static func buildFrontmatter(_ snapshot: GridSnapshot) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(snapshot)) ?? Data()
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        return ["---", "mandalart_format: \(mdLosslessFormat)", "data: |-", "  \(json)", "---"]
+            .joined(separator: "\n")
+    }
+
+    /// 先頭が md-lossless-v1 frontmatter なら `GridSnapshot` を復元する。該当しなければ nil
+    /// (呼び出し側は従来の JSON / parseTextToSnapshot にフォールバックする)。desktop の
+    /// `extractFrontmatterSnapshot` と等価。
+    static func extractFrontmatterSnapshot(_ text: String) -> GridSnapshot? {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
+
+        var close = -1
+        var idx = 1
+        while idx < lines.count {
+            if lines[idx].trimmingCharacters(in: .whitespaces) == "---" { close = idx; break }
+            idx += 1
+        }
+        guard close > 0 else { return nil }
+
+        let fm = Array(lines[1..<close])
+        guard let dataIdx = fm.firstIndex(where: {
+            let t = $0.trimmingCharacters(in: .whitespaces)
+            return t == "data: |-" || t == "data: |"
+        }) else { return nil }
+
+        var jsonLines: [String] = []
+        var i = dataIdx + 1
+        while i < fm.count {
+            let l = fm[i]
+            let hasIndent = l.first == " " || l.first == "\t"
+            let stripped = String(l.drop(while: { $0 == " " || $0 == "\t" }))
+            if hasIndent && !stripped.isEmpty {
+                jsonLines.append(stripped)
+            } else if stripped.isEmpty {
+                // 空行はスキップ
+            } else {
+                break
+            }
+            i += 1
+        }
+        let json = jsonLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(GridSnapshot.self, from: data)
+    }
+
+    /// Markdown ロスレス形式 (frontmatter + 人間可読本文) を組み立てる。
+    static func snapshotToMarkdownFile(_ snapshot: GridSnapshot) -> String {
+        "\(buildFrontmatter(snapshot))\n\n\(snapshotToMarkdown(snapshot))"
     }
 
     // MARK: - Internal: snapshot → ExportNode
@@ -784,6 +854,7 @@ enum TransferService {
                         text: c?.text ?? "",
                         color: c?.color,
                         imagePath: c?.imagePath,
+                        done: c?.done ?? false,
                         createdAt: now,
                         updatedAt: now
                     )
@@ -798,7 +869,8 @@ enum TransferService {
             let text = c?.text ?? ""
             let imagePath = c?.imagePath
             let color = c?.color
-            let isPopulated = !text.isEmpty || imagePath != nil || color != nil
+            let done = c?.done ?? false
+            let isPopulated = !text.isEmpty || imagePath != nil || color != nil || done
             let referencedByChild = snapshot.children.contains(where: { $0.parentPosition == pos })
             if !isPopulated && !referencedByChild { continue }
             let cell = Cell(
@@ -808,6 +880,7 @@ enum TransferService {
                 text: text,
                 color: color,
                 imagePath: imagePath,
+                done: done,
                 createdAt: now,
                 updatedAt: now
             )

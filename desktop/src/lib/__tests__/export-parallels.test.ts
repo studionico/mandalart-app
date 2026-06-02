@@ -9,7 +9,7 @@ import type { GridSnapshot } from '@/types'
  */
 
 function makeCell(position: number, text: string) {
-  return { position, text, image_path: null, color: null }
+  return { position, text, image_path: null, color: null, done: false }
 }
 
 describe('snapshotToMarkdown with parallels', () => {

@@ -281,8 +281,8 @@ Shift+Tab は逆順
 | PNG | 現在のグリッド表示をそのまま画像出力 (`html-to-image`、Tailwind v4 の `oklch()` カラー対応) |
 | PDF | 現在のグリッド表示を画像経由で PDF 出力（jsPDF）|
 | JSON | 階層構造を `GridSnapshot` でシリアライズ（バックアップ・完全復元用）|
-| Markdown | `# 見出し` レベルで階層を表現 (7 階層以上は箇条書きにフォールバック)。メモは `> blockquote` |
-| インデントテキスト | 2 スペースインデントでネストを表現 |
+| Markdown | **ロスレス (md-lossless-v1)**。YAML frontmatter に `GridSnapshot` 全体を compact JSON で保持し、本文 `# 見出し` は人間可読ビュー (再生成)。再 import は frontmatter を信頼 |
+| インデントテキスト | 2 スペースインデントでネストを表現 (簡易アウトライン、ロスあり) |
 
 ### 各形式で保持される要素
 
@@ -290,19 +290,21 @@ Shift+Tab は逆順
 |---|:---:|:---:|:---:|:---:|
 | 階層構造 | ✅ | ✅ | ✅ | ✅ (視覚のみ) |
 | セル text | ✅ | ✅ | ✅ | ✅ (視覚のみ) |
-| memo | ✅ | 🔶 出力はされるが再 import で落ちる | ❌ | ❌ |
-| color (プリセットカラー) | ✅ | ❌ | ❌ | ✅ (視覚のみ) |
-| 並列グリッド (peripherals 合計 8 超) | ✅ | ✅ 再 import で overflow 経由で再現 | ✅ 同上 | N/A |
-| 並列グリッド (peripherals 合計 8 以下) | ✅ | ❌ 1 grid にマージ | ❌ 同上 | N/A |
-| 画像 (image_path) | ✅ 相対パス保持 | ❌ | ❌ | ✅ 視覚のみ |
+| memo | ✅ | ✅ (frontmatter) | ❌ | ❌ |
+| color (プリセットカラー) | ✅ | ✅ (frontmatter) | ❌ | ✅ (視覚のみ) |
+| done (チェック状態) | ✅ | ✅ (frontmatter) | ❌ | ✅ 視覚のみ |
+| 画像 (image_path) | ✅ 相対パス保持 | ✅ (frontmatter) | ❌ | ✅ 視覚のみ |
+| 空セルを挟んだ位置 | ✅ | ✅ (frontmatter) | ❌ tab 順に前詰め | N/A |
+| 並列グリッド / 6 階層超 | ✅ | ✅ (frontmatter) | 🔶 overflow 再構築 | N/A |
 
-### Round-trip 制約 (MD / インデント共通)
+> Markdown が memo/color/done/image/位置をロスレス保持できるのは **frontmatter の構造を信頼するため**であり、本文 `#` 見出しの手編集は Phase 1 では往復に反映されない (本文を正にするのは将来の vault 化フェーズ)。`done` は cloud 同期対象外だが export/import ファイルには含む。
 
-- **memo は落ちる**: `parseMarkdown` は見出し行以外を無視、`parseIndentText` は「行 1 件 = ノード 1 件」前提なのでメモ行が子ノードと誤認される
-- **並列は peripherals 合計 8 超でのみ保持**: MD / インデントは "並列グリッド" の概念を持たず、9 個目以降の子を overflow として再構築するため
-- **色 / 画像はテキスト形式で失われる**
+### Round-trip 制約
 
-完全バックアップ・端末移行には **JSON** を使う。MD / インデントは共有・レビュー用の text 出力という位置付け。
+- **Markdown (md-lossless-v1)**: frontmatter 経由で完全往復。frontmatter の無い旧 Markdown / 手書き Markdown は従来の見出しパーサ (`parseTextToSnapshot`) にフォールバックし、その場合は memo/color/done/image/位置が落ちる
+- **インデントテキスト**: "並列グリッド" の概念を持たず 9 個目以降の子を overflow 再構築。memo/color/done/image は元から非対応 (ロスあり、共有・レビュー用)
+
+完全バックアップ・端末移行には **JSON または Markdown (md-lossless-v1)** を使う。インデントは共有・レビュー用の簡易 text 出力という位置付け。
 
 ### 検証用フィクスチャ
 
@@ -317,9 +319,12 @@ Shift+Tab は逆順
 | 形式 | 内容 |
 |------|------|
 | このアプリの JSON | エクスポートした形式を完全復元 (`parentPosition` は `undefined` / `null` どちらでも並列扱い) |
-| インデントテキスト | スペース・タブのネストで階層を表現 |
-| Markdown 見出し | `#` / `##` / `###` のレベルで階層を表現 |
+| Markdown (md-lossless-v1) | 先頭 frontmatter の `GridSnapshot` を信頼して完全復元 (memo/color/done/image/位置含む) |
+| インデントテキスト | スペース・タブのネストで階層を表現 (簡易) |
+| Markdown 見出し (frontmatter なし) | `#` / `##` / `###` のレベルで階層を表現 (fallback、ロスあり) |
 | クリップボード | 上記形式をクリップボードから直接貼り付け |
+
+> インポートは `tryParse` で **frontmatter (md-lossless-v1) → JSON → テキスト (見出し/インデント)** の順に判定する。
 
 > **所属フォルダ**: 新規マンダラート (`mode.kind === 'new'`) は **インポート押下時に開いていたフォルダタブ** に
 > 所属する (`DashboardPage` から `selectedFolderId` を `<ImportDialog targetFolderId>` 経由で

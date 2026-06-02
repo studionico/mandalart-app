@@ -420,13 +420,15 @@ cacheImageLocally(relPath: string, bytes: Uint8Array): Promise<void>
 // 並列グリッドの相互参照は visited Set で検出し無限再帰を回避する
 exportToJSON(gridId: string): Promise<GridSnapshot>
 
-// 指定グリッド以下を Markdown 見出し形式でエクスポート (round-trip 可能)
-// Level 1..6 は `#` 見出し、7 以降は `- ` 箇条書きにフォールバック
-// memo は各見出し直下の `> blockquote` (再 import 時には落ちる)
+// 指定グリッド以下を Markdown 形式でエクスポート (ロスレス: md-lossless-v1)
+// YAML frontmatter に GridSnapshot 全体を compact JSON (block-scalar) で保持し、本文 `#` 見出しは
+// 人間可読ビュー (再生成)。import は frontmatter を信頼するので memo / color / image_path / done /
+// 空セルの位置 / 6 階層超のネスト / 並列グリッドが JSON 同等にロスレス往復する。
+// frontmatter の直列化/抽出は lib/markdown-frontmatter.ts (buildFrontmatter / extractFrontmatterSnapshot)。
 exportToMarkdown(gridId: string): Promise<string>
 
 // 指定グリッド以下をインデントテキスト形式でエクスポート (2 スペースインデント)
-// memo は tree 構造と両立しないため省略 (完全保持には JSON を使う)
+// 簡易アウトライン形式。frontmatter は付けず memo / color / image / done は落ちる (ロスあり、共有/レビュー用)
 exportToIndentText(gridId: string): Promise<string>
 
 // テスト用のピュア関数: GridSnapshot → 文字列 (DB アクセスなし)

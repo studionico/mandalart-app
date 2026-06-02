@@ -338,6 +338,7 @@ async function buildGridSnapshot(
     text: c.text,
     image_path: c.image_path,
     color: c.color,
+    done: c.done,
   }))
 
   const children: GridSnapshot[] = []

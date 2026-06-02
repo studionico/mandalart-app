@@ -138,7 +138,7 @@ export type CellSnapshot = {
 
 export type GridSnapshot = {
   grid: Pick<Grid, 'sort_order' | 'memo'>
-  cells: Pick<Cell, 'position' | 'text' | 'image_path' | 'color'>[]
+  cells: Pick<Cell, 'position' | 'text' | 'image_path' | 'color' | 'done'>[]
   /**
    * 親グリッドのどのセル (position 0..8) から生えているか。
    *  - undefined: ルート階層のグリッド、または parent grid と同階層の並列グリッド

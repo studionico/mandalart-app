@@ -47,12 +47,16 @@ struct GridSnapshot: Codable, Equatable {
         var text: String
         var imagePath: String?
         var color: String?
+        /// チェックボックスのチェック状態。export/import 専用 (cloud 同期対象外)。
+        /// 旧ファイル / 旧バイナリとの後方互換のため optional。欠損時は false 相当に扱う。
+        var done: Bool?
 
         enum CodingKeys: String, CodingKey {
             case position
             case text
             case imagePath = "image_path"
             case color
+            case done
         }
     }
 

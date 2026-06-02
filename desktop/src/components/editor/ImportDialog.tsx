@@ -4,6 +4,7 @@ import Button from '@/components/ui/Button'
 import { WarningIcon } from '@/components/ui/icons'
 import type { GridSnapshot } from '@/types'
 import { parseTextToSnapshot, importFromJSON, importIntoCell } from '@/lib/api/transfer'
+import { extractFrontmatterSnapshot } from '@/lib/markdown-frontmatter'
 import { CENTER_POSITION, PERIPHERAL_POSITIONS } from '@/constants/grid'
 
 type Mode =
@@ -53,6 +54,10 @@ export default function ImportDialog({ open, mode, targetFolderId, onClose, onCo
   function tryParse(text: string): ParseResult {
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, error: 'テキストを入力してください' }
+
+    // md-lossless-v1 frontmatter を最優先で復元 (ロスレス)。
+    const fromFrontmatter = extractFrontmatterSnapshot(trimmed)
+    if (fromFrontmatter) return { ok: true, snapshot: fromFrontmatter }
 
     // JSON と判定できる場合は JSON パースを試す
     if (trimmed.startsWith('{')) {

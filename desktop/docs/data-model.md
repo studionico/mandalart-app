@@ -243,6 +243,8 @@ export type StockItem = {
 }
 
 // スナップショット型 (ストック保存 / インポート / エクスポート 共通)
+// Markdown エクスポートは md-lossless-v1 (先頭 YAML frontmatter に GridSnapshot 全体を
+// compact JSON で保持) により done 含めロスレス往復する (lib/markdown-frontmatter.ts)。
 
 export type CellSnapshot = {
   cell: Pick<Cell, 'text' | 'image_path' | 'color'>
@@ -251,7 +253,8 @@ export type CellSnapshot = {
 
 export type GridSnapshot = {
   grid: Pick<Grid, 'sort_order' | 'memo'>
-  cells: Pick<Cell, 'position' | 'text' | 'image_path' | 'color'>[]
+  // done は cloud 同期対象外だが export/import ファイルには含む (ロスレス往復のため)
+  cells: Pick<Cell, 'position' | 'text' | 'image_path' | 'color' | 'done'>[]
   /**
    * このグリッドが親のどのセル (0..8) から生えているか。
    *  - undefined: ルートグリッド、または親と並列な兄弟グリッド

@@ -1,6 +1,7 @@
 import { query, execute, generateId, now } from '@/lib/db'
 import type { GridSnapshot, Mandalart, Cell, Grid } from '@/types'
 import { parseTextToSnapshot } from '@/lib/import-parser'
+import { buildFrontmatter } from '@/lib/markdown-frontmatter'
 import { CENTER_POSITION, GRID_CELL_COUNT } from '@/constants/grid'
 import { TAB_ORDER } from '@/constants/tabOrder'
 import { ensureInboxFolder } from './folders'
@@ -94,7 +95,7 @@ export async function exportToJSON(gridId: string): Promise<GridSnapshot> {
       grid: { sort_order: sortOrder, memo: grid.memo ?? null },
       parentPosition,
       cells: allCells.map((c) => ({
-        position: c.position, text: c.text, image_path: c.image_path, color: c.color,
+        position: c.position, text: c.text, image_path: c.image_path, color: c.color, done: c.done,
       })),
       children,
     }
@@ -190,7 +191,8 @@ export function snapshotToMarkdown(snapshot: GridSnapshot): string {
 
 export async function exportToMarkdown(gridId: string): Promise<string> {
   const snapshot = await exportToJSON(gridId)
-  return snapshotToMarkdown(snapshot)
+  // frontmatter (ロスレスな構造+メタ) + 本文 (人間可読ビュー)
+  return `${buildFrontmatter(snapshot)}\n\n${snapshotToMarkdown(snapshot)}`
 }
 
 /**
@@ -280,8 +282,8 @@ async function importIntoGrid(
         // 自グリッドで center cell 行を INSERT (snapshot の内容を保持)。
         // root なら mandalarts.root_cell_id の実体、新並列なら独立テーマ行になる。
         await execute(
-          'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [centerCellId, gridId, pos, c?.text ?? '', c?.image_path ?? null, c?.color ?? null, ts, ts],
+          'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [centerCellId, gridId, pos, c?.text ?? '', c?.image_path ?? null, c?.color ?? null, c?.done ? 1 : 0, ts, ts],
         )
         insertedCellIdByPosition.set(pos, centerCellId)
       }
@@ -294,13 +296,14 @@ async function importIntoGrid(
     const text = c?.text ?? ''
     const imagePath = c?.image_path ?? null
     const color = c?.color ?? null
-    const isPopulated = text !== '' || imagePath !== null || color !== null
+    const done = c?.done ?? false
+    const isPopulated = text !== '' || imagePath !== null || color !== null || done
     const referencedByChild = snapshot.children.some((child) => child.parentPosition === pos)
     if (!isPopulated && !referencedByChild) continue
     const cellId = generateId()
     await execute(
-      'INSERT INTO cells (id, grid_id, position, text, image_path, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [cellId, gridId, pos, text, imagePath, color, ts, ts],
+      'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [cellId, gridId, pos, text, imagePath, color, done ? 1 : 0, ts, ts],
     )
     insertedCellIdByPosition.set(pos, cellId)
   }
@@ -349,11 +352,11 @@ export async function importIntoCell(cellId: string, snapshot: GridSnapshot): Pr
 
   // インポート先セルの内容を snapshot の root (position=4) と同期
   const root = snapshot.cells.find((c) => c.position === CENTER_POSITION)
-  if (root && (root.text.trim() || root.image_path || root.color)) {
+  if (root && (root.text.trim() || root.image_path || root.color || root.done)) {
     const ts = now()
     await execute(
-      'UPDATE cells SET text=?, image_path=?, color=?, updated_at=? WHERE id=?',
-      [root.text, root.image_path, root.color, ts, cellId],
+      'UPDATE cells SET text=?, image_path=?, color=?, done=?, updated_at=? WHERE id=?',
+      [root.text, root.image_path, root.color, root.done ? 1 : 0, ts, cellId],
     )
   }
 

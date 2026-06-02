@@ -101,7 +101,7 @@ function nodeToGrid(
 ): GridSnapshot {
   const firstEight = node.children.slice(0, 8)
   const cells: GridSnapshot['cells'] = [
-    { position: 4, text: node.text, image_path: null, color: null },
+    { position: 4, text: node.text, image_path: null, color: null, done: false },
   ]
   for (let i = 0; i < firstEight.length; i++) {
     cells.push({
@@ -109,6 +109,7 @@ function nodeToGrid(
       text: firstEight[i].text,
       image_path: null,
       color: null,
+      done: false,
     })
   }
 

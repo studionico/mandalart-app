@@ -679,7 +679,9 @@ struct DashboardView: View {
                     snapshot = try JSONDecoder().decode(GridSnapshot.self, from: data)
                 } else {
                     let text = String(data: data, encoding: .utf8) ?? ""
-                    snapshot = TransferService.parseTextToSnapshot(text)
+                    // md-lossless-v1 frontmatter を最優先で復元 (ロスレス)。無ければ従来パーサにフォールバック。
+                    snapshot = TransferService.extractFrontmatterSnapshot(text)
+                        ?? TransferService.parseTextToSnapshot(text)
                 }
                 if snapshot.cells.isEmpty && snapshot.children.isEmpty {
                     throw TransferService.TransferError.parseEmpty
