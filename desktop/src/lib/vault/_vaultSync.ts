@@ -1,61 +1,18 @@
+import { join } from '@tauri-apps/api/path'
 import { query } from '@/lib/db'
-import type { Mandalart, Grid, Cell } from '@/types'
-import type { MandalartRows } from './types'
-import { scanVault } from './io'
+import { scanVault, ensureDir, writeVaultFile } from './io'
 import { mandalartToVaultFiles, vaultFilesToRows } from './vaultModel'
 import { diffFiles } from './reconcile'
+import { loadMandalartRows, loadAllMandalartIds } from './dbRows'
 
 /**
- * Stage 2 の read-only リコンシリエーション (DB 無改変)。
+ * Stage 2/3a の vault リコンシリエーション。
  *
- * DB を正としたまま「もし vault に書き出したら何が変わるか」を計算してログするだけの dry-run。
- * 実際の upsert / ファイル書き込み (双方向 flush) は Stage 3 で本配線する。
- * dev フラグ越しにのみ呼ばれる ([dev.ts](./dev.ts))。
+ * - `dryRunCompareVaultToDb`: DB を正としたまま「vault に書き出したら何が変わるか」を計算してログ
+ *   するだけ (DB / ファイル無改変)。
+ * - `exportAllToVault`: DB→vault の **一方向書き出し** (ファイルのみ作成/上書き、DB は無改変、既存
+ *   ファイルの削除もしない非破壊)。危険な file→DB 再構築・双方向 flush は次ステップで本配線する。
  */
-
-/** SQLite の INTEGER 0/1 を boolean に正規化する (tauri-plugin-sql は INTEGER を number で返す)。 */
-function bool(v: unknown): boolean {
-  return v === true || v === 1
-}
-
-/** 1 マンダラート分の DB 行を読み込む (read-only)。 */
-export async function loadMandalartRows(mandalartId: string): Promise<MandalartRows | null> {
-  const ms = await query<Mandalart>(
-    'SELECT * FROM mandalarts WHERE id = ? AND deleted_at IS NULL',
-    [mandalartId],
-  )
-  const m = ms[0]
-  if (!m) return null
-  const mandalart: Mandalart = {
-    ...m,
-    show_checkbox: bool(m.show_checkbox),
-    pinned: bool(m.pinned),
-    locked: bool(m.locked),
-  }
-
-  let folderName = 'Inbox'
-  if (m.folder_id) {
-    const fs = await query<{ name: string }>('SELECT name FROM folders WHERE id = ?', [m.folder_id])
-    if (fs[0]) folderName = fs[0].name
-  }
-
-  const grids = await query<Grid>(
-    'SELECT * FROM grids WHERE mandalart_id = ? AND deleted_at IS NULL',
-    [mandalartId],
-  )
-  const gridIds = grids.map((g) => g.id)
-  let cells: Cell[] = []
-  if (gridIds.length > 0) {
-    const placeholders = gridIds.map(() => '?').join(',')
-    const rows = await query<Cell>(
-      `SELECT * FROM cells WHERE grid_id IN (${placeholders}) AND deleted_at IS NULL`,
-      gridIds,
-    )
-    cells = rows.map((c) => ({ ...c, done: bool(c.done) }))
-  }
-
-  return { mandalart, folderName, grids, cells }
-}
 
 export type DryRunReport = {
   vaultRoot: string
@@ -69,11 +26,8 @@ export type DryRunReport = {
   perMandalart: { id: string; title: string; filesToWrite: string[]; filesToDelete: string[] }[]
 }
 
-/**
- * vault と DB を突き合わせて差分を計算しログする (DB 無改変)。返り値で内訳を確認できる。
- */
+/** vault と DB を突き合わせて差分を計算しログする (DB / ファイル無改変)。返り値で内訳を確認できる。 */
 export async function dryRunCompareVaultToDb(vaultRoot: string): Promise<DryRunReport> {
-  // vault 側: 各フォルダを parse して mandalart id → ファイル群 に対応付け
   const vaultDirs = await scanVault(vaultRoot)
   const vaultById = new Map<string, { files: { path: string; content: string }[] }>()
   for (const dir of vaultDirs) {
@@ -81,7 +35,6 @@ export async function dryRunCompareVaultToDb(vaultRoot: string): Promise<DryRunR
     if (rows) vaultById.set(rows.mandalart.id, { files: dir.files })
   }
 
-  // DB 側: 全マンダラート
   const dbMandalarts = await query<{ id: string }>(
     'SELECT id FROM mandalarts WHERE deleted_at IS NULL',
   )
@@ -96,7 +49,6 @@ export async function dryRunCompareVaultToDb(vaultRoot: string): Promise<DryRunR
     perMandalart: [],
   }
 
-  // 両方にあるものは DB→vault flush の差分を計算
   for (const id of dbIds) {
     const vault = vaultById.get(id)
     if (!vault) continue
@@ -113,5 +65,31 @@ export async function dryRunCompareVaultToDb(vaultRoot: string): Promise<DryRunR
   }
 
   console.info('[vault] dry-run compare (DB 無改変):', report)
+  return report
+}
+
+export type ExportReport = { mandalartCount: number; fileCount: number }
+
+/**
+ * DB 全マンダラートを vault フォルダへ一方向書き出しする (ファイルのみ、DB 無改変)。
+ * 既存ファイルの削除は行わない (非破壊)。「DB を空 vault に移行」の安全な前半。
+ */
+export async function exportAllToVault(vaultRoot: string): Promise<ExportReport> {
+  await ensureDir(vaultRoot)
+  const ids = await loadAllMandalartIds()
+  let fileCount = 0
+  for (const id of ids) {
+    const rows = await loadMandalartRows(id)
+    if (!rows) continue
+    const { dirName, files } = mandalartToVaultFiles(rows)
+    const dirAbs = await join(vaultRoot, dirName)
+    await ensureDir(dirAbs)
+    for (const f of files) {
+      await writeVaultFile(await join(dirAbs, f.path), f.content)
+      fileCount++
+    }
+  }
+  const report: ExportReport = { mandalartCount: ids.length, fileCount }
+  console.info('[vault] export DB→vault (ファイルのみ、DB 無改変):', report)
   return report
 }

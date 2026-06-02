@@ -1,6 +1,7 @@
 import { STORAGE_KEYS } from '@/constants/storage'
-import { dryRunCompareVaultToDb, type DryRunReport } from './_vaultSync'
+import { dryRunCompareVaultToDb, exportAllToVault, type DryRunReport, type ExportReport } from './_vaultSync'
 import { watchVault } from './io'
+import { saveVaultConfig } from './config'
 
 /**
  * Phase 2 Stage 2 の dev 専用エントリ (本番挙動オフ)。
@@ -23,6 +24,8 @@ type VaultDevApi = {
   path: () => string | null
   /** DB ⇄ vault の差分を計算してログ (DB 無改変)。 */
   dryRun: () => Promise<DryRunReport | null>
+  /** DB 全マンダラートを vault に一方向書き出し (ファイルのみ、DB 無改変、非破壊)。 */
+  exportToVault: () => Promise<ExportReport | null>
   /** vault ルートを watch して変更パスをログ。 */
   startWatch: () => Promise<void>
   /** watch 停止。 */
@@ -53,6 +56,17 @@ export function initVaultDevMode(): void {
         return null
       }
       return dryRunCompareVaultToDb(p)
+    },
+    exportToVault: async () => {
+      const p = vaultPath()
+      if (!p) {
+        console.warn(`[vault] ${STORAGE_KEYS.vaultDevPath} に vault ルートを設定してください`)
+        return null
+      }
+      const report = await exportAllToVault(p)
+      // Stage 3b で使う永続 config にパスを記録 (vaultMode はまだ立てない = canonical 反転しない)
+      await saveVaultConfig({ vaultMode: false, vaultPath: p })
+      return report
     },
     startWatch: async () => {
       const p = vaultPath()
