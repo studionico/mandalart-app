@@ -181,12 +181,15 @@ src/
 │   │   ├── reorderArray.ts           # drag-and-drop 用 pure 関数: src → target に要素移動した新配列を返す (DashboardPage の card-reorder で使用)
 │   │   ├── export.ts                 # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
 │   │   └── captureCardLikeSource.ts  # カード相当 DOM (中心セル / dashboard カード / ストックエントリ) から ConvergeOverlay morph source 値 (rect / border / radius / inset / font) を共通計測
-│   ├── vault/                # Phase 2: vault フォルダモード (Markdown ファイルを source of truth) のピュア層
+│   ├── vault/                # Phase 2: vault フォルダモード (Markdown ファイルを source of truth)。ピュア層 + I/O 層
 │   │   ├── types.ts            # VaultFile / MandalartRows / Serialized{Mandalart,Grid,Cell} 等
 │   │   ├── frontmatter.ts      # 汎用 block-scalar frontmatter codec (buildDoc / parseDoc、YAML ライブラリ非依存)
 │   │   ├── vaultFormat.ts      # md-mandalart-v1: grid 行/cell 行 ⇄ <gridId>.md、_mandalart.md の build/parse、gridKind 導出
 │   │   ├── vaultModel.ts       # DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows、I/O なし)
-│   │   └── reconcile.ts        # hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho (ピュアな差分計画)
+│   │   ├── reconcile.ts        # hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho (ピュアな差分計画)
+│   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write 薄ラッパ、Rust notify 不要)
+│   │   ├── _vaultSync.ts       # read-only dry-run 比較 (DB 無改変、Stage 2)。Stage 3 で双方向 flush 本配線
+│   │   └── dev.ts              # dev フラグ (localStorage) で window.__vault を生やす Stage 2 エントリ (本番オフ)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり、frontmatter なし fallback)
 │   ├── markdown-frontmatter.ts # md-lossless-v1: GridSnapshot ⇄ YAML frontmatter (build/extract、ロスレス Markdown)
 │   ├── realtime.ts           # Supabase Realtime (postgres_changes) 購読

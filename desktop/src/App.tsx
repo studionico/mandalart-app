@@ -15,6 +15,7 @@ import { useBeforeQuit } from './hooks/useBeforeQuit'
 import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
 import { useCloudFoldersCleanup } from './hooks/useCloudFoldersCleanup'
 import { useWelcomeOnFirstRun } from './hooks/useWelcomeOnFirstRun'
+import { initVaultDevMode } from './lib/vault/dev'
 
 /**
  * Help / Welcome モーダルの表示モード。
@@ -44,6 +45,11 @@ export default function App() {
       setHelpMode('welcome')
     }
   }, [welcome.shouldShow, helpMode])
+
+  // Phase 2 vault モードの dev エントリ。localStorage フラグ off (= 通常) なら完全 no-op。
+  useEffect(() => {
+    initVaultDevMode()
+  }, [])
 
   // Tauri menu「ヘルプ」→「使い方を見る」 (id='help.show') を購読 → manual で開く。
   // event 名は `menu:help-show` (ハイフン区切り)。Tauri v2 の event 名は `.` を含められない

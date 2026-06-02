@@ -23,6 +23,12 @@ export const STORAGE_KEYS = {
    *  useWelcomeOnFirstRun hook が WELCOME_VERSION と比較して再表示判定。
    *  「次回以降表示しない」を check して close すると現行 version が保存される。 */
   welcomeSeenVersion: `${PREFIX}welcomeSeenVersion`,
+  /** Phase 2 vault モードの dev 用フラグ ('1' で有効)。off の間は vault 経路を一切起動しない。
+   *  Stage 2 では `window.__vault` に read-only の dry-run / watch ヘルパを生やすだけ (DB 無改変)。 */
+  vaultDevMode: `${PREFIX}vaultDevMode`,
+  /** Phase 2 vault モードの dev 用 vault ルート絶対パス ($HOME 配下等、fs:scope 内)。
+   *  Stage 3 でフォルダ選択ダイアログ + 永続 config に置換予定の暫定。 */
+  vaultDevPath: `${PREFIX}vaultDevPath`,
   // 旧 `showCheckbox` キーは migration 007 でマンダラート DB カラムに移行 (廃止済)。
   // localStorage に残ったエントリは未読み出しの orphan として残るが実害なし。
 } as const
