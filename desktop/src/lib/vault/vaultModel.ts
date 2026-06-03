@@ -53,10 +53,13 @@ export function mandalartToVaultFiles(rows: MandalartRows): MandalartVaultFiles 
     (a, b) => a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   )
   for (const grid of orderedGrids) {
-    files.push({
-      path: `${grid.id}.md`,
-      content: buildGridDocument(grid, cellsByGrid.get(grid.id) ?? []),
-    })
+    const gridCells = cellsByGrid.get(grid.id) ?? []
+    // lazy grid: cells も memo も無い空グリッドは vault に焼かない。drill で生成され drill-up で
+    // auto-cleanup される空 X=C drilled grid (= ナビゲーション由来) がファイル churn を起こすのを防ぐ。
+    // ルート/並列は中心セル行を必ず持ち、子を持つ X=C grid は drill 元の周辺セルを必ず持つので落ちない。
+    const isEmpty = gridCells.length === 0 && (grid.memo == null || grid.memo.trim() === '')
+    if (isEmpty) continue
+    files.push({ path: `${grid.id}.md`, content: buildGridDocument(grid, gridCells) })
   }
 
   return { dirName: mandalartDirName(mandalart.title, mandalart.id), files }

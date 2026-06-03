@@ -1,7 +1,8 @@
 import { join } from '@tauri-apps/api/path'
 import { query } from '@/lib/db'
-import { scanVault, ensureDir, writeVaultFile, removeVaultFile } from './io'
-import { mandalartToVaultFiles, vaultFilesToRows } from './vaultModel'
+import { scanVault, ensureDir, writeVaultFile, removeVaultFile, removeDir } from './io'
+import { mandalartToVaultFiles, vaultFilesToRows, MANDALART_DOC_NAME } from './vaultModel'
+import { docContentEquivalent } from './vaultFormat'
 import { diffFiles } from './reconcile'
 import { loadMandalartRows, loadAllMandalartIds } from './dbRows'
 import { applyVaultRowsToDb, type ApplyOptions, type ApplyReport } from './applyToDb'
@@ -96,14 +97,25 @@ export async function exportAllToVault(vaultRoot: string): Promise<ExportReport>
   return report
 }
 
-export type FlushReport = { mandalartCount: number; written: number; deleted: number }
+export type FlushReport = {
+  mandalartCount: number
+  written: number
+  deleted: number
+  deletedDirs: number
+}
 
 /**
  * DB→vault の差分 flush (ファイルのみ書込み)。各 DB マンダラートについて、既存 vault フォルダ
  * (mandalart id 一致で探す。無ければ新規 dirName) 内のファイルと desired を diff し、変化分だけ
  * 書き、不要になった `.md` を削除する。フォルダ名は cosmetic なので既存があればそれを再利用
- * (title 変更で dir が乱立しない)。DB で消えたマンダラートのフォルダは**削除しない** (非破壊、
- * 別途レビュー)。dev のドッグフードで「アプリ編集 → flush → ファイル反映」を回すのに使う。
+ * (title 変更で dir が乱立しない)。
+ *
+ * **DB live に存在しないマンダラートの vault フォルダは削除する** (= アプリ削除を vault に反映)。
+ * ただし `loadAllMandalartIds` が 0 件 (DB が空/壊れている) のときはフォルダ削除を**一切しない**
+ * (空 DB 誤適用で vault を全消しする事故を防ぐ)。ゴミ箱 (soft-delete) も deleted_at IS NULL で
+ * live から外れるためフォルダが消えるが、復元すれば次の flush で再生成され往復する。
+ *
+ * dev のドッグフードで「アプリ編集/削除 → flush → ファイル反映」を回すのに使う。
  */
 export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
   await ensureDir(vaultRoot)
@@ -124,6 +136,18 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
     const existing = existingById.get(id)
     const dirAbs = await join(vaultRoot, existing?.dirName ?? desired.dirName)
     await ensureDir(dirAbs)
+
+    // churn 回避: 既存と desired が `updated_at` だけの差のファイル (grid / mandalart 共通) は
+    // desired の内容を既存のものに差し替えて書き換えを抑止する。ナビゲーション等で grid/mandalart の
+    // updated_at が bump されても、content が同じならファイルを書き換えない。
+    const exMap = new Map((existing?.files ?? []).map((f) => [f.path, f.content]))
+    for (let i = 0; i < desired.files.length; i++) {
+      const ex = exMap.get(desired.files[i].path)
+      if (ex !== undefined && ex !== desired.files[i].content && docContentEquivalent(ex, desired.files[i].content)) {
+        desired.files[i] = { ...desired.files[i], content: ex }
+      }
+    }
+
     const plan = diffFiles(existing?.files ?? [], desired.files)
     for (const f of plan.write) {
       await writeVaultFile(await join(dirAbs, f.path), f.content)
@@ -135,7 +159,20 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
     }
   }
 
-  const report: FlushReport = { mandalartCount: ids.length, written, deleted }
+  // DB live に無くなったマンダラートの vault フォルダを削除 (アプリ削除を反映)。
+  // 空 DB ガード: live が 0 件のときは何も消さない (誤適用での全消し防止)。
+  let deletedDirs = 0
+  if (ids.length > 0) {
+    const dbIdSet = new Set(ids)
+    for (const [mid, info] of existingById) {
+      if (!dbIdSet.has(mid)) {
+        await removeDir(await join(vaultRoot, info.dirName))
+        deletedDirs++
+      }
+    }
+  }
+
+  const report: FlushReport = { mandalartCount: ids.length, written, deleted, deletedDirs }
   console.info('[vault] flush DB→vault (差分書き出し):', report)
   return report
 }
@@ -150,10 +187,22 @@ export async function reconcileVaultToDb(
   opts: ApplyOptions = {},
 ): Promise<ApplyReport> {
   const dirs = await scanVault(vaultRoot)
-  const all = dirs
-    .map((d) => vaultFilesToRows(d.files))
-    .filter((r): r is MandalartRows => r !== null)
-  const report = await applyVaultRowsToDb(all, opts)
-  console.warn('[vault] file→DB 再構築 (実 DB 書込み):', report)
+  const all: MandalartRows[] = []
+  // grid ファイルの parse 失敗があったマンダラートは「vault に無い grid」を消さない (データ損失防止)。
+  // 検知: フォルダ内の grid .md 数 (= _mandalart.md 以外) より parse できた grid 数が少なければ失敗あり。
+  const skipGridDeletionFor = new Set<string>()
+  for (const d of dirs) {
+    const rows = vaultFilesToRows(d.files)
+    if (!rows) continue
+    all.push(rows)
+    const gridFileCount = d.files.filter(
+      (f) => f.path !== MANDALART_DOC_NAME && f.path.endsWith('.md'),
+    ).length
+    if (rows.grids.length < gridFileCount) skipGridDeletionFor.add(rows.mandalart.id)
+  }
+  const report = await applyVaultRowsToDb(all, { ...opts, skipGridDeletionFor })
+  console.warn('[vault] file→DB 再構築 (実 DB 書込み):', report, {
+    skippedGridDeletion: [...skipGridDeletionFor],
+  })
   return report
 }

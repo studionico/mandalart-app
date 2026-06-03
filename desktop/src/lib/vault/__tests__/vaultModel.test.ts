@@ -7,7 +7,14 @@ import {
   slugifyTitle,
   MANDALART_DOC_NAME,
 } from '@/lib/vault/vaultModel'
-import { gridKind, parseGridDocument, parseMandalartDoc } from '@/lib/vault/vaultFormat'
+import {
+  gridKind,
+  parseGridDocument,
+  parseMandalartDoc,
+  buildMandalartDoc,
+  buildGridDocument,
+  docContentEquivalent,
+} from '@/lib/vault/vaultFormat'
 import type { MandalartRows } from '@/lib/vault/types'
 
 /**
@@ -91,9 +98,10 @@ describe('vaultModel round-trip', () => {
     const restored = vaultFilesToRows(vault.files)
     expect(restored).not.toBeNull()
 
-    // mandalart: folder_id は vault に無い (folder_name が正) ので null に正規化して比較
+    // mandalart: folder_id は vault に無い (folder_name が正)、last_grid_id は端末ローカル UI 状態で
+    // vault に焼かない (import で null) ので、それらを正規化して比較する。
     expect(restored!.folderName).toBe('Inbox')
-    expect(restored!.mandalart).toEqual({ ...rows.mandalart, folder_id: null })
+    expect(restored!.mandalart).toEqual({ ...rows.mandalart, folder_id: null, last_grid_id: null })
 
     // grids / cells は id ソートで比較 (mandalart_id stamp / grid_id stamp も検証)
     expect(sortById(restored!.grids)).toEqual(sortById(rows.grids))
@@ -111,6 +119,24 @@ describe('vaultModel round-trip', () => {
     const rows = sampleRows()
     const restored = vaultFilesToRows(mandalartToVaultFiles(rows).files)!
     expect(restored.cells).toHaveLength(rows.cells.length)
+  })
+
+  it('lazy grid: cells も memo も無い空グリッドは vault に焼かない (navigation churn 防止)', () => {
+    const rows = sampleRows()
+    rows.grids.push(
+      grid('g-empty', { center_cell_id: 'c-root-p0', parent_cell_id: 'c-root-p0', sort_order: 0 }),
+    )
+    const paths = mandalartToVaultFiles(rows).files.map((f) => f.path)
+    expect(paths).not.toContain('g-empty.md')
+  })
+
+  it('memo だけ持つグリッドは vault に焼く (memo は content)', () => {
+    const rows = sampleRows()
+    rows.grids.push(
+      grid('g-memo', { center_cell_id: 'c-root-p0', parent_cell_id: 'c-root-p0', sort_order: 0, memo: 'メモだけ' }),
+    )
+    const paths = mandalartToVaultFiles(rows).files.map((f) => f.path)
+    expect(paths).toContain('g-memo.md')
   })
 
   it('_mandalart.md が無ければ null', () => {
@@ -152,5 +178,47 @@ describe('parse の防御', () => {
   })
   it('format 不一致の mandalart ファイルは null', () => {
     expect(parseMandalartDoc('---\nformat: other\n---\n')).toBeNull()
+  })
+})
+
+describe('docContentEquivalent (churn 回避: updated_at 無視)', () => {
+  function mkM(extra: Partial<Mandalart> = {}): Mandalart {
+    return {
+      id: 'm', user_id: '', title: 'A', root_cell_id: 'c', show_checkbox: false,
+      pinned: false, locked: false, sort_order: null, last_grid_id: null, folder_id: null,
+      created_at: TS, updated_at: TS, ...extra,
+    }
+  }
+
+  it('mandalart doc: updated_at だけ違うなら等価 (= flush で書き換えない)', () => {
+    const a = buildMandalartDoc(mkM({ updated_at: '2026-01-01T00:00:00.000Z' }), 'Inbox')
+    const b = buildMandalartDoc(mkM({ updated_at: '2026-12-31T00:00:00.000Z' }), 'Inbox')
+    expect(docContentEquivalent(a, b)).toBe(true)
+  })
+  it('mandalart doc: title が違えば非等価', () => {
+    const a = buildMandalartDoc(mkM({ title: 'A' }), 'Inbox')
+    const b = buildMandalartDoc(mkM({ title: 'B' }), 'Inbox')
+    expect(docContentEquivalent(a, b)).toBe(false)
+  })
+  it('mandalart doc: folder_name が違えば非等価', () => {
+    const a = buildMandalartDoc(mkM(), 'Inbox')
+    const b = buildMandalartDoc(mkM(), 'Work')
+    expect(docContentEquivalent(a, b)).toBe(false)
+  })
+
+  it('grid doc: grid/cell の updated_at だけ違うなら等価 (= ナビゲーション churn を止める)', () => {
+    const cellsA = [cell('c1', 'g', 4, { text: 'X', updated_at: '2026-01-01T00:00:00.000Z' })]
+    const cellsB = [cell('c1', 'g', 4, { text: 'X', updated_at: '2026-12-31T00:00:00.000Z' })]
+    const a = buildGridDocument(grid('g', { center_cell_id: 'c1', updated_at: '2026-01-01T00:00:00.000Z' }), cellsA)
+    const b = buildGridDocument(grid('g', { center_cell_id: 'c1', updated_at: '2026-12-31T00:00:00.000Z' }), cellsB)
+    expect(docContentEquivalent(a, b)).toBe(true)
+  })
+  it('grid doc: memo / cell text が違えば非等価', () => {
+    const cells = [cell('c1', 'g', 4, { text: 'X' })]
+    const a = buildGridDocument(grid('g', { center_cell_id: 'c1' }), cells)
+    const memoChanged = buildGridDocument(grid('g', { center_cell_id: 'c1', memo: 'changed' }), cells)
+    const textChanged = buildGridDocument(grid('g', { center_cell_id: 'c1' }), [cell('c1', 'g', 4, { text: 'Y' })])
+    expect(docContentEquivalent(a, memoChanged)).toBe(false)
+    expect(docContentEquivalent(a, textChanged)).toBe(false)
   })
 })

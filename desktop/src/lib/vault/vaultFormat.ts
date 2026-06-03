@@ -92,7 +92,6 @@ export function buildMandalartDoc(mandalart: Mandalart, folderName: string): str
     title: mandalart.title,
     root_cell_id: mandalart.root_cell_id,
     show_checkbox: mandalart.show_checkbox,
-    last_grid_id: mandalart.last_grid_id ?? null,
     sort_order: mandalart.sort_order ?? null,
     pinned: mandalart.pinned,
     locked: mandalart.locked,
@@ -120,7 +119,7 @@ export function parseMandalartDoc(content: string): { mandalart: Mandalart; fold
     title: sm.title,
     root_cell_id: sm.root_cell_id,
     show_checkbox: sm.show_checkbox,
-    last_grid_id: sm.last_grid_id,
+    last_grid_id: null, // 端末ローカル UI 状態。vault には保存しない (import で null 復元)
     sort_order: sm.sort_order,
     pinned: sm.pinned,
     folder_id: null,
@@ -129,6 +128,32 @@ export function parseMandalartDoc(content: string): { mandalart: Mandalart; fold
     updated_at: sm.updated_at,
   }
   return { mandalart, folderName }
+}
+
+/** object/array を再帰的に辿り `updated_at` キーを除去する (純粋、比較用)。 */
+function stripUpdatedAt(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUpdatedAt)
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === 'updated_at') continue
+      out[k] = stripUpdatedAt(v)
+    }
+    return out
+  }
+  return value
+}
+
+/**
+ * 2 つの vault ドキュメント (grid / mandalart どちら向きでも) が **`updated_at` を除いて** 内容
+ * 等価かを判定する純関数。`updated_at` (grid / 各 cell / mandalart) はナビゲーション等で content
+ * 未編集でも bump されるため、これを無視することで flush の churn (timestamp だけ違うファイルを
+ * 書き換える) を防ぐ。frontmatter を JSON として比較するので grid 行・cells 行・mandalart 行すべてに効く。
+ */
+export function docContentEquivalent(a: string, b: string): boolean {
+  const fa = parseDoc(a).fields
+  const fb = parseDoc(b).fields
+  return JSON.stringify(stripUpdatedAt(fa)) === JSON.stringify(stripUpdatedAt(fb))
 }
 
 /** grid の人間可読ビュー (本文)。中心を H1、非空の周辺を H2、memo を blockquote。parse は読まない。 */

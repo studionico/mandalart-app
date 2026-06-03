@@ -8,13 +8,20 @@ import type { MandalartRows } from './types'
  * - upsert は `INSERT ... ON CONFLICT(id) DO UPDATE` (synced_at/remote_id は温存、deleted_at は復活)。
  * - フォルダは folder_name で ensure (vault は folder_id を持たない)。
  * - 適用した各マンダラート内で vault に無い grid/cell は削除 (canonical 反映)。
+ * - `skipGridDeletionFor` に含む mandalart は intra-mandalart の grid/cell 削除をスキップする
+ *   (= grid ファイルの parse 失敗があったマンダラート。破損ファイルを「vault に無い grid」と
+ *   誤認して DB から消す事故=データ損失を防ぐため、その回は upsert のみ行う)。
  * - `deleteMissingMandalarts` を立てたときのみ vault に無いマンダラート全体を削除する
  *   (= 完全 rebuild。空 vault 誤適用での全消し事故を防ぐため既定 false)。
  *
  * **本番経路からは未呼び出し** (vaultMode 反転は別ステップ)。dev / テストからのみ実行される。
  */
 
-export type ApplyOptions = { deleteMissingMandalarts?: boolean }
+export type ApplyOptions = {
+  deleteMissingMandalarts?: boolean
+  /** この mandalart id 群は intra-mandalart の grid/cell 削除をスキップ (parse 失敗時の保護)。 */
+  skipGridDeletionFor?: Set<string>
+}
 export type ApplyReport = {
   mandalarts: number
   grids: number
@@ -108,24 +115,27 @@ export async function applyVaultRowsToDb(
       report.cells++
     }
 
-    // vault に無い grid (とその cells) を削除
-    const dbGrids = await query<{ id: string }>(
-      'SELECT id FROM grids WHERE mandalart_id = ? AND deleted_at IS NULL',
-      [rows.mandalart.id],
-    )
-    for (const g of dbGrids) {
-      if (!vaultGridIds.has(g.id)) {
-        await execute('DELETE FROM cells WHERE grid_id = ?', [g.id])
-        await execute('DELETE FROM grids WHERE id = ?', [g.id])
+    // parse 失敗があったマンダラートは削除をスキップ (破損ファイルでの誤削除=データ損失を防ぐ)
+    if (!opts.skipGridDeletionFor?.has(rows.mandalart.id)) {
+      // vault に無い grid (とその cells) を削除
+      const dbGrids = await query<{ id: string }>(
+        'SELECT id FROM grids WHERE mandalart_id = ? AND deleted_at IS NULL',
+        [rows.mandalart.id],
+      )
+      for (const g of dbGrids) {
+        if (!vaultGridIds.has(g.id)) {
+          await execute('DELETE FROM cells WHERE grid_id = ?', [g.id])
+          await execute('DELETE FROM grids WHERE id = ?', [g.id])
+        }
       }
-    }
-    // 残った grid 内で vault に無い cell を削除
-    const dbCells = await query<{ id: string }>(
-      'SELECT c.id FROM cells c JOIN grids g ON c.grid_id = g.id WHERE g.mandalart_id = ? AND c.deleted_at IS NULL',
-      [rows.mandalart.id],
-    )
-    for (const c of dbCells) {
-      if (!vaultCellIds.has(c.id)) await execute('DELETE FROM cells WHERE id = ?', [c.id])
+      // 残った grid 内で vault に無い cell を削除
+      const dbCells = await query<{ id: string }>(
+        'SELECT c.id FROM cells c JOIN grids g ON c.grid_id = g.id WHERE g.mandalart_id = ? AND c.deleted_at IS NULL',
+        [rows.mandalart.id],
+      )
+      for (const c of dbCells) {
+        if (!vaultCellIds.has(c.id)) await execute('DELETE FROM cells WHERE id = ?', [c.id])
+      }
     }
   }
 

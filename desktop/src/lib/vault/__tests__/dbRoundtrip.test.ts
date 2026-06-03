@@ -87,7 +87,9 @@ describe('vault ⇄ 実 SQLite round-trip', () => {
     const m = await createMandalart('t')
     const root = (await getRootGrids(m.id))[0]
     const p3 = await upsertCellAt(root.id, 3, { text: 'X' })
-    await createGrid({ mandalartId: m.id, parentCellId: p3.id, centerCellId: p3.id, sortOrder: 0 })
+    // drilled (X=C) は中身を持たせる (空 X=C grid は lazy grid として vault に焼かれないため)
+    const drilled = await createGrid({ mandalartId: m.id, parentCellId: p3.id, centerCellId: p3.id, sortOrder: 0 })
+    await upsertCellAt(drilled.id, 0, { text: 'drilled-content' })
     await createGrid({ mandalartId: m.id, parentCellId: null, centerCellId: null, sortOrder: 1 })
 
     const rows = (await loadMandalartRows(m.id))!

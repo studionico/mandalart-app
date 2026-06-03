@@ -65,13 +65,17 @@ export type SerializedCell = {
   updated_at: string
 }
 
-/** `_mandalart.md` の frontmatter に焼く mandalart 行 (user_id / image_path / folder_id / deleted_at は省く)。 */
+/**
+ * `_mandalart.md` の frontmatter に焼く mandalart 行。
+ * 省くもの: user_id / image_path / folder_id / deleted_at に加え、`last_grid_id` も除外する
+ * (= どのサブグリッドを最後に開いたかは**端末ローカルの UI 状態**で、ナビゲーションのたびに
+ * 値が動き `_mandalart.md` を churn させるため。import 時は null 復元)。
+ */
 export type SerializedMandalart = {
   id: string
   title: string
   root_cell_id: string
   show_checkbox: boolean
-  last_grid_id: string | null
   sort_order: number | null
   pinned: boolean
   locked: boolean

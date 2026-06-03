@@ -64,6 +64,11 @@ export async function removeVaultFile(absPath: string): Promise<void> {
   await remove(absPath)
 }
 
+/** フォルダを再帰削除する (flush で DB から消えたマンダラートの dir を消すのに使用)。 */
+export async function removeDir(absPath: string): Promise<void> {
+  await remove(absPath, { recursive: true })
+}
+
 /**
  * vault ルートを再帰 watch する。変更があったパス配列を onChange に渡す。返り値で停止。
  * delayMs でデバウンスし、自分の書き込みの反響は呼び出し側が echo-skip で弾く。

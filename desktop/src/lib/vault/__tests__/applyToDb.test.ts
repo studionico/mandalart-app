@@ -119,6 +119,25 @@ describe('applyVaultRowsToDb', () => {
     expect(db.prepare('SELECT 1 FROM cells WHERE id = ?').get('bogus-cell')).toBeUndefined()
   })
 
+  it('skipGridDeletionFor: parse 失敗扱いのマンダラートは vault に無い grid を消さない (G 保護)', async () => {
+    await seedSample()
+    const before = await snapshotAll()
+    const mId = before[0].mandalart.id
+    const ts = '2026-06-03T00:00:00.000Z'
+    db.prepare(
+      'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
+    ).run('keep-grid', mId, 'keep-cell', null, 99, ts, ts)
+    db.prepare(
+      'INSERT INTO cells (id, grid_id, position, text, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+    ).run('keep-cell', 'keep-grid', 4, 'x', ts, ts)
+
+    // skipGridDeletionFor に該当 id を渡す → 削除スキップ (upsert のみ)
+    await applyVaultRowsToDb(before, { skipGridDeletionFor: new Set([mId]) })
+
+    expect(db.prepare('SELECT 1 FROM grids WHERE id = ?').get('keep-grid')).toBeDefined()
+    expect(db.prepare('SELECT 1 FROM cells WHERE id = ?').get('keep-cell')).toBeDefined()
+  })
+
   it('deleteMissingMandalarts: vault に無いマンダラートは opt 次第で削除', async () => {
     const m1 = await seedSample()
     await createMandalart('B') // m2 (vault には含めない)
