@@ -32,6 +32,7 @@
     "fs:allow-read-dir",
     "fs:allow-watch",
     "fs:allow-unwatch",
+    "dialog:allow-open",
     {
       "identifier": "fs:scope",
       "allow": [

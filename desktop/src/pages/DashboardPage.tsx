@@ -20,11 +20,12 @@ import ShredConfirmDialog from '@/components/editor/ShredConfirmDialog'
 import ExportFormatPicker, { type ExportFormat } from '@/components/editor/ExportFormatPicker'
 import AuthDialog from '@/components/AuthDialog'
 import TrashDialog from '@/components/dashboard/TrashDialog'
+import SettingsDialog from '@/components/dashboard/SettingsDialog'
 import ThemeToggle from '@/components/ThemeToggle'
 import Toast from '@/components/ui/Toast'
 import {
   LockClosedIcon, LockOpenIcon, StarFilledIcon, StarOutlineIcon, CopyIcon, XMarkIcon,
-  WarningIcon, SpinnerIcon,
+  WarningIcon, SpinnerIcon, GearIcon,
 } from '@/components/ui/icons'
 import { CardLikeText } from '@/components/CardLikeText'
 import { useCellImageUrl } from '@/hooks/useCellImageUrl'
@@ -73,6 +74,7 @@ export default function DashboardPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // ダッシュボード D&D 関連 state
   const [stockReloadKey, setStockReloadKey] = useState(0)
@@ -575,6 +577,14 @@ export default function DashboardPage() {
           >
             インポート
           </button>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 p-2 rounded-lg transition-colors"
+            title="設定"
+            aria-label="設定"
+          >
+            <GearIcon className="w-5 h-5" />
+          </button>
           {/* 「+ 新規作成」は card grid 先頭の「+」card に移行 (Phase A 以降) */}
         </div>
       </header>
@@ -693,6 +703,8 @@ export default function DashboardPage() {
         onClose={() => setTrashOpen(false)}
         onChange={load}
       />
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <ImportDialog
         open={importOpen}

@@ -95,7 +95,8 @@ src/
 │   ├── CardLikeText.tsx      # 中心セル / カード / ストックエントリのテキスト描画共通 (ConvergeOverlay polling 互換構造)
 │   │
 │   ├── dashboard/
-│   │   └── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
+│   │   ├── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
+│   │   └── SettingsDialog.tsx # アプリ設定モーダル。Vault(実験的): フォルダ選択 + export/flush (DB 無改変・P1)
 │   │
 │   ├── help/                 # 操作説明 / Welcome
 │   │   ├── HelpDialog.tsx       # Carousel 式モーダル (7 スライド、自動進行 / dots / キーボード)
@@ -192,6 +193,7 @@ src/
 │   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write/remove 薄ラッパ、Rust notify 不要)
 │   │   ├── config.ts           # vault 設定 (vaultMode / vaultPath) を AppData の vault-config.json に永続化 (plugin-store 不使用)
 │   │   ├── _vaultSync.ts       # dry-run 比較 / DB→vault 書き出し (export・flush) / file→DB 再構築 (reconcile) のオーケストレーション
+│   │   ├── vaultDialog.ts      # plugin-dialog のフォルダ選択ラッパ (pickVaultFolder、import をこの 1 ファイルに隔離)
 │   │   └── dev.ts              # dev フラグ (localStorage) で window.__vault を生やし双方向ループを手動ドッグフード (本番オフ)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり、frontmatter なし fallback)
 │   ├── markdown-frontmatter.ts # md-lossless-v1: GridSnapshot ⇄ YAML frontmatter (build/extract、ロスレス Markdown)
