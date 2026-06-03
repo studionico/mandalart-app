@@ -66,6 +66,14 @@ export const SYNC_DEBOUNCE_MS = 300
 /** MemoTab の auto-save debounce (ms)。typing 後この時間内に追加入力が無ければ保存。 */
 export const MEMO_SAVE_DEBOUNCE_MS = 800
 
+// --- vault auto-flush (Phase 2 productize P2) ---
+
+/**
+ * vault auto-flush の debounce (ms)。DB 書込み後この時間内に追加書込みが無ければ
+ * vault へ flush する。連続編集中は走らせず、止めてからまとめて 1 回書き出すための間。
+ */
+export const VAULT_FLUSH_DEBOUNCE_MS = 3000
+
 // --- UI 確認ダイアログ ---
 
 /**

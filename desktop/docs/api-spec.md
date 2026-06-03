@@ -27,6 +27,10 @@ query<T>(sql: string, params?: unknown[]): Promise<T[]>
 // INSERT / UPDATE / DELETE
 execute(sql: string, params?: unknown[]): Promise<void>
 
+// DB 書込み (execute) 成功時に発火する購読を登録する (返り値で解除)。
+// vault auto-flush が「実 mutation が起きた」合図として使う (query/PRAGMA は通らない)。
+onDbWrite(listener: () => void): () => void
+
 // UUID 生成 (crypto.randomUUID)
 generateId(): string
 

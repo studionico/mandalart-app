@@ -136,6 +136,9 @@ export default function SettingsDialog({ open, onClose }: Props) {
           </div>
 
           <p className="text-xs text-neutral-400">
+            フォルダ設定中は編集後に自動で vault へ反映されます（「今すぐ flush」は即時反映用）。
+          </p>
+          <p className="text-xs text-neutral-400">
             ファイルを正にする（vault から起動する）移行は今後対応します。
           </p>
         </section>

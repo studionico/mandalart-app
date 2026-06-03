@@ -15,6 +15,7 @@ import { useBeforeQuit } from './hooks/useBeforeQuit'
 import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
 import { useCloudFoldersCleanup } from './hooks/useCloudFoldersCleanup'
 import { useWelcomeOnFirstRun } from './hooks/useWelcomeOnFirstRun'
+import { useVaultAutoFlush } from './hooks/useVaultAutoFlush'
 import { initVaultDevMode } from './lib/vault/dev'
 
 /**
@@ -33,6 +34,7 @@ export default function App() {
   useBeforeQuit()
   useCloudEmptyCellsCleanup()
   useCloudFoldersCleanup()
+  useVaultAutoFlush()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   // Welcome / Help dialog state

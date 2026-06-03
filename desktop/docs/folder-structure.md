@@ -139,6 +139,7 @@ src/
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
 │   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper (+ app:sync-pulled も listen)
 │   ├── useVisibilityResync.ts # Tauri window focus 復帰で pullAll 発火 (落とし穴 #22 保険同期、app:sync-pulled event を dispatch)
+│   ├── useVaultAutoFlush.ts  # DB 書込み (onDbWrite) → debounce → vault へ自動 flush (Phase 2 P2、vault フォルダ設定時のみ ON)
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)
 │   ├── useSync.ts            # クラウド同期 (起動時全同期 + realtime + manual 同期 + 300ms debounce)
 │   ├── useAuthBootstrap.ts   # 起動時のセッション復元 + deep link ハンドラ登録
@@ -193,6 +194,7 @@ src/
 │   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write/remove 薄ラッパ、Rust notify 不要)
 │   │   ├── config.ts           # vault 設定 (vaultMode / vaultPath) を AppData の vault-config.json に永続化 (plugin-store 不使用)
 │   │   ├── _vaultSync.ts       # dry-run 比較 / DB→vault 書き出し (export・flush) / file→DB 再構築 (reconcile) のオーケストレーション
+│   │   ├── flushScheduler.ts   # auto-flush の debounce スケジューラ (createFlushScheduler、in-flight ガード、純関数=テスト可)
 │   │   ├── vaultDialog.ts      # plugin-dialog のフォルダ選択ラッパ (pickVaultFolder、import をこの 1 ファイルに隔離)
 │   │   └── dev.ts              # dev フラグ (localStorage) で window.__vault を生やし双方向ループを手動ドッグフード (本番オフ)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり、frontmatter なし fallback)
