@@ -4,6 +4,7 @@ import { loadVaultConfig } from '@/lib/vault/config'
 import { flushDbToVault } from '@/lib/vault/_vaultSync'
 import { createFlushScheduler } from '@/lib/vault/flushScheduler'
 import { VAULT_FLUSH_DEBOUNCE_MS } from '@/constants/timing'
+import { useBootstrapStore } from '@/store/bootstrapStore'
 
 /**
  * vault auto-flush (Phase 2 productize P2)。
@@ -18,9 +19,15 @@ import { VAULT_FLUSH_DEBOUNCE_MS } from '@/constants/timing'
  *
  * **フィードバックループなし**: `flushDbToVault` は読取 + ファイル書込みのみで `execute` を
  * 呼ばないため、自分の書込みで再発火しない。エラーは scheduler 側で console.error に留める。
+ *
+ * **bootstrap 後に限定** (P3): `ready` が true のときだけ onDbWrite を購読する。これにより起動時の
+ * vault→DB 再構築 (reconcileVaultToDb) の execute() が auto-flush を誤起動しない (購読者ゼロ)。
  */
 export function useVaultAutoFlush() {
+  const ready = useBootstrapStore((s) => s.ready)
+
   useEffect(() => {
+    if (!ready) return // 起動 rebuild 完了まで購読しない
     const scheduler = createFlushScheduler({
       debounceMs: VAULT_FLUSH_DEBOUNCE_MS,
       flush: async () => {
@@ -34,5 +41,5 @@ export function useVaultAutoFlush() {
       unsubscribe()
       scheduler.dispose()
     }
-  }, [])
+  }, [ready])
 }

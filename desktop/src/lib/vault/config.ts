@@ -41,3 +41,11 @@ export async function saveVaultConfig(config: VaultConfig): Promise<void> {
     baseDir: BaseDirectory.AppData,
   })
 }
+
+/**
+ * 起動時に vault→DB 再構築を行うべきか (P3)。vaultMode ON かつ vaultPath 設定済みのときだけ true。
+ * vaultMode true ＆ path null の不整合は「再構築しない」に倒す防御。
+ */
+export function shouldRebuildOnStartup(config: VaultConfig): boolean {
+  return config.vaultMode && config.vaultPath != null
+}

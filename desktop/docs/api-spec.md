@@ -771,3 +771,14 @@ clear(): void
 - `stock`: エディタ内セル → 新規ストックエントリ収束 (D&D で copy/move drop 時)
 
 `targetId` は polymorphic id (前 2 つは `mandalart.id`、`stock` は `stock_item.id`)。`centerCell` は起点側 DOM の実測値で overlay の**初期**スタイルとして使い、終端値は polling した target DOM の `getComputedStyle` から読む。
+
+### bootstrapStore
+
+アプリ起動時の bootstrap 状態 (Phase 2 productize P3)。`ready` が false の間 App は Routes を描画せず「初期化中…」を出し、vaultMode ON のときはこの間に vault→DB 再構築 (`reconcileVaultToDb`) をブロック実行してから `setReady()` する (全ページの初回 DB 読取が再構築後の DB を見る)。`useVaultAutoFlush` も `ready` を購読し、**ready 後にのみ** `onDbWrite` を購読する (起動 rebuild の execute() で auto-flush を誤起動しないため)。
+
+```typescript
+ready: boolean
+setReady(): void
+vaultRebuildError: string | null         // 再構築失敗時のユーザー向けメッセージ (既存 DB で続行 + 警告 Toast)
+setVaultRebuildError(message: string | null): void
+```

@@ -155,7 +155,8 @@ src/
 │   ├── undoStore.ts          # 操作履歴スタック
 │   ├── authStore.ts          # session / user / loading
 │   ├── themeStore.ts         # light / dark / system
-│   └── convergeStore.ts      # クロスルート morph 用 overlay state (direction='home'|'open'|'stock' / targetId / sourceRect / centerCell)
+│   ├── convergeStore.ts      # クロスルート morph 用 overlay state (direction='home'|'open'|'stock' / targetId / sourceRect / centerCell)
+│   └── bootstrapStore.ts     # 起動 bootstrap state (ready / vaultRebuildError)。vaultMode ON 時の起動 rebuild ゲート + auto-flush の ready 待ち (P3)
 │
 ├── lib/
 │   ├── db/
