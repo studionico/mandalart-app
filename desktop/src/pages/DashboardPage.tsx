@@ -34,6 +34,7 @@ import { reorderArray } from '@/lib/utils/reorderArray'
 import { useAuthStore } from '@/store/authStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
+import { useVaultStore } from '@/store/vaultStore'
 import { useSync } from '@/hooks/useSync'
 import { useDashboardDnd, type DashboardDropAction } from '@/hooks/useDashboardDnd'
 import { useTwoClickConfirmKey } from '@/hooks/useTwoClickConfirm'
@@ -92,6 +93,8 @@ export default function DashboardPage() {
   >(null)
 
   const user = useAuthStore((s) => s.user)
+  // vaultMode 中はクラウド同期を完全オフにするため、同期 UI を出さない (P4)。
+  const vaultMode = useVaultStore((s) => s.vaultMode)
   const { status: syncStatus, lastSync, error: syncError, sync, reloadKey } = useSync()
 
   // 再取得中の古いレスポンスで UI が上書きされるのを防ぐ
@@ -542,12 +545,18 @@ export default function DashboardPage() {
           <ThemeToggle />
           {user ? (
             <div className="flex items-center gap-2">
-              <SyncIndicator
-                status={syncStatus}
-                lastSync={lastSync}
-                error={syncError}
-                onSync={sync}
-              />
+              {vaultMode ? (
+                <span className="text-xs text-neutral-400 dark:text-neutral-500" title="vault モード中はクラウド同期を停止しています">
+                  vault モード（クラウド同期停止）
+                </span>
+              ) : (
+                <SyncIndicator
+                  status={syncStatus}
+                  lastSync={lastSync}
+                  error={syncError}
+                  onSync={sync}
+                />
+              )}
               <button
                 onClick={async () => { await signOut() }}
                 className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"

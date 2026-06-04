@@ -782,3 +782,13 @@ setReady(): void
 vaultRebuildError: string | null         // 再構築失敗時のユーザー向けメッセージ (既存 DB で続行 + 警告 Toast)
 setVaultRebuildError(message: string | null): void
 ```
+
+### vaultStore
+
+vault 設定 (vaultMode / vaultPath) の in-memory 反応的ミラー (Phase 2 productize P4)。永続化の正は AppData の vault-config.json で、本ストアは同期フックが vaultMode を**同期的に**読むためのミラー。App 起動 bootstrap で `setVault(cfg)` し、SettingsDialog のトグル/フォルダ選択でも更新する。`useSync` は `vaultMode` ON のとき Supabase 同期を完全オフにする (vaultMode 中は pull が起動再構築した DB を上書きする衝突を防ぐ)。DashboardPage は vaultMode 中 `SyncIndicator` を非表示にし subtle な「vault モード（クラウド同期停止）」表示に置換する。
+
+```typescript
+vaultMode: boolean
+vaultPath: string | null
+setVault(cfg: { vaultMode: boolean; vaultPath: string | null }): void
+```

@@ -8,6 +8,7 @@ import ConvergeOverlay from './components/ConvergeOverlay'
 import HelpDialog from './components/help/HelpDialog'
 import Toast from './components/ui/Toast'
 import { useBootstrapStore } from './store/bootstrapStore'
+import { useVaultStore } from './store/vaultStore'
 import { loadVaultConfig, shouldRebuildOnStartup } from './lib/vault/config'
 import { reconcileVaultToDb } from './lib/vault/_vaultSync'
 import { useGlobalShortcut } from './hooks/useGlobalShortcut'
@@ -54,6 +55,8 @@ export default function App() {
     void (async () => {
       try {
         const cfg = await loadVaultConfig()
+        // 同期フック等が同期的に vaultMode を読めるよう in-memory ストアへミラー (ready 前に確定)。
+        useVaultStore.getState().setVault({ vaultMode: cfg.vaultMode, vaultPath: cfg.vaultPath })
         if (shouldRebuildOnStartup(cfg) && cfg.vaultPath) {
           // vault を正として DB を作り直す (実 DB 書込み)。失敗しても既存 DB で続行する。
           try {

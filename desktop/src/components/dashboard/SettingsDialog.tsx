@@ -4,6 +4,7 @@ import Toast from '@/components/ui/Toast'
 import { loadVaultConfig, saveVaultConfig } from '@/lib/vault/config'
 import { pickVaultFolder } from '@/lib/vault/vaultDialog'
 import { exportAllToVault, flushDbToVault } from '@/lib/vault/_vaultSync'
+import { useVaultStore } from '@/store/vaultStore'
 
 type Props = {
   open: boolean
@@ -24,6 +25,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const [vaultMode, setVaultMode] = useState(false)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const setVaultStore = useVaultStore((s) => s.setVault)
 
   // モーダルを開くたびに永続 config から現在の vault パス + モードを読み直す。
   useEffect(() => {
@@ -52,6 +54,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
       // 現在の vaultMode は保持したままパスだけ差し替える。
       await saveVaultConfig({ vaultMode, vaultPath: picked })
       setVaultPath(picked)
+      setVaultStore({ vaultMode, vaultPath: picked })
       setToast({ message: 'vault フォルダを設定しました', type: 'success' })
     } catch (e) {
       console.error('[settings] フォルダ選択に失敗:', e)
@@ -69,10 +72,12 @@ export default function SettingsDialog({ open, onClose }: Props) {
         await flushDbToVault(vaultPath)
         await saveVaultConfig({ vaultMode: true, vaultPath })
         setVaultMode(true)
-        setToast({ message: 'vault モードを有効化しました（次回起動から vault が正）', type: 'success' })
+        setVaultStore({ vaultMode: true, vaultPath })
+        setToast({ message: 'vault モードを有効化しました（次回起動から vault が正・クラウド同期は停止）', type: 'success' })
       } else {
         await saveVaultConfig({ vaultMode: false, vaultPath })
         setVaultMode(false)
+        setVaultStore({ vaultMode: false, vaultPath })
         setToast({ message: 'vault モードを無効化しました（DB が正に戻ります）', type: 'success' })
       }
     } catch (e) {

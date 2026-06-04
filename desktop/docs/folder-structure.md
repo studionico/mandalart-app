@@ -156,7 +156,8 @@ src/
 │   ├── authStore.ts          # session / user / loading
 │   ├── themeStore.ts         # light / dark / system
 │   ├── convergeStore.ts      # クロスルート morph 用 overlay state (direction='home'|'open'|'stock' / targetId / sourceRect / centerCell)
-│   └── bootstrapStore.ts     # 起動 bootstrap state (ready / vaultRebuildError)。vaultMode ON 時の起動 rebuild ゲート + auto-flush の ready 待ち (P3)
+│   ├── bootstrapStore.ts     # 起動 bootstrap state (ready / vaultRebuildError)。vaultMode ON 時の起動 rebuild ゲート + auto-flush の ready 待ち (P3)
+│   └── vaultStore.ts         # vault 設定 (vaultMode / vaultPath) の in-memory 反応的ミラー。useSync が vaultMode ON でクラウド同期を完全オフにする (P4)
 │
 ├── lib/
 │   ├── db/
