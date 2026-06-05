@@ -221,4 +221,52 @@ describe('docContentEquivalent (churn 回避: updated_at 無視)', () => {
     expect(docContentEquivalent(a, memoChanged)).toBe(false)
     expect(docContentEquivalent(a, textChanged)).toBe(false)
   })
+
+  it('本文 (リンク有無) が違えば非等価 = 既存 vault へ移行が伝播する', () => {
+    const cells = [cell('c1', 'g', 4, { text: 'X' }), cell('c2', 'g', 2, { text: 'Y' })]
+    const g = grid('g', { center_cell_id: 'c1' })
+    const noLink = buildGridDocument(g, cells)
+    const withLink = buildGridDocument(g, cells, { childByCell: new Map([['c2', 'g-child']]) })
+    // frontmatter (grid + cells) は同一、本文だけリンク有無で違う → 非等価で再書き出しされる
+    expect(docContentEquivalent(noLink, withLink)).toBe(false)
+  })
+})
+
+describe('Obsidian 双方向リンク (本文 wiki-link)', () => {
+  function fileContent(rows: MandalartRows, path: string): string {
+    return mandalartToVaultFiles(rows).files.find((f) => f.path === path)!.content
+  }
+
+  it('親→子: 子グリッドを持つ周辺セル見出しが子へのリンク、子なしは素のテキスト', () => {
+    const root = fileContent(sampleRows(), 'g-root.md')
+    // c-root-p2「運動」は g-drill を drill しているのでリンク、c-root-p0「食事」は子なしで素のテキスト
+    expect(root).toContain('## [[g-drill|運動]]')
+    expect(root).toContain('## 食事')
+    expect(root).not.toMatch(/\[\[[^\]]*食事/)
+  })
+
+  it('子→親: 子グリッドの先頭に親グリッドへの戻りリンク', () => {
+    const drill = fileContent(sampleRows(), 'g-drill.md')
+    // g-drill の親セル c-root-p2 は g-root 所属 → 親グリッド g-root、ラベルは g-root 中心「健康」
+    expect(drill).toContain('親: [[g-root|健康]]')
+  })
+
+  it('ルート/独立並列グリッドは _mandalart.md へ戻るリンク', () => {
+    // g-root (parent_cell_id=null) も g-par (独立並列、parent_cell_id=null) も _mandalart へ戻る
+    expect(fileContent(sampleRows(), 'g-root.md')).toContain('親: [[_mandalart|健康 / 2026]]')
+    expect(fileContent(sampleRows(), 'g-par.md')).toContain('親: [[_mandalart|健康 / 2026]]')
+  })
+
+  it('_mandalart.md ⇄ ルートグリッドの双方向リンク', () => {
+    // 順方向: _mandalart → root、戻り: root → _mandalart
+    expect(fileContent(sampleRows(), '_mandalart.md')).toContain('[[g-root|健康 / 2026]]')
+    expect(fileContent(sampleRows(), 'g-root.md')).toContain('[[_mandalart|健康 / 2026]]')
+  })
+
+  it('本文にリンクを足しても round-trip (frontmatter→DB) は不変', () => {
+    const rows = sampleRows()
+    const restored = vaultFilesToRows(mandalartToVaultFiles(rows).files)!
+    expect(sortById(restored.grids)).toEqual(sortById(rows.grids))
+    expect(sortById(restored.cells)).toEqual(sortById(rows.cells))
+  })
 })

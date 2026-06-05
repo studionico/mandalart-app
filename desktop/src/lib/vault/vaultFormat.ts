@@ -21,8 +21,19 @@ export function gridKind(grid: Pick<Grid, 'parent_cell_id' | 'center_cell_id'>):
   return 'parallel'
 }
 
-/** grid + その cells を `<gridId>.md` の内容に直列化する。 */
-export function buildGridDocument(grid: Grid, cells: Cell[]): string {
+/**
+ * 本文ビューに焼く Obsidian リンク情報 (任意)。本文は表示専用で parse は読まないので、リンクの
+ * 有無はデータ往復に影響しない。
+ * - `childByCell`: セル id → そのセルが drill した子グリッド id (親→子リンク)。
+ * - `parent`: 自グリッドの親グリッドへの戻りリンク (子→親リンク、ルートは無し)。
+ */
+export type GridBodyLinks = {
+  childByCell?: Map<string, string>
+  parent?: { gridId: string; label: string }
+}
+
+/** grid + その cells を `<gridId>.md` の内容に直列化する。`links` で本文に親子 wiki-link を出す。 */
+export function buildGridDocument(grid: Grid, cells: Cell[], links?: GridBodyLinks): string {
   const sg: SerializedGrid = {
     id: grid.id,
     center_cell_id: grid.center_cell_id,
@@ -44,7 +55,7 @@ export function buildGridDocument(grid: Grid, cells: Cell[]): string {
     created_at: c.created_at,
     updated_at: c.updated_at,
   }))
-  return buildDoc(VAULT_FORMAT, { grid: sg, cells: sc }, renderGridBody(sorted, grid.memo))
+  return buildDoc(VAULT_FORMAT, { grid: sg, cells: sc }, renderGridBody(sorted, grid.memo, links))
 }
 
 /**
@@ -85,8 +96,11 @@ export function parseGridDocument(
   return { grid, cells }
 }
 
-/** mandalart 行 + 所属フォルダ名を `_mandalart.md` の内容に直列化する。 */
-export function buildMandalartDoc(mandalart: Mandalart, folderName: string): string {
+/**
+ * mandalart 行 + 所属フォルダ名を `_mandalart.md` の内容に直列化する。
+ * `rootGridId` を渡すと本文 H1 をルートグリッドへの wiki-link にする (順方向リンク)。
+ */
+export function buildMandalartDoc(mandalart: Mandalart, folderName: string, rootGridId?: string): string {
   const sm: SerializedMandalart = {
     id: mandalart.id,
     title: mandalart.title,
@@ -98,7 +112,8 @@ export function buildMandalartDoc(mandalart: Mandalart, folderName: string): str
     created_at: mandalart.created_at,
     updated_at: mandalart.updated_at,
   }
-  const body = `# ${mandalart.title.trim() || '(無題)'}`
+  const title = mandalart.title.trim() || '(無題)'
+  const body = rootGridId ? `# ${wikiLink(rootGridId, title)}` : `# ${title}`
   return buildDoc(VAULT_FORMAT, { mandalart: sm, folder_name: folderName }, body)
 }
 
@@ -151,23 +166,55 @@ function stripUpdatedAt(value: unknown): unknown {
  * 書き換える) を防ぐ。frontmatter を JSON として比較するので grid 行・cells 行・mandalart 行すべてに効く。
  */
 export function docContentEquivalent(a: string, b: string): boolean {
-  const fa = parseDoc(a).fields
-  const fb = parseDoc(b).fields
-  return JSON.stringify(stripUpdatedAt(fa)) === JSON.stringify(stripUpdatedAt(fb))
+  const pa = parseDoc(a)
+  const pb = parseDoc(b)
+  // 本文 (人間可読ビュー) も比較する。本文は updated_at を含まず frontmatter から決定的に生成されるので、
+  // 「updated_at だけ bump」では本文は不変 (= churn 抑止は維持)。本文テンプレ変更 (リンク追加等) や実データ
+  // 変更のときだけ本文が変わり、既存ファイルへ再書き出しで伝播する。
+  if (pa.body !== pb.body) return false
+  return JSON.stringify(stripUpdatedAt(pa.fields)) === JSON.stringify(stripUpdatedAt(pb.fields))
 }
 
-/** grid の人間可読ビュー (本文)。中心を H1、非空の周辺を H2、memo を blockquote。parse は読まない。 */
-function renderGridBody(cellsSortedByPosition: Cell[], memo: string | null): string {
+/** Obsidian wiki-link (エイリアス記法)。リンク先はファイル名 (= `<gridId>.md` の basename)。 */
+function wikiLink(gridId: string, label: string): string {
+  return `[[${gridId}|${label}]]`
+}
+
+/** セル見出し。子グリッドがあれば見出しを子へのリンクにする (親→子)。 */
+function renderCellHeading(
+  prefix: string,
+  cell: Cell,
+  fallback: string,
+  childByCell?: Map<string, string>,
+): string {
+  const label = cell.text.trim() || fallback
+  const childId = childByCell?.get(cell.id)
+  return childId ? `${prefix} ${wikiLink(childId, label)}` : `${prefix} ${label}`
+}
+
+/**
+ * grid の人間可読ビュー (本文)。中心を H1、非空の周辺を H2、memo を blockquote。parse は読まない。
+ * `links` 指定時は親子の Obsidian wiki-link を出す (親→子 = 子持ちセル見出し、子→親 = 先頭の戻りリンク)。
+ */
+function renderGridBody(
+  cellsSortedByPosition: Cell[],
+  memo: string | null,
+  links?: GridBodyLinks,
+): string {
   const lines: string[] = []
+  // 子→親: 先頭に親グリッドへの戻りリンク (ルートは parent 無しなので出ない)。
+  if (links?.parent) {
+    lines.push(`親: ${wikiLink(links.parent.gridId, links.parent.label)}`, '')
+  }
   const center = cellsSortedByPosition.find((c) => c.position === CENTER_POSITION)
-  lines.push(`# ${center?.text.trim() || '(中心)'}`)
+  lines.push(center ? renderCellHeading('#', center, '(中心)', links?.childByCell) : '# (中心)')
   if (memo && memo.trim() !== '') {
     for (const memoLine of memo.split('\n')) lines.push(`> ${memoLine}`)
   }
   for (const c of cellsSortedByPosition) {
     if (c.position === CENTER_POSITION) continue
     if (c.text.trim() === '') continue
-    lines.push('', `## ${c.text.trim()}`)
+    lines.push('', renderCellHeading('##', c, '(無題)', links?.childByCell))
   }
   return lines.join('\n')
 }
