@@ -124,7 +124,11 @@ func mandalartToVaultFiles(_ rows: MandalartRows) -> MandalartVaultFiles {
 
 /// vault ファイル群 → DB 行。`_mandalart.md` が無い / 壊れている場合は nil。
 /// grid ファイルの parse 失敗は skip+warn (誤削除しない方針、parse できた分だけ返す)。
-func vaultFilesToRows(_ files: [VaultFile]) -> MandalartRows? {
+///
+/// `applyBody`: grid 本文 (人間可読ビュー) の編集 (text/color/done/image/memo) を frontmatter に canonical
+/// マージするか。vault→DB 取り込み (`reconcileVaultToDb`) は true で本文編集を反映、DB→vault 方向で existing を
+/// 読むだけの呼び出し (`flushDbToVault` / `dryRunScan`) は false (mandalart.id だけ要るので body 不要)。
+func vaultFilesToRows(_ files: [VaultFile], applyBody: Bool = false) -> MandalartRows? {
     guard let mandalartFile = files.first(where: { $0.path == mandalartDocName }),
           let parsedMandalart = parseMandalartDoc(mandalartFile.content) else { return nil }
 
@@ -135,7 +139,7 @@ func vaultFilesToRows(_ files: [VaultFile]) -> MandalartRows? {
     for file in files {
         if file.path == mandalartDocName { continue }
         if !file.path.hasSuffix(".md") { continue }
-        guard let parsed = parseGridDocument(file.content, mandalartId: mandalart.id) else {
+        guard let parsed = parseGridDocument(file.content, mandalartId: mandalart.id, applyBody: applyBody) else {
             print("[vault] grid ファイルの parse をスキップ: \(file.path)")
             continue
         }

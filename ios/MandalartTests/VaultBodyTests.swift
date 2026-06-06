@@ -22,6 +22,24 @@ final class VaultBodyTests: XCTestCase {
         XCTAssertEqual(sortedByPosition(parsed!.cells), sortedByPosition(cells))
     }
 
+    /// 本番取り込み経路 `vaultFilesToRows(applyBody: true)` でも本文が正としてマージされる (files レベル回帰)。
+    func testVaultFilesToRowsAppliesBody() {
+        let files = mandalartToVaultFiles(sampleRows()).files
+        // g-par.md の本文だけ編集 (frontmatter の cells JSON は不変)。
+        let edited = files.map { f -> VaultFile in
+            guard f.path == "g-par.md" else { return f }
+            return VaultFile(path: f.path, content: f.content.replacingOccurrences(
+                of: "## [ ] 睡眠 #c/blue-100 ^p3", with: "## [x] 熟睡 ^p3"))
+        }
+        let rows = vaultFilesToRows(edited, applyBody: true)
+        let cell = rows?.cells.first { $0.id == "c-par-p3" }
+        XCTAssertEqual(cell?.text, "熟睡")
+        XCTAssertEqual(cell?.done, true)
+        // applyBody=false (既定) なら frontmatter 値のまま (本番 flush 読取経路は不変)。
+        let unchanged = vaultFilesToRows(edited)?.cells.first { $0.id == "c-par-p3" }
+        XCTAssertEqual(unchanged?.text, "睡眠")
+    }
+
     // MARK: parseGridBody フィールド抽出
 
     func testParseHeadingFields() {

@@ -11,7 +11,8 @@ import SwiftData
 /// - `deleteMissingMandalarts` (既定 false) のときだけ vault に無いマンダラート全体を削除。
 ///
 /// SwiftData 依存のため Vault/ ではなく Services/ に置く (Vault/ ピュア層は @Model 非含有の不変条件)。
-/// **本番経路からは未呼び出し** (vaultMode 反転は後続 Stage)。DEBUG ハーネス / テストからのみ実行。
+/// `reconcileVaultToDb` (起動 rebuild / フォアグラウンド復帰 / 設定再構築) から呼ばれ、vault を正として
+/// 本文編集 (本文ラウンドトリップ Stage ③、`applyBody: true` 経由) を含めて DB を再構築する。vault は DEBUG 限定機能。
 
 struct VaultApplyOptions {
     var deleteMissingMandalarts: Bool = false

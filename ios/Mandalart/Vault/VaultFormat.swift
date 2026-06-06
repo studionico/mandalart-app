@@ -58,7 +58,8 @@ func buildGridDocument(_ grid: VaultGrid, _ cells: [VaultCell], links: GridBodyL
 ///
 /// `applyBody == true` のとき、frontmatter から組んだセルに **本文 (人間可読ビュー) の編集**
 /// (text/color/done/image) と grid.memo を `VaultBody` で上書きする (本文ラウンドトリップ)。
-/// 本番経路 (`vaultFilesToRows`) は applyBody=false のまま (= frontmatter のみ信頼)。Stage ③ で本番を true 化予定。
+/// vault→DB 取り込み (`reconcileVaultToDb` → `vaultFilesToRows(applyBody: true)`) は true で本文編集を反映する。
+/// DB→vault 方向で existing を読むだけの呼び出しは false のまま (= frontmatter のみ信頼)。
 func parseGridDocument(_ content: String, mandalartId: String, applyBody: Bool = false) -> (grid: VaultGrid, cells: [VaultCell])? {
     let parsed = parseDoc(content)
     guard parsed.format == vaultFormat else { return nil }

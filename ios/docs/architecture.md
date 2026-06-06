@@ -68,7 +68,7 @@ ios/
 │   │   ├── VaultTypes.swift       行型 (VaultGrid/VaultCell/VaultMandalart) + Serialized 型 + VaultFile / MandalartRows
 │   │   ├── VaultFrontmatter.swift block-scalar JSON codec (buildDoc / parseDoc、YAML ライブラリ非依存)
 │   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName。本文は編集可能ビュー `<#/##> [done] text #c/color ^pN` + 画像 embed + 親子 wiki-link
-│   │   ├── VaultBody.swift        本文ラウンドトリップ parser (parseGridBody / mergeBody)。本文 → text/color/done/image/memo を frontmatter セルに上書き。parseGridDocument applyBody=true で適用 (本番反映は Stage ③)
+│   │   ├── VaultBody.swift        本文ラウンドトリップ parser (parseGridBody / mergeBody)。本文 → text/color/done/image/memo を frontmatter セルに上書き。parseGridDocument applyBody=true で適用 (reconcile 経路で本番反映済 Stage ③)
 │   │   ├── VaultModel.swift       DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows)
 │   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho
 │   │   ├── VaultIO.swift          FileManager I/O ラッパ (scanVault / scanMandalartDir / ensureDir / write / remove / readBytes、URL ベース、Stage I/O)

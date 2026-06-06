@@ -22,7 +22,9 @@ enum VaultDbReconcile {
         var all: [MandalartRows] = []
         var skipGridDeletionFor = options.skipGridDeletionFor
         for entry in dirs {
-            guard let rows = vaultFilesToRows(entry.files) else { continue }
+            // applyBody: true = 本文 (人間可読ビュー) の編集を frontmatter にマージして DB へ反映
+            // (本文ラウンドトリップ Stage ③)。reconcile は vault→DB 取り込みなので本文を正として読む。
+            guard let rows = vaultFilesToRows(entry.files, applyBody: true) else { continue }
             all.append(rows)
             let gridFileCount = entry.files.filter { $0.path != mandalartDocName && $0.path.hasSuffix(".md") }.count
             if rows.grids.count < gridFileCount {
