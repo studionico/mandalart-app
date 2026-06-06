@@ -12,6 +12,8 @@ import SwiftData
 @MainActor
 final class VaultAutoFlush {
     private weak var context: ModelContext?
+    /// echo-skip 台帳 (Stage ④)。MandalartApp から reconcile と共有する同一インスタンスを受け取る。
+    private var ledger: VaultWriteLedger?
     private var observer: NSObjectProtocol?
     private var debounceTask: Task<Void, Never>?
     private var flushing = false
@@ -19,9 +21,11 @@ final class VaultAutoFlush {
     private let debounceSeconds = 3.0
 
     /// didSave 購読を開始する。**起動 rebuild 完了後に呼ぶこと** (reconcile の save を誤って拾わない)。
-    func start(context: ModelContext) {
+    /// `ledger` は reconcile が seed する台帳と同一インスタンスを渡す (clobber 安全化)。
+    func start(context: ModelContext, ledger: VaultWriteLedger? = nil) {
         guard observer == nil else { return }
         self.context = context
+        self.ledger = ledger
         observer = NotificationCenter.default.addObserver(
             forName: ModelContext.didSave, object: nil, queue: .main
         ) { [weak self] _ in
@@ -88,7 +92,7 @@ final class VaultAutoFlush {
         let appSupport = VaultImageStore.appSupportDirectory() ?? FileManager.default.temporaryDirectory
         do {
             _ = try VaultBookmark.withAccess(resolved.url) {
-                try VaultSync.flushDbToVault(rows: rows, to: resolved.url, appSupportDir: appSupport)
+                try VaultSync.flushDbToVault(rows: rows, to: resolved.url, appSupportDir: appSupport, ledger: ledger)
             }
         } catch {
             print("[vault] auto-flush failed:", error)

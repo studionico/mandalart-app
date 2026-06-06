@@ -16,9 +16,22 @@ enum VaultDbReconcile {
         vaultRoot: URL,
         in context: ModelContext,
         appSupportDir: URL,
-        options: VaultApplyOptions = .init()
+        options: VaultApplyOptions = .init(),
+        ledger: VaultWriteLedger? = nil
     ) throws -> VaultApplyReport {
         let dirs = try VaultIO.scanVault(vaultRoot)
+
+        // echo-skip 台帳を現 disk で seed (Stage ④)。取り込み直後の disk が「自分の最後の書込み」基準になり、
+        // 次回 flush で Stage ③ の frontmatter 整合書込みが外部編集と誤判定され skip されるのを防ぐ。
+        // corrupt で parse 失敗した entry も disk にはあるので seed する (all ではなく dirs を回す)。
+        if let ledger {
+            for entry in dirs {
+                for file in entry.files {
+                    ledger.record(vaultLedgerKey(dirName: entry.dirName, path: file.path), hash: hashContent(file.content))
+                }
+            }
+        }
+
         var all: [MandalartRows] = []
         var skipGridDeletionFor = options.skipGridDeletionFor
         for entry in dirs {

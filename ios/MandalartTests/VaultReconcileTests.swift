@@ -55,11 +55,45 @@ final class VaultReconcileTests: XCTestCase {
         XCTAssertEqual(plan.deletePaths, ["gone.md"])
     }
 
-    // MARK: shouldSkipEcho
+    // MARK: diffFilesGuarded (clobber 安全化、Stage ④)
 
-    func testShouldSkipEcho() {
-        let recent: Set<String> = ["h1", "h2"]
-        XCTAssertTrue(shouldSkipEcho("h1", recentWrites: recent))
-        XCTAssertFalse(shouldSkipEcho("h3", recentWrites: recent))
+    func testGuardedWriteTruthTable() {
+        let existing = [
+            VaultFile(path: "same.md", content: "S"),     // disk == desired → no-op
+            VaultFile(path: "mine.md", content: "M"),      // disk ≠ desired, 自分の最後の書込み → write
+            VaultFile(path: "ext.md", content: "EXTERNAL"), // disk ≠ desired, 外部編集 → skip
+            VaultFile(path: "untracked.md", content: "U"), // disk ≠ desired, 台帳に無い → skip
+        ]
+        let desired = [
+            VaultFile(path: "same.md", content: "S"),
+            VaultFile(path: "mine.md", content: "M2"),
+            VaultFile(path: "ext.md", content: "E2"),
+            VaultFile(path: "untracked.md", content: "U2"),
+            VaultFile(path: "new.md", content: "N"),       // disk 無し → write
+        ]
+        // 台帳: mine.md は現 disk と一致、ext.md は古い hash (= 現 disk と不一致)、untracked.md は無し。
+        let ledger: [String: String] = [
+            "mine.md": hashContent("M"),
+            "ext.md": hashContent("OLD"),
+        ]
+        let plan = diffFilesGuarded(existing: existing, desired: desired, ledgerHash: { ledger[$0] })
+        XCTAssertEqual(plan.write.map(\.path).sorted(), ["mine.md", "new.md"])
+        XCTAssertEqual(plan.skippedExternal.sorted(), ["ext.md", "untracked.md"])
+    }
+
+    func testGuardedDeleteOnlyOwnedUnchanged() {
+        let existing = [
+            VaultFile(path: "owned.md", content: "O"),   // 台帳==hash → 消してよい
+            VaultFile(path: "extnew.md", content: "X"),  // 台帳に無い (外部作成) → 残す
+            VaultFile(path: "extedit.md", content: "Y"), // 台帳はあるが hash 不一致 (外部編集) → 残す
+        ]
+        let desired: [VaultFile] = [] // すべて desired から消えた
+        let ledger: [String: String] = [
+            "owned.md": hashContent("O"),
+            "extedit.md": hashContent("OLD"),
+        ]
+        let plan = diffFilesGuarded(existing: existing, desired: desired, ledgerHash: { ledger[$0] })
+        XCTAssertEqual(plan.deletePaths, ["owned.md"])
+        XCTAssertTrue(plan.write.isEmpty)
     }
 }

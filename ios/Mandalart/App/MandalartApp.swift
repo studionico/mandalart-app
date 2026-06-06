@@ -11,6 +11,8 @@ struct MandalartApp: App {
     @State private var bootstrapDone = !shouldRebuildOnStartup(VaultConfigStore.load())
     /// DB 編集 → debounce → vault へ差分 flush する auto-flush ドライバ (vaultMode ON のときだけ書く)。
     @State private var autoFlush = VaultAutoFlush()
+    /// echo-skip 台帳 (Stage ④)。reconcile が seed し flush が参照する共有インスタンス (clobber 安全化)。
+    @State private var writeLedger = VaultWriteLedger()
     /// 一度でも background に入ったか (= 起動直後の .active を「復帰」と誤認しないためのガード)。
     @State private var wasBackgrounded = false
 
@@ -117,7 +119,8 @@ struct MandalartApp: App {
         defer {
             bootstrapDone = true
             // rebuild 完了後に auto-flush 購読を開始 (reconcile の save を誤って拾わない)。
-            autoFlush.start(context: sharedModelContainer.mainContext)
+            // reconcile が seed した同一台帳を渡す (clobber 安全化、Stage ④)。
+            autoFlush.start(context: sharedModelContainer.mainContext, ledger: writeLedger)
         }
         let config = VaultConfigStore.load()
         guard shouldRebuildOnStartup(config),
@@ -127,7 +130,8 @@ struct MandalartApp: App {
         do {
             _ = try VaultBookmark.withAccess(resolved.url) {
                 try VaultDbReconcile.reconcileVaultToDb(
-                    vaultRoot: resolved.url, in: sharedModelContainer.mainContext, appSupportDir: appSupport)
+                    vaultRoot: resolved.url, in: sharedModelContainer.mainContext,
+                    appSupportDir: appSupport, ledger: writeLedger)
             }
         } catch {
             print("[vault] startup rebuild failed (既存 DB で続行):", error)
@@ -147,7 +151,8 @@ struct MandalartApp: App {
         do {
             _ = try VaultBookmark.withAccess(resolved.url) {
                 try VaultDbReconcile.reconcileVaultToDb(
-                    vaultRoot: resolved.url, in: sharedModelContainer.mainContext, appSupportDir: appSupport)
+                    vaultRoot: resolved.url, in: sharedModelContainer.mainContext,
+                    appSupportDir: appSupport, ledger: writeLedger)
             }
         } catch {
             print("[vault] foreground import failed:", error)

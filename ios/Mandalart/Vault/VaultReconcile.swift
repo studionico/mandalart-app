@@ -70,9 +70,52 @@ func diffFiles(existing: [VaultFile], desired: [VaultFile]) -> FilePlan {
     return FilePlan(write: write, deletePaths: deletePaths)
 }
 
-/// 自分が書いた直後の watcher 発火を無視するための echo skip 判定 (ループ回避 3 重防御の 1 つ)。
-/// 書き出した content の hash を recentWrites に積んでおき、watcher で読んだ content の hash が
-/// 一致すれば「自分の書き込みの反響」とみなして無視する。
-func shouldSkipEcho(_ hash: String, recentWrites: Set<String>) -> Bool {
-    recentWrites.contains(hash)
+// MARK: - clobber 安全化 (echo-skip、Stage ④)
+
+/// `diffFiles` に echo-skip 台帳を加味した guard 付き版。外部編集を上書き/削除から保護する。
+/// ピュア (MainActor 非依存): 台帳 object ではなく `ledgerHash` クロージャ (path → 自分の最後の書込み hash、
+/// nil=台帳に無い) を受け取る。
+struct GuardedFilePlan: Equatable {
+    /// 書いてよいファイル (新規 or disk が自分の最後の書込みと一致 = DB が先行しただけ)。
+    var write: [VaultFile]
+    /// 消してよいファイル (自分が作って未改変 = 台帳の hash と現 disk が一致)。
+    var deletePaths: [String]
+    /// disk が自分の最後の書込みと違う (外部編集) ため上書きを見送ったファイル。次回 reconcile が取り込む。
+    var skippedExternal: [String]
+}
+
+/// path をキーに existing(現 disk) と desired(あるべき内容) を突き合わせ、台帳で外部編集を保護する。
+func diffFilesGuarded(
+    existing: [VaultFile],
+    desired: [VaultFile],
+    ledgerHash: (String) -> String?
+) -> GuardedFilePlan {
+    let existingByPath = Dictionary(existing.map { ($0.path, $0.content) }, uniquingKeysWith: { _, new in new })
+    var desiredPaths = Set<String>()
+    var write: [VaultFile] = []
+    var skipped: [String] = []
+
+    for f in desired {
+        desiredPaths.insert(f.path)
+        guard let diskContent = existingByPath[f.path] else {
+            write.append(f) // disk に無い = 新規ファイル → 書く
+            continue
+        }
+        if diskContent == f.content { continue } // disk == desired → no-op
+        // disk ≠ desired: disk が自分の最後の書込みか?
+        if let lh = ledgerHash(f.path), lh == hashContent(diskContent) {
+            write.append(f) // 自分の最後の書込み = DB が先行しただけ → 安全に上書き
+        } else {
+            skipped.append(f.path) // 外部編集あり → skip (次回 reconcile で取り込む)
+        }
+    }
+
+    var deletePaths: [String] = []
+    for f in existing where !desiredPaths.contains(f.path) {
+        // desired に無い既存ファイルは「自分が作って未改変」のときだけ削除。外部作成/外部編集は残す。
+        if let lh = ledgerHash(f.path), lh == hashContent(f.content) {
+            deletePaths.append(f.path)
+        }
+    }
+    return GuardedFilePlan(write: write, deletePaths: deletePaths, skippedExternal: skipped)
 }

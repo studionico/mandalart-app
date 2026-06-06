@@ -63,19 +63,20 @@ ios/
 │   │   ├── NeutralPalette.swift  Tailwind neutral 系列を直 RGB で持つ adaptive 背景色群 (systemBackground を意図的に回避)
 │   │   ├── PresetColors.swift    desktop と完全一致の 10 色 (light/dark 両値)
 │   │   └── ThemePreference.swift app.theme グローバル UserDefaults / 3 値 enum (light/system/dark) / colorScheme 算出
-│   ├── Vault/                vault フォルダモード (Phase 2) のピュア層を desktop から移植 (Stage 0/1)。
-│   │   │                     Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存。本番未配線 (dead code)
+│   ├── Vault/                vault フォルダモード (Phase 2) のピュア層を desktop から移植。
+│   │   │                     Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存。Stage 0/1〜④ で本番配線済み (vaultMode ON / DEBUG 限定)
 │   │   ├── VaultTypes.swift       行型 (VaultGrid/VaultCell/VaultMandalart) + Serialized 型 + VaultFile / MandalartRows
 │   │   ├── VaultFrontmatter.swift block-scalar JSON codec (buildDoc / parseDoc、YAML ライブラリ非依存)
 │   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName。本文は編集可能ビュー `<#/##> [done] text #c/color ^pN` + 画像 embed + 親子 wiki-link
 │   │   ├── VaultBody.swift        本文ラウンドトリップ parser (parseGridBody / mergeBody)。本文 → text/color/done/image/memo を frontmatter セルに上書き。parseGridDocument applyBody=true で適用 (reconcile 経路で本番反映済 Stage ③)
 │   │   ├── VaultModel.swift       DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows)
-│   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho
+│   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / diffFilesGuarded (echo-skip)
+│   │   ├── VaultWriteLedger.swift 自分の最後の書込み hash 台帳 (clobber 安全化、Stage ④)。flush が外部編集を skip する per-file hash (process メモリのみ、reconcile が seed)
 │   │   ├── VaultIO.swift          FileManager I/O ラッパ (scanVault / scanMandalartDir / ensureDir / write / remove / readBytes、URL ベース、Stage I/O)
 │   │   ├── VaultImageStore.swift  セル画像の vault attachments 化 (flushImagesToVault / restoreImagesFromVault、appSupportDir/vaultRoot を引数注入、ImageStorage 非依存)
 │   │   ├── VaultConfig.swift      vault 設定 (vaultMode / security-scoped bookmark / vaultPath) を UserDefaults 永続化 + bookmark make/resolve/withAccess + shouldRebuildOnStartup
 │   │   ├── VaultTimestamp.swift   ISO8601 Date↔String (SyncEngine と同形式、cloud/desktop と一致、Stage I/O-b)
-│   │   └── VaultSync.swift        orchestration: exportAllToVault / dryRunScan / flushDbToVault (DB→vault 差分書き出し、churn 抑止 + dir 削除)。ピュア (structs のみ)、Stage I/O-b/auto-flush
+│   │   └── VaultSync.swift        orchestration: exportAllToVault / dryRunScan / flushDbToVault (DB→vault 差分書き出し、churn 抑止 + dir 削除 + echo-skip clobber 安全化)。Stage I/O-b/auto-flush/④
 │   └── Resources/
 │       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)

@@ -116,4 +116,34 @@ final class VaultDbReconcileTests: XCTestCase {
         _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
         XCTAssertEqual(fetchCell("c-root-p0")?.text, "食事", "本文に無い position は frontmatter 値で維持される")
     }
+
+    // MARK: - clobber 安全化 keystone (Stage ③/④ 連動): reconcile が台帳 seed → 次 flush で frontmatter 整合
+
+    /// 外部本文編集を reconcile が取り込み + 台帳 seed すると、次の flush は (台帳のおかげで) その編集を
+    /// 「外部編集」と誤判定せず、frontmatter を本文に整合させる書込みを行う (skip しない)。
+    func testReconcileSeedsLedgerSoNextFlushReconcilesFrontmatter() throws {
+        let ledger = VaultWriteLedger()
+        _ = try VaultSync.exportAllToVault(rows: [sampleRows()], to: vaultRoot, appSupportDir: appSupport)
+
+        // 外部で g-par.md の本文セル見出しを編集 (frontmatter JSON は古いまま)。
+        try editGridFile("g-par.md") {
+            $0.replacingOccurrences(of: "## [ ] 睡眠 #c/blue-100 ^p3", with: "## [x] 睡眠改善 #c/red-100 ^p3")
+        }
+
+        // reconcile が本文を DB 取り込み + 現 disk hash を台帳 seed。
+        _ = try VaultDbReconcile.reconcileVaultToDb(
+            vaultRoot: vaultRoot, in: context, appSupportDir: appSupport, ledger: ledger)
+        XCTAssertEqual(fetchCell("c-par-p3")?.text, "睡眠改善")
+
+        // 同台帳で flush: frontmatter を本文に整合させる書込みが skip されず行われる。
+        let rows = VaultRowsBridge.loadAllMandalartRows(in: context)
+        let report = try VaultSync.flushDbToVault(
+            rows: rows, to: vaultRoot, appSupportDir: appSupport, ledger: ledger)
+        XCTAssertEqual(report.skippedExternal, 0, "seed 済みなので外部編集扱いされない")
+        XCTAssertGreaterThanOrEqual(report.written, 1, "frontmatter が本文に整合再構成される")
+
+        let gParContent = try String(
+            contentsOf: vaultRoot.appendingPathComponent("健康-2026-m-1/g-par.md"), encoding: .utf8)
+        XCTAssertTrue(gParContent.contains("睡眠改善"), "disk の frontmatter も更新後 text を含む")
+    }
 }

@@ -65,13 +65,22 @@ enum VaultSync {
         var deleted = 0
         var deletedDirs = 0
         var imagesCopied = 0
+        /// 外部編集を検知して上書きを見送ったファイル数 (echo-skip、Stage ④)。
+        var skippedExternal = 0
     }
 
     /// DB 行群 → vault へ **差分** flush (変化したファイルだけ書き、不要 .md を削除)。
     /// desktop [`_vaultSync.flushDbToVault`](../../../desktop/src/lib/vault/_vaultSync.ts) 移植。
     /// `updated_at` だけの差は `docContentEquivalent` で書き換えを抑止 (churn 回避)。
+    ///
+    /// `ledger` を渡すと **clobber 安全化 (echo-skip、Stage ④)** が有効: disk が自分の最後の書込みと違う
+    /// ファイル/dir は外部編集とみなして上書き/削除を見送る。nil (既定) のときは従来どおり無条件に上書き/削除
+    /// (= legacy、手動 rebuild 後や台帳不要の経路)。`@MainActor` は台帳 (MainActor 隔離) に触れるため。
+    @MainActor
     @discardableResult
-    static func flushDbToVault(rows: [MandalartRows], to vaultRoot: URL, appSupportDir: URL) throws -> FlushReport {
+    static func flushDbToVault(
+        rows: [MandalartRows], to vaultRoot: URL, appSupportDir: URL, ledger: VaultWriteLedger? = nil
+    ) throws -> FlushReport {
         try VaultIO.ensureDir(vaultRoot)
         let scanned = try VaultIO.scanVault(vaultRoot)
         var existingById: [String: (dirName: String, files: [VaultFile])] = [:]
@@ -103,9 +112,14 @@ enum VaultSync {
             if let renameFrom {
                 for file in desired.files {
                     try VaultIO.writeVaultFile(dirAbs.appendingPathComponent(file.path), content: file.content)
+                    ledger?.record(vaultLedgerKey(dirName: dirName, path: file.path), hash: hashContent(file.content))
                     report.written += 1
                 }
-                try VaultIO.removeDir(vaultRoot.appendingPathComponent(renameFrom))
+                // 旧 untitled dir は全ファイルが自分のものなら削除 (外部ファイルがあれば残し次回 reconcile に委ねる)。
+                if dirIsFullyOwned(existing?.files ?? [], dirName: renameFrom, ledger: ledger) {
+                    try VaultIO.removeDir(vaultRoot.appendingPathComponent(renameFrom))
+                    purgeDirKeys(existing?.files ?? [], dirName: renameFrom, ledger: ledger)
+                }
             } else {
                 // churn 抑止: 既存と updated_at だけの差のファイルは既存内容に差し替えて書換えを止める。
                 let exMap = Dictionary(
@@ -117,14 +131,34 @@ enum VaultSync {
                         desiredFiles[i] = VaultFile(path: desiredFiles[i].path, content: ex)
                     }
                 }
-                let plan = diffFiles(existing: existing?.files ?? [], desired: desiredFiles)
-                for file in plan.write {
-                    try VaultIO.writeVaultFile(dirAbs.appendingPathComponent(file.path), content: file.content)
-                    report.written += 1
-                }
-                for path in plan.deletePaths {
-                    try VaultIO.removeVaultFile(dirAbs.appendingPathComponent(path))
-                    report.deleted += 1
+                if let ledger {
+                    // clobber 安全化: churn 抑止後の desiredFiles に対し guard を効かせる。
+                    let plan = diffFilesGuarded(
+                        existing: existing?.files ?? [], desired: desiredFiles,
+                        ledgerHash: { ledger.storedHash(vaultLedgerKey(dirName: dirName, path: $0)) }
+                    )
+                    for file in plan.write {
+                        try VaultIO.writeVaultFile(dirAbs.appendingPathComponent(file.path), content: file.content)
+                        ledger.record(vaultLedgerKey(dirName: dirName, path: file.path), hash: hashContent(file.content))
+                        report.written += 1
+                    }
+                    for path in plan.deletePaths {
+                        try VaultIO.removeVaultFile(dirAbs.appendingPathComponent(path))
+                        ledger.remove(vaultLedgerKey(dirName: dirName, path: path))
+                        report.deleted += 1
+                    }
+                    report.skippedExternal += plan.skippedExternal.count // skip は台帳を触らない (次 reconcile が再 seed)
+                } else {
+                    // legacy: 台帳なし = 従来どおり無条件 clobber/delete。
+                    let plan = diffFiles(existing: existing?.files ?? [], desired: desiredFiles)
+                    for file in plan.write {
+                        try VaultIO.writeVaultFile(dirAbs.appendingPathComponent(file.path), content: file.content)
+                        report.written += 1
+                    }
+                    for path in plan.deletePaths {
+                        try VaultIO.removeVaultFile(dirAbs.appendingPathComponent(path))
+                        report.deleted += 1
+                    }
                 }
             }
             report.imagesCopied += VaultImageStore.flushImagesToVault(
@@ -134,11 +168,33 @@ enum VaultSync {
         // DB live に無くなったマンダラートの vault フォルダを削除 (空 DB ガード: rows 0 件なら何も消さない)。
         if !rows.isEmpty {
             for (mid, info) in existingById where !liveIds.contains(mid) {
+                // 台帳ありのとき、外部ファイルを含む dir は削除しない (= 外部作成/編集を保護、次回 reconcile で取り込む)。
+                guard dirIsFullyOwned(info.files, dirName: info.dirName, ledger: ledger) else { continue }
                 try VaultIO.removeDir(vaultRoot.appendingPathComponent(info.dirName))
+                purgeDirKeys(info.files, dirName: info.dirName, ledger: ledger)
                 report.deletedDirs += 1
             }
         }
 
         return report
+    }
+
+    /// dir 内の全ファイルが「自分が作って未改変」(台帳の hash と現 disk が一致) かを判定。
+    /// 台帳 nil (legacy) のときは常に true (= 従来どおり無条件削除)。
+    @MainActor
+    private static func dirIsFullyOwned(_ files: [VaultFile], dirName: String, ledger: VaultWriteLedger?) -> Bool {
+        guard let ledger else { return true }
+        for f in files {
+            guard let lh = ledger.storedHash(vaultLedgerKey(dirName: dirName, path: f.path)),
+                  lh == hashContent(f.content) else { return false }
+        }
+        return true
+    }
+
+    /// dir 削除に伴い台帳からそのファイル群のキーを除く (台帳 nil は no-op)。
+    @MainActor
+    private static func purgeDirKeys(_ files: [VaultFile], dirName: String, ledger: VaultWriteLedger?) {
+        guard let ledger else { return }
+        for f in files { ledger.remove(vaultLedgerKey(dirName: dirName, path: f.path)) }
     }
 }
