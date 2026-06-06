@@ -55,7 +55,11 @@ func buildGridDocument(_ grid: VaultGrid, _ cells: [VaultCell], links: GridBodyL
 
 /// `<gridId>.md` を VaultGrid + VaultCell[] に復元する。format 不一致 / grid 欠損は nil (skip+warn)。
 /// mandalart_id は file からは判らないので caller (vaultModel) が渡す。grid_id は file の grid.id。
-func parseGridDocument(_ content: String, mandalartId: String) -> (grid: VaultGrid, cells: [VaultCell])? {
+///
+/// `applyBody == true` のとき、frontmatter から組んだセルに **本文 (人間可読ビュー) の編集**
+/// (text/color/done/image) と grid.memo を `VaultBody` で上書きする (本文ラウンドトリップ)。
+/// 本番経路 (`vaultFilesToRows`) は applyBody=false のまま (= frontmatter のみ信頼)。Stage ③ で本番を true 化予定。
+func parseGridDocument(_ content: String, mandalartId: String, applyBody: Bool = false) -> (grid: VaultGrid, cells: [VaultCell])? {
     let parsed = parseDoc(content)
     guard parsed.format == vaultFormat else { return nil }
     guard let gridJSON = parsed.fields["grid"],
@@ -73,13 +77,22 @@ func parseGridDocument(_ content: String, mandalartId: String) -> (grid: VaultGr
         createdAt: sg.createdAt,
         updatedAt: sg.updatedAt
     )
-    let cells: [VaultCell] = sc.map {
+    var cells: [VaultCell] = sc.map {
         VaultCell(
             id: $0.id, gridId: sg.id, position: $0.position, text: $0.text, imagePath: $0.imagePath,
             color: $0.color, done: $0.done, createdAt: $0.createdAt, updatedAt: $0.updatedAt
         )
     }
-    return (grid, cells)
+
+    var resultGrid = grid
+    if applyBody {
+        let bodyParse = parseGridBody(parsed.body)
+        cells = mergeBody(frontCells: cells, parse: bodyParse, gridId: grid.id, timestamp: grid.updatedAt)
+        if case .set(let memo) = bodyParse.memo {
+            resultGrid.memo = memo
+        }
+    }
+    return (resultGrid, cells)
 }
 
 // MARK: - mandalart ドキュメント
@@ -190,34 +203,48 @@ func attachmentName(_ imagePath: String) -> String {
     )
 }
 
-/// セル見出し。子グリッドがあれば見出しを子へのリンクにする (親→子)。
-private func renderCellHeading(_ prefix: String, _ cell: VaultCell, fallback: String, childByCell: [String: String]?) -> String {
-    let trimmed = cell.text.trimmingCharacters(in: .whitespacesAndNewlines)
-    let label = trimmed.isEmpty ? fallback : trimmed
-    if let childId = childByCell?[cell.id] {
-        return "\(prefix) \(wikiLink(childId, label))"
+/// 色 → 本文タグ `#c/<color>`。preset key はそのまま、hex (先頭 `#`) は `hex-<digits>` に畳む。
+/// 色なし (nil/空) は nil。VaultBody の parse と対の reversible 表現。
+func colorTag(_ color: String?) -> String? {
+    guard let color, !color.isEmpty else { return nil }
+    if color.hasPrefix("#") {
+        return "#c/hex-\(color.dropFirst())"
     }
-    return "\(prefix) \(label)"
+    return "#c/\(color)"
 }
 
-/// セルの見出し + (画像があれば) Obsidian embed 行。画像は vault の `attachments/<basename>` に
-/// コピーされており、`![[<basename>]]` で Obsidian が表示する (basename は vault 内一意)。
+/// セル見出し (本文ラウンドトリップ正準形): `<prefix> [done] <text or [[childId|text]]> #c/<color> ^p<N>`。
+/// done は `[x]`/`[ ]`、color は `#c/...`、position は Obsidian block-ref `^pN`。VaultBody が逆に parse する。
+private func renderCellHeading(_ prefix: String, _ cell: VaultCell, childByCell: [String: String]?) -> String {
+    let done = cell.done ? "[x]" : "[ ]"
+    let label = cell.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    var parts: [String] = [prefix, done]
+    if let childId = childByCell?[cell.id] {
+        parts.append(wikiLink(childId, label))
+    } else if !label.isEmpty {
+        parts.append(label)
+    }
+    if let tag = colorTag(cell.color) { parts.append(tag) }
+    parts.append("^p\(cell.position)")
+    return parts.joined(separator: " ")
+}
+
+/// セルの見出し + (画像があれば) Obsidian embed 行。非空セル (text / 子リンク / 画像のいずれか)
+/// は必ず `^pN` 付き見出しを出す (= 本文から全フィールドを編集可能にするため)。
 private func renderCellLines(
     _ prefix: String,
     _ cell: VaultCell,
-    fallback: String,
     childByCell: [String: String]?,
     forceHeading: Bool = false
 ) -> [String] {
     let hasChild = childByCell?[cell.id] != nil
-    var lines: [String] = []
     let hasText = !cell.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    // テキストか子リンクがあれば見出しを出す。画像だけのセルは見出しを省き embed のみ
-    // (中心セルは forceHeading でグリッドタイトルとして必ず見出しを出す)。
-    if forceHeading || hasText || hasChild {
-        lines.append(renderCellHeading(prefix, cell, fallback: fallback, childByCell: childByCell))
+    let hasImage = !(cell.imagePath ?? "").isEmpty
+    var lines: [String] = []
+    if forceHeading || hasText || hasChild || hasImage {
+        lines.append(renderCellHeading(prefix, cell, childByCell: childByCell))
     }
-    if let imagePath = cell.imagePath, !imagePath.isEmpty {
+    if hasImage, let imagePath = cell.imagePath {
         lines.append("![[\(attachmentName(imagePath))]]")
     }
     return lines
@@ -233,7 +260,7 @@ private func renderGridBody(_ cellsSortedByPosition: [VaultCell], memo: String?,
     }
     let center = cellsSortedByPosition.first { $0.position == GridConstants.centerPosition }
     if let center {
-        lines.append(contentsOf: renderCellLines("#", center, fallback: "(中心)", childByCell: links?.childByCell, forceHeading: true))
+        lines.append(contentsOf: renderCellLines("#", center, childByCell: links?.childByCell, forceHeading: true))
     } else {
         lines.append("# (中心)")
     }
@@ -250,7 +277,7 @@ private func renderGridBody(_ cellsSortedByPosition: [VaultCell], memo: String?,
         // テキスト・画像・子グリッドのいずれも無い空セルだけスキップ (画像だけのセルは残す)。
         if !hasText && !hasImage && !hasChild { continue }
         lines.append("")
-        lines.append(contentsOf: renderCellLines("##", cell, fallback: "(無題)", childByCell: links?.childByCell))
+        lines.append(contentsOf: renderCellLines("##", cell, childByCell: links?.childByCell))
     }
     return lines.joined(separator: "\n")
 }

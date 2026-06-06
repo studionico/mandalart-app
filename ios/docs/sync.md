@@ -20,6 +20,33 @@ iOS                                     Supabase
 - supabase 共有 instance: [`../Mandalart/Services/SupabaseService.swift`](../Mandalart/Services/SupabaseService.swift) (umbrella `SupabaseClient`)
 - 同期トリガ UI: [`../Mandalart/Views/SettingsView.swift`](../Mandalart/Views/SettingsView.swift) の「今すぐ同期」ボタン (Phase 0-3 時点は手動のみ、自動同期は Phase 3 残作業)
 
+## vaultMode 中はクラウド同期を完全停止 (Stage 反転)
+
+vault フォルダモード ([`docs/tasks.md`](tasks.md) Phase 12) を ON にすると **クラウド同期を完全に止める**:
+[`MandalartApp.fullSync`](../Mandalart/App/MandalartApp.swift) は冒頭で `if VaultConfigStore.load().vaultMode { return }`、
+SettingsView の「今すぐ同期」は `@AppStorage("vault.mode")` で disabled + 注記。理由は vaultMode 中は**起動時に
+vault→DB 再構築** (`reconcileVaultToDb`) が走るので、pull が再構築直後の DB を cloud 内容で上書きする衝突を防ぐため
+(vault が正・ファイル同期に委譲。desktop P4 / 落とし穴 #24 と同根)。
+
+> **緊急停止からの復帰時の必須条件**: 下記 realtime / scenePhase / auto-push 経路を再有効化する際は、**必ず
+> `!vaultMode` を条件に含める** (vaultMode 中は購読・pull・push しない)。`vault.mode` は `VaultConfigStore.load().vaultMode`
+> / `@AppStorage(VaultConfigStore.Keys.mode)` で読む。
+
+### vault のファイル往復 (scenePhase ペア)
+
+iOS はフォルダ watcher が無いため、vaultMode 中は scenePhase で **書き出し / 取り込み**を往復させる
+([`MandalartApp`](../Mandalart/App/MandalartApp.swift) `onChange(of: scenePhase)`):
+
+- **`.background`（離れる確定点）= 書き出し**: `VaultAutoFlush.flushNow()`（DB→vault 差分 flush）でアプリ内編集を確定し `wasBackgrounded=true`。
+- **`.active`（復帰、`wasBackgrounded` 限定）= 取り込み**: `importVaultOnForeground()`（`reconcileVaultToDb` = vault→DB）で
+  **背面中に外部編集された .md を DB に反映**。これが無いと外部編集が次の flush で上書きされる（= 症状2 の原因だった）。
+- **`.inactive` は何もしない**: 復帰シーケンスは `.background → .inactive → .active` の順で `.inactive` も発火するため、ここで
+  flush すると**復帰の途中で外部編集を潰し**、続く `.active` の取り込みが潰れた vault を読む（= 症状2 の再発バグだった。離脱の確定点は `.background` のみ）。
+
+加えて編集中は `ModelContext.didSave` 駆動の debounce(3s) flush が走る（[`VaultAutoFlush`](../Mandalart/Services/VaultAutoFlush.swift)）。
+flush は**ファイルだけ書き DB を書かない**のでフィードバックループは無い。**起動中（フォアグラウンドのまま）の外部編集の
+ライブ取り込みは未対応**（watcher 未実装。編集は一度背面に回す or 再起動で取り込まれる）。
+
 ## pullAll (cloud → local)
 
 ### 流れ

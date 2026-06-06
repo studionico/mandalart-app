@@ -74,9 +74,11 @@ final class VaultModelTests: XCTestCase {
 
     func testParentToChildLink() {
         let root = fileContent(sampleRows(), "g-root.md")
-        // c-root-p2「運動」は g-drill を drill しているのでリンク、c-root-p0「食事」は子なしで素のテキスト
-        XCTAssertTrue(root.contains("## [[g-drill|運動]]"))
-        XCTAssertTrue(root.contains("## 食事"))
+        // c-root-p2「運動」は g-drill を drill しているのでリンク (^p2)、c-root-p0「食事」は子なしで素のテキスト (^p0)。
+        // 本文ラウンドトリップ正準形: `## [done] <text> ^pN`。
+        XCTAssertTrue(root.contains("[[g-drill|運動]]"))
+        XCTAssertTrue(root.contains("^p2"))
+        XCTAssertTrue(root.contains("## [ ] 食事 ^p0"))
         XCTAssertNil(root.range(of: "\\[\\[[^\\]]*食事", options: .regularExpression))
     }
 
@@ -111,12 +113,14 @@ final class VaultModelTests: XCTestCase {
         XCTAssertFalse(root.contains("![[c-root-p0"))
     }
 
-    func testImageOnlyCellEmitsEmbedWithoutHeading() {
+    func testImageOnlyCellEmitsPositionHeadingAndEmbed() {
         var rows = sampleRows()
         rows.cells.append(makeCell("c-root-p5", "g-root", 5, text: "", imagePath: "images/only-img.jpg"))
         let root = fileContent(rows, "g-root.md")
         XCTAssertTrue(root.contains("![[only-img.jpg]]"))
-        XCTAssertFalse(root.contains("## (無題)")) // テキスト無し画像のみは見出しを出さない
+        // 本文ラウンドトリップ用に、画像のみのセルも `^pN` 付き見出し (text 空) を出す。
+        XCTAssertTrue(root.contains("## [ ] ^p5"))
+        XCTAssertFalse(root.contains("## (無題)"))
     }
 
     func testColonImagePathEmbedIsSanitized() {

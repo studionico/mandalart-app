@@ -9,6 +9,9 @@ struct SettingsView: View {
     @State private var showSignIn = false
     @State private var syncStatus: String?
     @State private var syncing = false
+    /// vault モード中はクラウド同期を停止する (本番 gate)。DEBUG トグルが書く `vault.mode` を共有読み。
+    /// release では DEBUG トグルが無いので常に false = 同期は通常どおり。
+    @AppStorage(VaultConfigStore.Keys.mode) private var vaultModeFlag = false
     #if DEBUG
     // vault フォルダモードの開発ハーネス (Stage I/O-b)。本番トグル無し・DB 書込み無し。
     @State private var vaultConfig = VaultConfig.empty
@@ -65,8 +68,12 @@ struct SettingsView: View {
                                 if syncing { ProgressView() }
                             }
                         }
-                        .disabled(syncing)
-                        if let status = syncStatus {
+                        .disabled(syncing || vaultModeFlag)
+                        if vaultModeFlag {
+                            Text("vault モード中はクラウド同期を停止しています。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if let status = syncStatus {
                             Text(status)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -97,6 +104,11 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    Toggle("vault モード（同期を止めて vault を正に）", isOn: Binding(
+                        get: { vaultConfig.vaultMode },
+                        set: { setVaultMode($0) }
+                    ))
+                    .disabled(!vaultConfigured)
                     Button("vault に書き出す") { exportToVault() }
                         .disabled(!vaultConfigured)
                     Button("dry-run scan") { dryRunVault() }
@@ -203,6 +215,35 @@ struct SettingsView: View {
         } catch {
             vaultStatus = "scan 失敗: \(error.localizedDescription)"
         }
+    }
+
+    /// vault モードの ON/OFF。ON 時は baseline export (現在の DB を vault に書き出し files=DB に揃える)
+    /// を行ってから config を保存する。これで初回起動 rebuild が no-op になり「空/古い vault で DB が
+    /// 消える」事故を防ぐ。bookmark 未設定なら何もしない。
+    private func setVaultMode(_ enabled: Bool) {
+        var config = VaultConfigStore.load()
+        if enabled {
+            guard let bookmark = config.vaultBookmark, let resolved = VaultBookmark.resolve(bookmark) else {
+                vaultStatus = "フォルダ未設定のため ON にできません"
+                return
+            }
+            let rows = VaultRowsBridge.loadAllMandalartRows(in: modelContext)
+            let appSupport = VaultImageStore.appSupportDirectory() ?? FileManager.default.temporaryDirectory
+            do {
+                let report = try VaultBookmark.withAccess(resolved.url) {
+                    try VaultSync.exportAllToVault(rows: rows, to: resolved.url, appSupportDir: appSupport)
+                }
+                vaultStatus = "vault モード ON（ベースライン書き出し: \(report.files) ファイル）"
+            } catch {
+                vaultStatus = "ON 失敗（ベースライン書き出しエラー）: \(error.localizedDescription)"
+                return // ON にしない
+            }
+        } else {
+            vaultStatus = "vault モード OFF（クラウド同期を再開）"
+        }
+        config.vaultMode = enabled
+        VaultConfigStore.save(config)
+        vaultConfig = config
     }
 
     /// vault フォルダの内容で実 SwiftData DB を再構築する (確認ダイアログ経由のみ)。

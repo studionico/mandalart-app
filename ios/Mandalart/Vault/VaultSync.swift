@@ -56,4 +56,89 @@ enum VaultSync {
         }
         return DryRunReport(mandalarts: mandalarts, grids: grids, cells: cells)
     }
+
+    // MARK: - flush (DB→vault 差分書き出し、auto-flush の核)
+
+    struct FlushReport: Equatable {
+        var mandalarts = 0
+        var written = 0
+        var deleted = 0
+        var deletedDirs = 0
+        var imagesCopied = 0
+    }
+
+    /// DB 行群 → vault へ **差分** flush (変化したファイルだけ書き、不要 .md を削除)。
+    /// desktop [`_vaultSync.flushDbToVault`](../../../desktop/src/lib/vault/_vaultSync.ts) 移植。
+    /// `updated_at` だけの差は `docContentEquivalent` で書き換えを抑止 (churn 回避)。
+    @discardableResult
+    static func flushDbToVault(rows: [MandalartRows], to vaultRoot: URL, appSupportDir: URL) throws -> FlushReport {
+        try VaultIO.ensureDir(vaultRoot)
+        let scanned = try VaultIO.scanVault(vaultRoot)
+        var existingById: [String: (dirName: String, files: [VaultFile])] = [:]
+        for entry in scanned {
+            if let restored = vaultFilesToRows(entry.files) {
+                existingById[restored.mandalart.id] = (entry.dirName, entry.files)
+            }
+        }
+
+        var report = FlushReport()
+        report.mandalarts = rows.count
+        let liveIds = Set(rows.map { $0.mandalart.id })
+
+        for row in rows {
+            let desired = mandalartToVaultFiles(row)
+            let existing = existingById[row.mandalart.id]
+
+            // stale な untitled-* フォルダ (作成直後に title 空) は実タイトル folder へリネーム。
+            let renameFrom: String? = {
+                if let ex = existing, ex.dirName != desired.dirName, ex.dirName.hasPrefix("untitled-") {
+                    return ex.dirName
+                }
+                return nil
+            }()
+            let dirName = renameFrom != nil ? desired.dirName : (existing?.dirName ?? desired.dirName)
+            let dirAbs = vaultRoot.appendingPathComponent(dirName, isDirectory: true)
+            try VaultIO.ensureDir(dirAbs)
+
+            if let renameFrom {
+                for file in desired.files {
+                    try VaultIO.writeVaultFile(dirAbs.appendingPathComponent(file.path), content: file.content)
+                    report.written += 1
+                }
+                try VaultIO.removeDir(vaultRoot.appendingPathComponent(renameFrom))
+            } else {
+                // churn 抑止: 既存と updated_at だけの差のファイルは既存内容に差し替えて書換えを止める。
+                let exMap = Dictionary(
+                    (existing?.files ?? []).map { ($0.path, $0.content) }, uniquingKeysWith: { _, new in new })
+                var desiredFiles = desired.files
+                for i in desiredFiles.indices {
+                    if let ex = exMap[desiredFiles[i].path], ex != desiredFiles[i].content,
+                       docContentEquivalent(ex, desiredFiles[i].content) {
+                        desiredFiles[i] = VaultFile(path: desiredFiles[i].path, content: ex)
+                    }
+                }
+                let plan = diffFiles(existing: existing?.files ?? [], desired: desiredFiles)
+                for file in plan.write {
+                    try VaultIO.writeVaultFile(dirAbs.appendingPathComponent(file.path), content: file.content)
+                    report.written += 1
+                }
+                for path in plan.deletePaths {
+                    try VaultIO.removeVaultFile(dirAbs.appendingPathComponent(path))
+                    report.deleted += 1
+                }
+            }
+            report.imagesCopied += VaultImageStore.flushImagesToVault(
+                vaultRoot: vaultRoot, appSupportDir: appSupportDir, cells: row.cells)
+        }
+
+        // DB live に無くなったマンダラートの vault フォルダを削除 (空 DB ガード: rows 0 件なら何も消さない)。
+        if !rows.isEmpty {
+            for (mid, info) in existingById where !liveIds.contains(mid) {
+                try VaultIO.removeDir(vaultRoot.appendingPathComponent(info.dirName))
+                report.deletedDirs += 1
+            }
+        }
+
+        return report
+    }
 }

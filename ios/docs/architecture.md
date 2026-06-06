@@ -11,7 +11,7 @@ ios/
 ├── Mandalart.xcodeproj/     ← xcodegen で生成 (gitignore)
 ├── Mandalart/
 │   ├── App/
-│   │   ├── MandalartApp.swift    @main / ModelContainer 設定
+│   │   ├── MandalartApp.swift    @main / ModelContainer 設定 / vaultMode 起動時 rebuild (shouldRebuildOnStartup→reconcileVaultToDb、初期化中…ゲート) / fullSync を vaultMode で gate (Stage 反転) / VaultAutoFlush 起動 + scenePhase 背面 flush (Stage auto-flush)
 │   │   └── ContentView.swift     ルーティング (Dashboard ↔ Editor)
 │   ├── Models/             SwiftData @Model (5 ファイル)
 │   │   ├── Mandalart.swift
@@ -24,7 +24,7 @@ ios/
 │   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state + 不変条件 enforcement + 空マンダラート自動 hard delete)
 │   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除 / すべて削除、desktop の TrashDialog 等価)
 │   │   ├── DashboardTransferSupport.swift Dashboard の Export/Import modifier 切り出し (SourceKit timeout 回避、pitfalls.md #12)
-│   │   ├── SettingsView.swift    アカウント / 同期ボタン (+ #if DEBUG「Vault（実験的）」: フォルダ選択 + bookmark + export/dry-run + 確認付き「vault から再構築」(reconcile=実 DB 書込み)。Stage I/O-b/DB。本番トグル無し)
+│   │   ├── SettingsView.swift    アカウント / 同期ボタン (vaultMode 中は disabled + 注記、@AppStorage("vault.mode")) + #if DEBUG「Vault（実験的）」: フォルダ選択 + bookmark + vaultMode トグル(ON=baseline export) + export/dry-run + 確認付き「vault から再構築」。Stage I/O-b/DB/反転
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
 │   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / シュレッダー context menu、編集中以外は overlay で hit テスト)
@@ -55,6 +55,7 @@ ios/
 │   │   ├── VaultRowsBridge.swift  @Model → vault のピュア行型 [MandalartRows] への read-only 変換 (dbRows.ts 相当、SwiftData 依存で app 限定、Stage I/O-b)
 │   │   ├── VaultDbApply.swift     vault→DB 実書込み (applyVaultRowsToDb: id で upsert + 削除ガード + folder ensure、applyToDb.ts 相当、Stage DB)
 │   │   ├── VaultDbReconcile.swift vault フォルダ→DB 再構築 (scanVault → vaultFilesToRows → apply + 破損検知 skipGridDeletion + 画像復元、Stage DB)
+│   │   ├── VaultAutoFlush.swift   DB 編集 → debounce(3s) → vault 差分 flush (ModelContext.didSave 購読 + flushScheduler 相当 + 背面即時 flush、vaultMode ON のみ、Stage auto-flush)
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template
 │   ├── Utils/
@@ -66,14 +67,15 @@ ios/
 │   │   │                     Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存。本番未配線 (dead code)
 │   │   ├── VaultTypes.swift       行型 (VaultGrid/VaultCell/VaultMandalart) + Serialized 型 + VaultFile / MandalartRows
 │   │   ├── VaultFrontmatter.swift block-scalar JSON codec (buildDoc / parseDoc、YAML ライブラリ非依存)
-│   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName + 本文 wiki-link/embed
+│   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName。本文は編集可能ビュー `<#/##> [done] text #c/color ^pN` + 画像 embed + 親子 wiki-link
+│   │   ├── VaultBody.swift        本文ラウンドトリップ parser (parseGridBody / mergeBody)。本文 → text/color/done/image/memo を frontmatter セルに上書き。parseGridDocument applyBody=true で適用 (本番反映は Stage ③)
 │   │   ├── VaultModel.swift       DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows)
 │   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho
 │   │   ├── VaultIO.swift          FileManager I/O ラッパ (scanVault / scanMandalartDir / ensureDir / write / remove / readBytes、URL ベース、Stage I/O)
 │   │   ├── VaultImageStore.swift  セル画像の vault attachments 化 (flushImagesToVault / restoreImagesFromVault、appSupportDir/vaultRoot を引数注入、ImageStorage 非依存)
 │   │   ├── VaultConfig.swift      vault 設定 (vaultMode / security-scoped bookmark / vaultPath) を UserDefaults 永続化 + bookmark make/resolve/withAccess + shouldRebuildOnStartup
 │   │   ├── VaultTimestamp.swift   ISO8601 Date↔String (SyncEngine と同形式、cloud/desktop と一致、Stage I/O-b)
-│   │   └── VaultSync.swift        非破壊 orchestration: exportAllToVault (DB rows→vault ファイル書き出し) / dryRunScan (vault→rows 件数集計)。ピュア (structs のみ)、Stage I/O-b
+│   │   └── VaultSync.swift        orchestration: exportAllToVault / dryRunScan / flushDbToVault (DB→vault 差分書き出し、churn 抑止 + dir 削除)。ピュア (structs のみ)、Stage I/O-b/auto-flush
 │   └── Resources/
 │       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)
