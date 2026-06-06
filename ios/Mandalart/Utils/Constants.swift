@@ -44,6 +44,12 @@ enum LayoutConstants {
     static let dashboardStockAsideWidth: CGFloat = 280
     /// 現在地マップアイコン (パンくず置換) の 1 マスの一辺 (pt)。3×3 で全体 ~24pt 角。
     static let locationMapCellSize: CGFloat = 7
+
+    // MARK: - PNG/PDF Export (現在表示中の 3×3 グリッドを画面と同じ比率で off-screen レンダリング)
+    /// export 画像の grid 周囲の余白 (pt、画面の grid サイズに対して適用)。
+    static let exportImagePadding: CGFloat = 24
+    /// export レンダリング倍率 (解像度のみ。比率は画面の grid サイズに一致させるので scale は鮮明さ用)。
+    static let exportImageScale: CGFloat = 3
 }
 
 enum TimingConstants {

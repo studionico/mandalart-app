@@ -32,6 +32,9 @@ struct EditorView: View {
     @State private var lastTransitionKind: DrillTransitionKind = .initial
     /// 3×3 編集モード / 9×9 俯瞰モード。toggle ボタンで切替。9×9 中は edit / drill 全 NOOP。
     @State private var viewMode: EditorViewMode = .grid3x3
+    /// 画面に表示中の 3×3 グリッドの一辺 (pt)。PNG/PDF export を「画面で見ているまま」のサイズ・比率で
+    /// レンダリングするために body の GeometryReader から取り込む (テーマはダークでも常にライト固定で保存)。
+    @State private var renderGridSize: CGFloat = 0
     /// 右ペインのタブ (= メモ / ストック)。
     @State private var rightPaneTab: RightPaneTab = .memo
     /// ストックペースト先選択モード中の対象 stock item id。nil = 通常モード。
@@ -204,6 +207,25 @@ struct EditorView: View {
                                 .accessibilityLabel(viewMode == .grid3x3 ? "9×9 ビューに切替" : "3×3 ビューに戻る")
                             }
 
+                            // 9×9 表示中の全体ボード エクスポート (iPad regular のみ。3×3 はセル長押しメニューが担う)。
+                            // 9×9 は readOnly でセルメニューが無いため専用ボタンを toggle の左隣に置く。
+                            if nineByNineSupported, viewMode == .grid9x9 {
+                                Menu {
+                                    Button(ExportFormat.png.label) { startNineByNineExport(format: .png) }
+                                    Button(ExportFormat.pdf.label) { startNineByNineExport(format: .pdf) }
+                                } label: {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 36, height: 36)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                }
+                                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                .padding(.trailing, 80)
+                                .padding(.top, 20)
+                                .accessibilityLabel("9×9 をエクスポート")
+                            }
+
                         }
                         .onChange(of: horizontalSizeClass) { _, newClass in
                             // iPad で Split View を縮小して compact に変わった場合、
@@ -231,12 +253,15 @@ struct EditorView: View {
             ),
             presenting: cellExportTarget
         ) { c in
+            // JSON/MD/Indent はセル配下 (cell subtree)、PNG/PDF は画面で見ている現在のグリッド画像。
+            Button(ExportFormat.png.label) { startCellExport(cell: c, format: .png) }
+            Button(ExportFormat.pdf.label) { startCellExport(cell: c, format: .pdf) }
             Button(ExportFormat.json.label) { startCellExport(cell: c, format: .json) }
             Button(ExportFormat.markdown.label) { startCellExport(cell: c, format: .markdown) }
             Button(ExportFormat.indentText.label) { startCellExport(cell: c, format: .indentText) }
             Button("キャンセル", role: .cancel) { cellExportTarget = nil }
         } message: { c in
-            Text("「\(c.text.isEmpty ? "(空)" : c.text)」配下をエクスポート")
+            Text("「\(c.text.isEmpty ? "(空)" : c.text)」をエクスポート")
         }
         .fileExporter(
             isPresented: $showFileExporter,
@@ -417,6 +442,10 @@ struct EditorView: View {
                             convergeNamespace: namespace
                         )
                         .frame(width: gridSize, height: gridSize)
+                        // export を「画面で見ているまま」のサイズでレンダリングするため現在の grid サイズを保持。
+                        // .task(id:) は appear 時 + gridSize 変化/識別子再生成のたびに現在値で再実行され、
+                        // onAppear が geometry 未確定 (0) を拾って固定化する不具合を回避する。
+                        .task(id: gridSize) { renderGridSize = gridSize }
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                         // 右スロット: 兄弟セルナビ (二重シェブロン) を並列ナビ/+ (rightSlotButton) の上に縦積み。
                         VStack(spacing: leftInnerSpacing) {
@@ -438,6 +467,7 @@ struct EditorView: View {
                             mandalart: mandalart
                         )
                         .frame(width: gridSize, height: gridSize)
+                        .task(id: gridSize) { renderGridSize = gridSize }
                         .transition(.scale(scale: 1.5).combined(with: .opacity))
                         Color.clear.frame(width: 36, height: 36)
                     }
@@ -1275,15 +1305,53 @@ struct EditorView: View {
 
     // MARK: - Cell-level Export / Import
 
-    /// 選択された format で cell 単位の payload を構築し `.fileExporter` を起動する。
-    /// confirmationDialog の各 format ボタンから呼ばれる。
-    private func startCellExport(cell: Cell, format: ExportFormat) {
+    /// 9×9 表示の全体ボードを画像 (PNG/PDF) で書き出す。iPad の 9×9 エクスポートボタンから呼ばれる。
+    /// 画面と同じ size・ライト固定でレンダリング (= 見ているまま)。
+    private func startNineByNineExport(format: ExportFormat) {
+        guard let mandalart else { return }
         do {
-            let payload = try TransferService.buildCellExportPayload(
-                cell: cell,
+            let payload = try TransferService.buildNineByNineImagePayload(
+                mandalart: mandalart,
                 format: format,
+                size: renderGridSize > 0 ? renderGridSize : 360, // 実 gridSize をそのまま (下限クランプしない)
                 in: modelContext
             )
+            exportDocument = payload.document
+            exportFilename = payload.filename
+            exportContentType = payload.contentType
+            showFileExporter = true
+        } catch {
+            transferAlert = TransferAlertState(
+                title: "エクスポート失敗",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// 選択された format で payload を構築し `.fileExporter` を起動する。セル長押しメニューから呼ばれる。
+    /// - JSON/MD/Indent: セル配下 (cell subtree) をシリアライズ。
+    /// - PNG/PDF: **画面で見ている現在の 3×3 グリッド画像**を、表示中サイズ・テーマのままレンダリング
+    ///   (= ユーザーが見ているまま。セルは起点で画像は現在のビュー)。
+    private func startCellExport(cell: Cell, format: ExportFormat) {
+        do {
+            let payload: (document: MandalartExportDocument, filename: String, contentType: UTType)
+            switch format {
+            case .png, .pdf:
+                guard let mandalart, let grid = currentGrid else { cellExportTarget = nil; return }
+                payload = try TransferService.buildGridImagePayload(
+                    grid: grid,
+                    mandalart: mandalart,
+                    format: format,
+                    size: renderGridSize > 0 ? renderGridSize : 360, // 実 gridSize をそのまま (下限クランプしない)
+                    in: modelContext
+                )
+            case .json, .markdown, .indentText:
+                payload = try TransferService.buildCellExportPayload(
+                    cell: cell,
+                    format: format,
+                    in: modelContext
+                )
+            }
             exportDocument = payload.document
             exportFilename = payload.filename
             exportContentType = payload.contentType

@@ -8,46 +8,8 @@ struct TransferAlertState: Identifiable {
     let message: String
 }
 
-/// Export 関連の modifier (confirmationDialog + fileExporter)。
-///
-/// **本ファイルに切り出す理由**: `DashboardView.swift` 内に置くと SwiftUI modifier chain の
-/// 累積複雑度が SourceKit (= Live Issues 用 type-checker) の閾値を超え、
-/// `Cannot find type X` の連鎖エラーが Live Issues に表示される。Build (swiftc) は通るが
-/// IDE 体験を損なうので、modifier 定義を別ファイル + ViewModifier 化して 2 modifier ずつに分割。
-struct DashboardExportModifier: ViewModifier {
-    let exportTarget: Mandalart?
-    @Binding var showExportFormatDialog: Bool
-    let exportDocument: MandalartExportDocument?
-    let exportContentType: UTType
-    let exportFilename: String
-    @Binding var showFileExporter: Bool
-    let onPickFormat: (Mandalart, ExportFormat) -> Void
-    let onCancelFormat: () -> Void
-    let onExportResult: (Result<URL, Error>) -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .confirmationDialog(
-                "エクスポート形式",
-                isPresented: $showExportFormatDialog,
-                presenting: exportTarget
-            ) { m in
-                Button(ExportFormat.json.label) { onPickFormat(m, .json) }
-                Button(ExportFormat.markdown.label) { onPickFormat(m, .markdown) }
-                Button(ExportFormat.indentText.label) { onPickFormat(m, .indentText) }
-                Button("キャンセル", role: .cancel) { onCancelFormat() }
-            } message: { m in
-                Text("「\(m.title.isEmpty ? "(無題)" : m.title)」をエクスポート")
-            }
-            .fileExporter(
-                isPresented: $showFileExporter,
-                document: exportDocument,
-                contentType: exportContentType,
-                defaultFilename: exportFilename,
-                onCompletion: onExportResult
-            )
-    }
-}
+// Export はダッシュボードには無い (desktop と同様、export はエディターのビュー単位のみ)。
+// 旧 DashboardExportModifier は撤去。export 経路は EditorView の「ビュー単位エクスポート」へ集約。
 
 /// Import + 結果通知 alert の modifier (fileImporter + alert)。
 struct DashboardImportAlertModifier: ViewModifier {

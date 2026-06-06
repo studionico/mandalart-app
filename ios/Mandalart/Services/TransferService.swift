@@ -5,11 +5,13 @@ import UniformTypeIdentifiers
 
 // MARK: - Export format / file document
 
-/// Export 対応フォーマット (PNG / PDF は別 phase)。
+/// Export 対応フォーマット。テキスト 3 形式 + 視覚スナップショット 2 形式 (PNG/PDF、マンダラート単位のみ)。
 enum ExportFormat: String, CaseIterable, Identifiable {
     case json
     case markdown
     case indentText
+    case png
+    case pdf
 
     var id: Self { self }
 
@@ -18,6 +20,8 @@ enum ExportFormat: String, CaseIterable, Identifiable {
         case .json: return "JSON"
         case .markdown: return "Markdown"
         case .indentText: return "インデントテキスト"
+        case .png: return "PNG画像"
+        case .pdf: return "PDF"
         }
     }
 
@@ -26,6 +30,8 @@ enum ExportFormat: String, CaseIterable, Identifiable {
         case .json: return "json"
         case .markdown: return "md"
         case .indentText: return "txt"
+        case .png: return "png"
+        case .pdf: return "pdf"
         }
     }
 
@@ -34,15 +40,23 @@ enum ExportFormat: String, CaseIterable, Identifiable {
         case .json: return .json
         case .markdown: return UTType(filenameExtension: "md") ?? .plainText
         case .indentText: return .plainText
+        case .png: return .png
+        case .pdf: return .pdf
         }
     }
 }
 
-/// Files.app への書き出しに使う `FileDocument`。テキスト系 3 フォーマットを汎用的に扱う。
+/// Files.app への書き出しに使う `FileDocument`。テキスト 3 形式 + 画像 2 形式 (PNG/PDF) を汎用的に扱う。
 /// `.fileExporter(document:)` に渡す。
 struct MandalartExportDocument: FileDocument {
+    /// 読取 (import) はテキスト系のみ。
     static var readableContentTypes: [UTType] {
         [.json, .plainText, UTType(filenameExtension: "md") ?? .plainText]
+    }
+    /// 書込 (export) は PNG/PDF も含む。**これを定義しないと `.fileExporter` の contentType が
+    /// writable に無い PNG/PDF を先頭の .json にフォールバックし、拡張子が .json になる不具合になる。**
+    static var writableContentTypes: [UTType] {
+        [.json, .plainText, UTType(filenameExtension: "md") ?? .plainText, .png, .pdf]
     }
 
     var data: Data
@@ -80,27 +94,54 @@ private func exportTimestamp() -> String {
 }
 
 extension TransferService {
-    /// マンダラート 1 件の Export ペイロード (= FileDocument + 推奨ファイル名 + UTType) を構築。
-    /// 呼び出し側は `.fileExporter(...)` の引数にそのまま渡せる。
-    static func buildExportPayload(
-        for mandalart: Mandalart,
+    /// 現在表示中の 3×3 グリッドの **画像 (PNG/PDF)** Export ペイロードを構築。
+    /// `size` = 画面に表示中の grid 一辺 (pt)。これを使って **ユーザーが見ているままの比率**でレンダリングする
+    /// (セル長押しメニューの PNG/PDF 用)。テーマはダークでも常にライト固定で保存。
+    /// JSON/MD/Indent はセル配下を `buildCellExportPayload` が担うのでここでは png/pdf のみ。
+    static func buildGridImagePayload(
+        grid: Grid,
+        mandalart: Mandalart,
         format: ExportFormat,
+        size: CGFloat,
         in context: ModelContext
     ) throws -> (document: MandalartExportDocument, filename: String, contentType: UTType) {
         let data: Data
         switch format {
-        case .json:
-            data = try TransferService.exportMandalartToJSONData(mandalart, in: context)
-        case .markdown:
-            let s = try TransferService.exportMandalartToMarkdown(mandalart, in: context)
-            data = s.data(using: .utf8) ?? Data()
-        case .indentText:
-            let s = try TransferService.exportMandalartToIndentText(mandalart, in: context)
-            data = s.data(using: .utf8) ?? Data()
+        case .png:
+            data = try MandalartImageRenderer.renderGridPNG(
+                grid: grid, mandalart: mandalart, size: size, in: context)
+        case .pdf:
+            data = try MandalartImageRenderer.renderGridPDF(
+                grid: grid, mandalart: mandalart, size: size, in: context)
+        case .json, .markdown, .indentText:
+            throw TransferError.imageFormatNotSupportedForCell // 呼び出し側は png/pdf のみ渡す
         }
         let baseName = sanitizeFilename(mandalart.title.isEmpty ? "mandalart" : mandalart.title)
         let nameRoot = baseName.isEmpty ? "mandalart" : baseName
         let filename = "\(nameRoot)-\(exportTimestamp()).\(format.fileExtension)"
+        return (MandalartExportDocument(data: data), filename, format.contentType)
+    }
+
+    /// 9×9 全体ボードの **画像 (PNG/PDF)** Export ペイロードを構築 (iPad の 9×9 エクスポートボタン用)。
+    /// `size` = 画面の grid 一辺 (pt)。画面と同じ比率・ライト固定でレンダリングする。
+    static func buildNineByNineImagePayload(
+        mandalart: Mandalart,
+        format: ExportFormat,
+        size: CGFloat,
+        in context: ModelContext
+    ) throws -> (document: MandalartExportDocument, filename: String, contentType: UTType) {
+        let data: Data
+        switch format {
+        case .png:
+            data = try MandalartImageRenderer.renderNineByNinePNG(mandalart: mandalart, size: size, in: context)
+        case .pdf:
+            data = try MandalartImageRenderer.renderNineByNinePDF(mandalart: mandalart, size: size, in: context)
+        case .json, .markdown, .indentText:
+            throw TransferError.imageFormatNotSupportedForCell // 9×9 ボタンは png/pdf のみ渡す
+        }
+        let baseName = sanitizeFilename(mandalart.title.isEmpty ? "mandalart" : mandalart.title)
+        let nameRoot = baseName.isEmpty ? "mandalart" : baseName
+        let filename = "\(nameRoot)-9x9-\(exportTimestamp()).\(format.fileExtension)"
         return (MandalartExportDocument(data: data), filename, format.contentType)
     }
 
@@ -160,6 +201,9 @@ extension TransferService {
             data = snapshotToMarkdownFile(snapshot).data(using: .utf8) ?? Data()
         case .indentText:
             data = snapshotToIndentText(snapshot).data(using: .utf8) ?? Data()
+        case .png, .pdf:
+            // セル単位は視覚スナップショット非対応 (desktop と同じ。UI も png/pdf を出さない)。
+            throw TransferError.imageFormatNotSupportedForCell
         }
         let baseName = sanitizeFilename(cell.text.isEmpty ? "cell" : cell.text)
         let nameRoot = baseName.isEmpty ? "cell" : baseName
@@ -927,6 +971,7 @@ enum TransferService {
         case parseEmpty
         case decodeFailed(String)
         case centerCellNotAllowed
+        case imageFormatNotSupportedForCell
 
         var errorDescription: String? {
             switch self {
@@ -935,6 +980,7 @@ enum TransferService {
             case .parseEmpty: return "パース結果が空です"
             case .decodeFailed(let msg): return "JSON のデコードに失敗: \(msg)"
             case .centerCellNotAllowed: return "中心セルにはインポートできません"
+            case .imageFormatNotSupportedForCell: return "PNG/PDF はセル単位ではエクスポートできません"
             }
         }
     }

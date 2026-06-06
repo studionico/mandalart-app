@@ -289,6 +289,15 @@ guard displayPosition != GridConstants.centerPosition else { ... }
 
 セル画像を Storage `cell-images` に同期するとき、オブジェクトキーは `<userId>/<basename>`。この `userId` を `session.user.id.uuidString` のまま使うと **大文字 UUID** になり、RLS policy の `auth.uid()::text = (storage.foldername(name))[1]` (Postgres 側は小文字) と一致せず **upload が 403**、かつ desktop (supabase-js は小文字) と**キーが食い違って相互に download 不能**になる。**`.lowercased()` を必ず付ける** ([`ImageStorage.currentUserId`](../Mandalart/Services/ImageStorage.swift))。UUID 大文字小文字問題は desktop 落とし穴 #23 と同根。詳細フロー: [`sync.md`](sync.md) 「画像同期」節。
 
+### #16. `ImageRenderer` での grid 画像 export は画面と乖離しやすい (PNG/PDF Export)
+
+[`MandalartImageRenderer`](../Mandalart/Services/MandalartImageRenderer.swift) で grid を画像化するとき、4 つの罠で「画面と全く違う画像」になる:
+
+1. **`GridView3x3` を `readOnly: true` で描かない** (最重要)。`CellView.effectiveFontSize` は `readOnly ? cellNineByNineFontSize(=14/3) : cellBaseFontSize(=14)` で、readOnly:true だと **文字が画面の 1/3** になる (= 9×9 inner 用)。画面の 3×3 は readOnly:false。**3×3 export は `readOnly: false`** (ImageRenderer は静的描画なので tap は発火せず副作用なし)。9×9 export (`GridView9x9`) は内部 readOnly:true=画面 9×9 と一致なのでそのまま。
+2. **固定サイズで描かない**。フォントは固定 pt なので 1024 等の固定 frame で描くとセル:文字比が崩れる。**画面の `gridSize` と同じ一辺**で描く。gridSize は `.task(id: gridSize) { renderGridSize = gridSize }` で @State に取込む (`.onAppear` は geometry 未確定の 0 を latch して固定化する)。size を `max(_, 360)` で下限クランプしない (実機 gridSize が 360 未満だと拡大されて文字が相対的に縮む)。
+3. **`.fileExporter` で PNG/PDF を出すには `MandalartExportDocument` に `writableContentTypes` (png/pdf 含む) を定義**。無いと writable 先頭の `.json` にフォールバックして拡張子が壊れる。
+4. export は **`.environment(\.colorScheme, .light)` 固定 + `NeutralPalette.rootBackground`** (ダークでもライトで保存、ユーザー指定)。クラウドのみ存在する画像は off-screen で `CellView` の `.task` download が走らず空白 (ローカル画像は同期ロードで写る)。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。

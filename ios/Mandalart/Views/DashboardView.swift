@@ -64,13 +64,7 @@ struct DashboardView: View {
     /// ツールバーの tray icon でユーザーがいつでもトグル可能。
     @State private var showStock = false
 
-    // Export 状態
-    @State private var exportTarget: Mandalart?
-    @State private var showExportFormatDialog = false
-    @State private var exportDocument: MandalartExportDocument?
-    @State private var exportFilename: String = ""
-    @State private var exportContentType: UTType = .json
-    @State private var showFileExporter = false
+    // Export はダッシュボードには無い (desktop と同様、export はエディターのビュー単位のみ)。
 
     // Import 状態
     @State private var showFileImporter = false
@@ -235,17 +229,6 @@ struct DashboardView: View {
             .sheet(isPresented: $showTrash) {
                 TrashView()
             }
-            .modifier(DashboardExportModifier(
-                exportTarget: exportTarget,
-                showExportFormatDialog: $showExportFormatDialog,
-                exportDocument: exportDocument,
-                exportContentType: exportContentType,
-                exportFilename: exportFilename,
-                showFileExporter: $showFileExporter,
-                onPickFormat: { m, fmt in startExport(m, format: fmt) },
-                onCancelFormat: { exportTarget = nil },
-                onExportResult: { handleExportResult($0) }
-            ))
             .modifier(DashboardImportAlertModifier(
                 showFileImporter: $showFileImporter,
                 transferAlert: $transferAlert,
@@ -480,13 +463,6 @@ struct DashboardView: View {
             Label("フォルダ移動", systemImage: "folder")
         }
 
-        Button {
-            exportTarget = m
-            showExportFormatDialog = true
-        } label: {
-            Label("エクスポート", systemImage: "square.and.arrow.up")
-        }
-
         // ロック中マンダラートは削除できない (誤操作防止のため context menu から削除項目を非表示)。
         // ロック解除すると削除メニューが復活する。defensive ガードは
         // `MandalartFactory.softDelete` 冒頭に同等の locked check あり。
@@ -622,43 +598,6 @@ struct DashboardView: View {
     }
 
     // MARK: - Export / Import handlers
-
-    /// 選択された `format` で payload を構築し、`.fileExporter` を起動する。
-    private func startExport(_ m: Mandalart, format: ExportFormat) {
-        do {
-            let payload = try TransferService.buildExportPayload(for: m, format: format, in: modelContext)
-            exportDocument = payload.document
-            exportFilename = payload.filename
-            exportContentType = payload.contentType
-            showFileExporter = true
-        } catch {
-            transferAlert = TransferAlertState(
-                title: "エクスポート失敗",
-                message: error.localizedDescription
-            )
-        }
-    }
-
-    /// `.fileExporter` の完了結果をハンドル。成功で確認 alert、失敗で error alert。
-    private func handleExportResult(_ result: Result<URL, Error>) {
-        switch result {
-        case .success(let url):
-            transferAlert = TransferAlertState(
-                title: "保存しました",
-                message: url.lastPathComponent
-            )
-        case .failure(let error):
-            // ユーザーキャンセルは alert を出さない (= cancellationError 系)
-            let nsError = error as NSError
-            if nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError {
-                return
-            }
-            transferAlert = TransferAlertState(
-                title: "エクスポート失敗",
-                message: error.localizedDescription
-            )
-        }
-    }
 
     /// `.fileImporter` の完了結果をハンドル。
     /// 1. URL を security-scoped でアクセスして読み込み
