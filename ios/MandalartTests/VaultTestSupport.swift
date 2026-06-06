@@ -81,3 +81,18 @@ func sampleRows() -> MandalartRows {
 func sortedById<T>(_ arr: [T], _ id: (T) -> String) -> [T] {
     arr.sorted { id($0) < id($1) }
 }
+
+// MARK: - I/O テスト用 (Stage I/O)
+
+/// ユニークな temp ディレクトリを作成して返す (呼び出し側が tearDown で削除)。
+func makeUniqueTempDir() -> URL {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("vaulttest-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+/// temp ディレクトリを削除 (best-effort)。
+func removeTempDir(_ url: URL) {
+    try? FileManager.default.removeItem(at: url)
+}
