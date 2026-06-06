@@ -24,7 +24,7 @@ ios/
 │   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state + 不変条件 enforcement + 空マンダラート自動 hard delete)
 │   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除 / すべて削除、desktop の TrashDialog 等価)
 │   │   ├── DashboardTransferSupport.swift Dashboard の Export/Import modifier 切り出し (SourceKit timeout 回避、pitfalls.md #12)
-│   │   ├── SettingsView.swift    アカウント / 同期ボタン
+│   │   ├── SettingsView.swift    アカウント / 同期ボタン (+ #if DEBUG「Vault（実験的）」: フォルダ選択 + bookmark + export/dry-run ハーネス、Stage I/O-b。本番トグル・DB 書込み無し)
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
 │   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / シュレッダー context menu、編集中以外は overlay で hit テスト)
@@ -52,6 +52,7 @@ ios/
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO / backfillImages (Storage 未アップロード画像の回収)
+│   │   ├── VaultRowsBridge.swift  @Model → vault のピュア行型 [MandalartRows] への read-only 変換 (dbRows.ts 相当、SwiftData 依存で app 限定、Stage I/O-b)
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template
 │   ├── Utils/
@@ -68,7 +69,9 @@ ios/
 │   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho
 │   │   ├── VaultIO.swift          FileManager I/O ラッパ (scanVault / scanMandalartDir / ensureDir / write / remove / readBytes、URL ベース、Stage I/O)
 │   │   ├── VaultImageStore.swift  セル画像の vault attachments 化 (flushImagesToVault / restoreImagesFromVault、appSupportDir/vaultRoot を引数注入、ImageStorage 非依存)
-│   │   └── VaultConfig.swift      vault 設定 (vaultMode / security-scoped bookmark / vaultPath) を UserDefaults 永続化 + bookmark make/resolve/withAccess + shouldRebuildOnStartup
+│   │   ├── VaultConfig.swift      vault 設定 (vaultMode / security-scoped bookmark / vaultPath) を UserDefaults 永続化 + bookmark make/resolve/withAccess + shouldRebuildOnStartup
+│   │   ├── VaultTimestamp.swift   ISO8601 Date↔String (SyncEngine と同形式、cloud/desktop と一致、Stage I/O-b)
+│   │   └── VaultSync.swift        非破壊 orchestration: exportAllToVault (DB rows→vault ファイル書き出し) / dryRunScan (vault→rows 件数集計)。ピュア (structs のみ)、Stage I/O-b
 │   └── Resources/
 │       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)
