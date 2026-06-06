@@ -94,7 +94,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
     try {
       const r = await exportAllToVault(vaultPath)
       setToast({
-        message: `vault に書き出しました (マンダラート ${r.mandalartCount} / ファイル ${r.fileCount})`,
+        message: `vault に書き出しました (マンダラート ${r.mandalartCount} / ファイル ${r.fileCount} / 画像 ${r.imagesCopied})`,
         type: 'success',
       })
     } catch (e) {
@@ -111,7 +111,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
     try {
       const r = await flushDbToVault(vaultPath)
       setToast({
-        message: `flush 完了 (書込 ${r.written} / 削除 ${r.deleted} / フォルダ削除 ${r.deletedDirs})`,
+        message: `flush 完了 (書込 ${r.written} / 削除 ${r.deleted} / フォルダ削除 ${r.deletedDirs} / 画像 ${r.imagesCopied})`,
         type: 'success',
       })
     } catch (e) {

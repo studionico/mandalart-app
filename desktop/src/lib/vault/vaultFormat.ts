@@ -180,6 +180,16 @@ function wikiLink(gridId: string, label: string): string {
   return `[[${gridId}|${label}]]`
 }
 
+/**
+ * image_path から vault attachments 用の Obsidian/FS 安全なファイル名を作る。
+ * basename を取り、Obsidian の `![[ ]]` を壊す文字 (特に `:` = pending synthetic cell id 由来) を `-` に畳む。
+ * imageVault のファイル書き出しと本文 embed はこの同じ関数を使って一致させる (両者から import)。
+ */
+export function attachmentName(imagePath: string): string {
+  const base = imagePath.split('/').pop() ?? imagePath
+  return base.replace(/[:*?"<>|#^[\]\\]+/g, '-')
+}
+
 /** セル見出し。子グリッドがあれば見出しを子へのリンクにする (親→子)。 */
 function renderCellHeading(
   prefix: string,
@@ -190,6 +200,31 @@ function renderCellHeading(
   const label = cell.text.trim() || fallback
   const childId = childByCell?.get(cell.id)
   return childId ? `${prefix} ${wikiLink(childId, label)}` : `${prefix} ${label}`
+}
+
+/**
+ * セルの見出し + (画像があれば) Obsidian embed 行。画像は vault の `attachments/<basename>` に
+ * コピーされており、`![[<basename>]]` で Obsidian が表示する (basename は vault 内一意)。
+ * imageVault への import は循環依存になるため basename はここで素朴に抽出する。
+ */
+function renderCellLines(
+  prefix: string,
+  cell: Cell,
+  fallback: string,
+  childByCell?: Map<string, string>,
+  forceHeading = false,
+): string[] {
+  const hasChild = childByCell?.has(cell.id) ?? false
+  const lines: string[] = []
+  // テキストか子リンクがあれば見出しを出す。画像だけのセルは見出しを省き embed のみ
+  // (中心セルは forceHeading でグリッドタイトルとして必ず見出しを出す)。
+  if (forceHeading || cell.text.trim() !== '' || hasChild) {
+    lines.push(renderCellHeading(prefix, cell, fallback, childByCell))
+  }
+  if (cell.image_path) {
+    lines.push(`![[${attachmentName(cell.image_path)}]]`)
+  }
+  return lines
 }
 
 /**
@@ -207,14 +242,16 @@ function renderGridBody(
     lines.push(`親: ${wikiLink(links.parent.gridId, links.parent.label)}`, '')
   }
   const center = cellsSortedByPosition.find((c) => c.position === CENTER_POSITION)
-  lines.push(center ? renderCellHeading('#', center, '(中心)', links?.childByCell) : '# (中心)')
+  if (center) lines.push(...renderCellLines('#', center, '(中心)', links?.childByCell, true))
+  else lines.push('# (中心)')
   if (memo && memo.trim() !== '') {
     for (const memoLine of memo.split('\n')) lines.push(`> ${memoLine}`)
   }
   for (const c of cellsSortedByPosition) {
     if (c.position === CENTER_POSITION) continue
-    if (c.text.trim() === '') continue
-    lines.push('', renderCellHeading('##', c, '(無題)', links?.childByCell))
+    // テキスト・画像・子グリッドのいずれも無い空セルだけスキップ (画像だけのセルは残す)。
+    if (c.text.trim() === '' && !c.image_path && !links?.childByCell?.has(c.id)) continue
+    lines.push('', ...renderCellLines('##', c, '(無題)', links?.childByCell))
   }
   return lines.join('\n')
 }

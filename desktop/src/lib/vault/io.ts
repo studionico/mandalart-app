@@ -2,10 +2,13 @@ import {
   readDir,
   readTextFile,
   writeTextFile,
+  readFile,
+  writeFile,
   mkdir,
   exists,
   remove,
   watch,
+  BaseDirectory,
   type UnwatchFn,
 } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
@@ -67,6 +70,50 @@ export async function removeVaultFile(absPath: string): Promise<void> {
 /** フォルダを再帰削除する (flush で DB から消えたマンダラートの dir を消すのに使用)。 */
 export async function removeDir(absPath: string): Promise<void> {
   await remove(absPath, { recursive: true })
+}
+
+/** パス (絶対) の存在確認。 */
+export async function pathExists(absPath: string): Promise<boolean> {
+  return exists(absPath)
+}
+
+/** AppData 相対パスの存在確認。 */
+export async function appDataExists(relPath: string): Promise<boolean> {
+  try {
+    return await exists(relPath, { baseDir: BaseDirectory.AppData })
+  } catch {
+    return false
+  }
+}
+
+/** AppData 相対パスから binary を読む (画像)。欠損/失敗時は null。 */
+export async function readAppDataBytes(relPath: string): Promise<Uint8Array | null> {
+  try {
+    if (!(await exists(relPath, { baseDir: BaseDirectory.AppData }))) return null
+    return await readFile(relPath, { baseDir: BaseDirectory.AppData })
+  } catch {
+    return null
+  }
+}
+
+/** AppData 相対パスへ binary を書く (rebuild 時の画像復元)。 */
+export async function writeAppDataBytes(relPath: string, bytes: Uint8Array): Promise<void> {
+  await writeFile(relPath, bytes, { baseDir: BaseDirectory.AppData })
+}
+
+/** 絶対パスから binary を読む (vault attachments)。欠損/失敗時は null。 */
+export async function readBytesAbs(absPath: string): Promise<Uint8Array | null> {
+  try {
+    if (!(await exists(absPath))) return null
+    return await readFile(absPath)
+  } catch {
+    return null
+  }
+}
+
+/** 絶対パスへ binary を書く (vault attachments、親は事前に ensureDir すること)。 */
+export async function writeBytesAbs(absPath: string, bytes: Uint8Array): Promise<void> {
+  await writeFile(absPath, bytes)
 }
 
 /**

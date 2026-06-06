@@ -83,6 +83,11 @@ export function mandalartToVaultFiles(rows: MandalartRows): MandalartVaultFiles 
   const rootGrid =
     grids.find((g) => g.parent_cell_id === null && g.center_cell_id === mandalart.root_cell_id) ??
     grids.find((g) => g.parent_cell_id === null)
+  // フォルダ名/戻りリンクの表示タイトル: mandalart.title は denormalized で空のことがある
+  // ([[feedback_denormalized_field_runtime_fetch]]) ので、空ならルート中心セルの text を使う。
+  const displayTitle =
+    mandalart.title.trim() ||
+    (rootGrid ? gridCenterText(rootGrid, cellsByGrid.get(rootGrid.id) ?? [], cellById) : '')
 
   const files: VaultFile[] = [
     { path: MANDALART_DOC_NAME, content: buildMandalartDoc(mandalart, folderName, rootGrid?.id) },
@@ -108,7 +113,7 @@ export function mandalartToVaultFiles(rows: MandalartRows): MandalartVaultFiles 
       }
     } else {
       // ルート/独立並列グリッド → _mandalart.md へ戻る (順方向の _mandalart→root と対の双方向)。
-      parent = { gridId: MANDALART_DOC_LINK, label: mandalart.title.trim() || '(無題)' }
+      parent = { gridId: MANDALART_DOC_LINK, label: displayTitle || '(無題)' }
     }
     files.push({
       path: `${grid.id}.md`,
@@ -116,7 +121,7 @@ export function mandalartToVaultFiles(rows: MandalartRows): MandalartVaultFiles 
     })
   }
 
-  return { dirName: mandalartDirName(mandalart.title, mandalart.id), files }
+  return { dirName: mandalartDirName(displayTitle, mandalart.id), files }
 }
 
 /**

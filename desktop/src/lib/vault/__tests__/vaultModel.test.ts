@@ -14,6 +14,7 @@ import {
   buildMandalartDoc,
   buildGridDocument,
   docContentEquivalent,
+  attachmentName,
 } from '@/lib/vault/vaultFormat'
 import type { MandalartRows } from '@/lib/vault/types'
 
@@ -268,5 +269,52 @@ describe('Obsidian 双方向リンク (本文 wiki-link)', () => {
     const restored = vaultFilesToRows(mandalartToVaultFiles(rows).files)!
     expect(sortById(restored.grids)).toEqual(sortById(rows.grids))
     expect(sortById(restored.cells)).toEqual(sortById(rows.cells))
+  })
+
+  it('画像付きセルは本文に Obsidian embed ![[basename]] を出す', () => {
+    // c-root-p2 は image_path = 'images/c-root-p2-1.jpg' を持つ → basename を embed
+    const root = fileContent(sampleRows(), 'g-root.md')
+    expect(root).toContain('![[c-root-p2-1.jpg]]')
+    // 画像を持たない 食事 (c-root-p0) には embed が付かない
+    expect(root).not.toContain('![[c-root-p0')
+  })
+
+  it('attachmentName は basename を取り Obsidian 不正文字 (コロン等) を畳む', () => {
+    expect(attachmentName('images/normal-1.jpg')).toBe('normal-1.jpg')
+    // pending synthetic cell 由来のコロンは `-` に (Obsidian の ![[ ]] を壊さない)
+    expect(attachmentName('images/pending:af2:7-1780.jpg')).toBe('pending-af2-7-1780.jpg')
+  })
+
+  it('画像だけ (テキスト空) の周辺セルも embed が出る (見出しは省く)', () => {
+    const rows = sampleRows()
+    rows.cells.push(cell('c-root-p5', 'g-root', 5, { text: '', image_path: 'images/only-img.jpg' }))
+    const root = mandalartToVaultFiles(rows).files.find((f) => f.path === 'g-root.md')!.content
+    expect(root).toContain('![[only-img.jpg]]')
+    expect(root).not.toContain('## (無題)') // テキスト無し画像のみは見出しを出さない
+  })
+
+  it('コロン入り image_path の embed はサニタイズされた名前で出る', () => {
+    const rows = sampleRows()
+    rows.cells.push(cell('c-root-p1', 'g-root', 1, { text: '画像', image_path: 'images/pending:x:7-1.jpg' }))
+    const root = mandalartToVaultFiles(rows).files.find((f) => f.path === 'g-root.md')!.content
+    expect(root).toContain('![[pending-x-7-1.jpg]]')
+    expect(root).not.toContain(':7-1.jpg]]') // コロンが残らない
+  })
+})
+
+describe('フォルダ名 (untitled 回避)', () => {
+  it('mandalart.title が空ならルート中心セルの text をフォルダ名に使う', () => {
+    const TS2 = '2026-06-04T00:00:00.000Z'
+    const rows: MandalartRows = {
+      mandalart: {
+        id: 'mm-9', user_id: '', title: '   ', root_cell_id: 'rc', show_checkbox: false,
+        last_grid_id: null, sort_order: null, pinned: false, folder_id: null, locked: false,
+        created_at: TS2, updated_at: TS2,
+      },
+      folderName: 'Inbox',
+      grids: [grid('g-r', { center_cell_id: 'rc', parent_cell_id: null })],
+      cells: [cell('rc', 'g-r', 4, { text: '実タイトル' })],
+    }
+    expect(mandalartToVaultFiles(rows).dirName).toBe('実タイトル-mm-9')
   })
 })

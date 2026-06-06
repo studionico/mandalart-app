@@ -6,6 +6,7 @@ import { docContentEquivalent } from './vaultFormat'
 import { diffFiles } from './reconcile'
 import { loadMandalartRows, loadAllMandalartIds } from './dbRows'
 import { applyVaultRowsToDb, type ApplyOptions, type ApplyReport } from './applyToDb'
+import { flushImagesToVault, restoreImagesFromVault } from './imageVault'
 import type { MandalartRows, VaultFile } from './types'
 
 /**
@@ -71,16 +72,17 @@ export async function dryRunCompareVaultToDb(vaultRoot: string): Promise<DryRunR
   return report
 }
 
-export type ExportReport = { mandalartCount: number; fileCount: number }
+export type ExportReport = { mandalartCount: number; fileCount: number; imagesCopied: number }
 
 /**
- * DB 全マンダラートを vault フォルダへ一方向書き出しする (ファイルのみ、DB 無改変)。
+ * DB 全マンダラートを vault フォルダへ一方向書き出しする (.md + 画像、DB 無改変)。
  * 既存ファイルの削除は行わない (非破壊)。「DB を空 vault に移行」の安全な前半。
  */
 export async function exportAllToVault(vaultRoot: string): Promise<ExportReport> {
   await ensureDir(vaultRoot)
   const ids = await loadAllMandalartIds()
   let fileCount = 0
+  let imagesCopied = 0
   for (const id of ids) {
     const rows = await loadMandalartRows(id)
     if (!rows) continue
@@ -91,9 +93,14 @@ export async function exportAllToVault(vaultRoot: string): Promise<ExportReport>
       await writeVaultFile(await join(dirAbs, f.path), f.content)
       fileCount++
     }
+    try {
+      imagesCopied += await flushImagesToVault(vaultRoot, rows.cells)
+    } catch (e) {
+      console.error('[vault] 画像コピー失敗 (export, 続行):', e)
+    }
   }
-  const report: ExportReport = { mandalartCount: ids.length, fileCount }
-  console.info('[vault] export DB→vault (ファイルのみ、DB 無改変):', report)
+  const report: ExportReport = { mandalartCount: ids.length, fileCount, imagesCopied }
+  console.info('[vault] export DB→vault (.md + 画像、DB 無改変):', report)
   return report
 }
 
@@ -102,6 +109,7 @@ export type FlushReport = {
   written: number
   deleted: number
   deletedDirs: number
+  imagesCopied: number
 }
 
 /**
@@ -129,33 +137,54 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
   const ids = await loadAllMandalartIds()
   let written = 0
   let deleted = 0
+  let imagesCopied = 0
   for (const id of ids) {
     const rows = await loadMandalartRows(id)
     if (!rows) continue
     const desired = mandalartToVaultFiles(rows)
     const existing = existingById.get(id)
-    const dirAbs = await join(vaultRoot, existing?.dirName ?? desired.dirName)
+
+    // stale な `untitled-*` フォルダ (作成直後に title 列が空だったため) は、実タイトルが入った今
+    // 正しいフォルダ名へリネームする。リネーム時は新フォルダに全 .md を書いて旧フォルダを削除する。
+    const renameFrom =
+      existing && existing.dirName !== desired.dirName && existing.dirName.startsWith('untitled-')
+        ? existing.dirName
+        : null
+    const dirAbs = await join(vaultRoot, renameFrom ? desired.dirName : (existing?.dirName ?? desired.dirName))
     await ensureDir(dirAbs)
 
-    // churn 回避: 既存と desired が `updated_at` だけの差のファイル (grid / mandalart 共通) は
-    // desired の内容を既存のものに差し替えて書き換えを抑止する。ナビゲーション等で grid/mandalart の
-    // updated_at が bump されても、content が同じならファイルを書き換えない。
-    const exMap = new Map((existing?.files ?? []).map((f) => [f.path, f.content]))
-    for (let i = 0; i < desired.files.length; i++) {
-      const ex = exMap.get(desired.files[i].path)
-      if (ex !== undefined && ex !== desired.files[i].content && docContentEquivalent(ex, desired.files[i].content)) {
-        desired.files[i] = { ...desired.files[i], content: ex }
+    if (renameFrom) {
+      for (const f of desired.files) {
+        await writeVaultFile(await join(dirAbs, f.path), f.content)
+        written++
+      }
+      await removeDir(await join(vaultRoot, renameFrom))
+    } else {
+      // churn 回避: 既存と desired が `updated_at` だけの差のファイル (grid / mandalart 共通) は
+      // desired の内容を既存のものに差し替えて書き換えを抑止する。ナビゲーション等で grid/mandalart の
+      // updated_at が bump されても、content が同じならファイルを書き換えない。
+      const exMap = new Map((existing?.files ?? []).map((f) => [f.path, f.content]))
+      for (let i = 0; i < desired.files.length; i++) {
+        const ex = exMap.get(desired.files[i].path)
+        if (ex !== undefined && ex !== desired.files[i].content && docContentEquivalent(ex, desired.files[i].content)) {
+          desired.files[i] = { ...desired.files[i], content: ex }
+        }
+      }
+
+      const plan = diffFiles(existing?.files ?? [], desired.files)
+      for (const f of plan.write) {
+        await writeVaultFile(await join(dirAbs, f.path), f.content)
+        written++
+      }
+      for (const p of plan.deletePaths) {
+        await removeVaultFile(await join(dirAbs, p))
+        deleted++
       }
     }
-
-    const plan = diffFiles(existing?.files ?? [], desired.files)
-    for (const f of plan.write) {
-      await writeVaultFile(await join(dirAbs, f.path), f.content)
-      written++
-    }
-    for (const p of plan.deletePaths) {
-      await removeVaultFile(await join(dirAbs, p))
-      deleted++
+    try {
+      imagesCopied += await flushImagesToVault(vaultRoot, rows.cells)
+    } catch (e) {
+      console.error('[vault] 画像コピー失敗 (flush, 続行):', e)
     }
   }
 
@@ -172,7 +201,7 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
     }
   }
 
-  const report: FlushReport = { mandalartCount: ids.length, written, deleted, deletedDirs }
+  const report: FlushReport = { mandalartCount: ids.length, written, deleted, deletedDirs, imagesCopied }
   console.info('[vault] flush DB→vault (差分書き出し):', report)
   return report
 }
@@ -201,8 +230,16 @@ export async function reconcileVaultToDb(
     if (rows.grids.length < gridFileCount) skipGridDeletionFor.add(rows.mandalart.id)
   }
   const report = await applyVaultRowsToDb(all, { ...opts, skipGridDeletionFor })
+  // vault attachments → AppData/images へ画像を復元 (ローカルに無い分だけ)。失敗は rebuild を止めない。
+  let imagesRestored = 0
+  try {
+    imagesRestored = await restoreImagesFromVault(vaultRoot, all.flatMap((r) => r.cells))
+  } catch (e) {
+    console.error('[vault] 画像復元失敗 (reconcile, 続行):', e)
+  }
   console.warn('[vault] file→DB 再構築 (実 DB 書込み):', report, {
     skippedGridDeletion: [...skipGridDeletionFor],
+    imagesRestored,
   })
   return report
 }

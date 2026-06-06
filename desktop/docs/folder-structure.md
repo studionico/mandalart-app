@@ -193,7 +193,8 @@ src/
 │   │   ├── reconcile.ts        # hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho (ピュアな差分計画)
 │   │   ├── dbRows.ts           # plugin-fs 非依存の DB 行ローダ (loadMandalartRows / loadAllMandalartIds、setupTestDb でテスト可)
 │   │   ├── applyToDb.ts        # file→DB 適用 (applyVaultRowsToDb、ON CONFLICT upsert + 削除、実 DB 書込み)
-│   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write/remove 薄ラッパ、Rust notify 不要)
+│   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write/remove + binary(画像) read/write 薄ラッパ、Rust notify 不要)
+│   │   ├── imageVault.ts       # セル画像の vault attachments 化 (flushImagesToVault=AppData→vault/attachments、restoreImagesFromVault=vault→AppData、cloud 非依存)
 │   │   ├── config.ts           # vault 設定 (vaultMode / vaultPath) を AppData の vault-config.json に永続化 (plugin-store 不使用)
 │   │   ├── _vaultSync.ts       # dry-run 比較 / DB→vault 書き出し (export・flush) / file→DB 再構築 (reconcile) のオーケストレーション
 │   │   ├── flushScheduler.ts   # auto-flush の debounce スケジューラ (createFlushScheduler、in-flight ガード、純関数=テスト可)
