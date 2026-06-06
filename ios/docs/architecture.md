@@ -59,11 +59,25 @@ ios/
 │   │   ├── NeutralPalette.swift  Tailwind neutral 系列を直 RGB で持つ adaptive 背景色群 (systemBackground を意図的に回避)
 │   │   ├── PresetColors.swift    desktop と完全一致の 10 色 (light/dark 両値)
 │   │   └── ThemePreference.swift app.theme グローバル UserDefaults / 3 値 enum (light/system/dark) / colorScheme 算出
+│   ├── Vault/                vault フォルダモード (Phase 2) のピュア層を desktop から移植 (Stage 0/1)。
+│   │   │                     Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存。本番未配線 (dead code)
+│   │   ├── VaultTypes.swift       行型 (VaultGrid/VaultCell/VaultMandalart) + Serialized 型 + VaultFile / MandalartRows
+│   │   ├── VaultFrontmatter.swift block-scalar JSON codec (buildDoc / parseDoc、YAML ライブラリ非依存)
+│   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName + 本文 wiki-link/embed
+│   │   ├── VaultModel.swift       DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows)
+│   │   └── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho
 │   └── Resources/
 │       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)
+├── MandalartTests/          vault ピュア層のユニットテスト (XCTest)。VaultFormat/Model/Reconcile + 共有フィクスチャ
 └── docs/                    本ドキュメント群
 ```
+
+> **テストターゲット**: `MandalartTests` (type `bundle.unit-test`) は app ターゲット (= Supabase リンク)
+> に依存させず、`Mandalart/Vault/*.swift` と `Mandalart/Utils/Constants.swift` を**直接コンパイル**する。
+> 専用スキーム `VaultTests` が MandalartTests だけをビルド/テストするので、`xcodebuild test` を CLI で
+> 回しても Supabase をビルドせず、[pitfalls.md](pitfalls.md) #1 (SPM 依存で Simulator destination を見失う)
+> を踏まない。実行: `xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'`。
 
 ## レイヤー / 依存方向
 

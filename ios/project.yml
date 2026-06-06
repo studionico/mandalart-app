@@ -42,3 +42,31 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  # vault ピュア層 (Phase 2 Stage 0/1 移植) のユニットテスト専用ターゲット。
+  # app ターゲット (= Supabase リンク) に依存させず、ピュア層 (Foundation + CryptoKit のみ) と
+  # GridConstants だけを直接コンパイルする。これで `xcodebuild test` を VaultTests スキームで
+  # 回しても Supabase をビルドせず、落とし穴 #1 (SPM 依存で Simulator destination を見失う) を踏まない。
+  MandalartTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: MandalartTests
+      - path: Mandalart/Vault
+      - path: Mandalart/Utils/Constants.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.mandalart.app.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+schemes:
+  # MandalartTests だけをビルド/テストするスキーム (app・Supabase を巻き込まない logic test)。
+  # 実行例: xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'
+  VaultTests:
+    build:
+      targets:
+        MandalartTests: [test]
+    test:
+      targets:
+        - MandalartTests
