@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var vaultFolderName: String?
     @State private var vaultStatus: String?
     @State private var showVaultPicker = false
+    @State private var showRebuildConfirm = false
     private var vaultConfigured: Bool { vaultConfig.vaultBookmark != nil }
     #endif
 
@@ -100,6 +101,8 @@ struct SettingsView: View {
                         .disabled(!vaultConfigured)
                     Button("dry-run scan") { dryRunVault() }
                         .disabled(!vaultConfigured)
+                    Button("vault から再構築", role: .destructive) { showRebuildConfirm = true }
+                        .disabled(!vaultConfigured)
                     if let vaultStatus {
                         Text(vaultStatus)
                             .font(.caption)
@@ -125,6 +128,16 @@ struct SettingsView: View {
                 allowsMultipleSelection: false,
                 onCompletion: handleVaultFolderPick
             )
+            .confirmationDialog(
+                "vault の内容で DB を再構築します。よろしいですか?",
+                isPresented: $showRebuildConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("再構築する", role: .destructive) { rebuildFromVault() }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("DB を vault フォルダの内容で上書きします（DB に有り vault に無いマンダラートは消しません）。")
+            }
             .onAppear(perform: loadVaultConfig)
             #endif
         }
@@ -189,6 +202,25 @@ struct SettingsView: View {
             vaultStatus = "scan: \(report.mandalarts) マンダラート / \(report.grids) グリッド / \(report.cells) セル"
         } catch {
             vaultStatus = "scan 失敗: \(error.localizedDescription)"
+        }
+    }
+
+    /// vault フォルダの内容で実 SwiftData DB を再構築する (確認ダイアログ経由のみ)。
+    /// deleteMissingMandalarts=false なので DB に有り vault に無いマンダラートは消さない。
+    private func rebuildFromVault() {
+        guard let bookmark = vaultConfig.vaultBookmark, let resolved = VaultBookmark.resolve(bookmark) else {
+            vaultStatus = "フォルダ未設定 / bookmark 解決失敗"
+            return
+        }
+        let appSupport = VaultImageStore.appSupportDirectory() ?? FileManager.default.temporaryDirectory
+        do {
+            let report = try VaultBookmark.withAccess(resolved.url) {
+                try VaultDbReconcile.reconcileVaultToDb(
+                    vaultRoot: resolved.url, in: modelContext, appSupportDir: appSupport)
+            }
+            vaultStatus = "再構築: \(report.mandalarts) マンダラート / \(report.grids) グリッド / \(report.cells) セル"
+        } catch {
+            vaultStatus = "再構築失敗: \(error.localizedDescription)"
         }
     }
     #endif

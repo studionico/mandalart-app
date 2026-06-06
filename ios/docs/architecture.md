@@ -24,7 +24,7 @@ ios/
 │   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state + 不変条件 enforcement + 空マンダラート自動 hard delete)
 │   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除 / すべて削除、desktop の TrashDialog 等価)
 │   │   ├── DashboardTransferSupport.swift Dashboard の Export/Import modifier 切り出し (SourceKit timeout 回避、pitfalls.md #12)
-│   │   ├── SettingsView.swift    アカウント / 同期ボタン (+ #if DEBUG「Vault（実験的）」: フォルダ選択 + bookmark + export/dry-run ハーネス、Stage I/O-b。本番トグル・DB 書込み無し)
+│   │   ├── SettingsView.swift    アカウント / 同期ボタン (+ #if DEBUG「Vault（実験的）」: フォルダ選択 + bookmark + export/dry-run + 確認付き「vault から再構築」(reconcile=実 DB 書込み)。Stage I/O-b/DB。本番トグル無し)
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
 │   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / シュレッダー context menu、編集中以外は overlay で hit テスト)
@@ -53,6 +53,8 @@ ios/
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO / backfillImages (Storage 未アップロード画像の回収)
 │   │   ├── VaultRowsBridge.swift  @Model → vault のピュア行型 [MandalartRows] への read-only 変換 (dbRows.ts 相当、SwiftData 依存で app 限定、Stage I/O-b)
+│   │   ├── VaultDbApply.swift     vault→DB 実書込み (applyVaultRowsToDb: id で upsert + 削除ガード + folder ensure、applyToDb.ts 相当、Stage DB)
+│   │   ├── VaultDbReconcile.swift vault フォルダ→DB 再構築 (scanVault → vaultFilesToRows → apply + 破損検知 skipGridDeletion + 画像復元、Stage DB)
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template
 │   ├── Utils/
@@ -80,10 +82,11 @@ ios/
 ```
 
 > **テストターゲット**: `MandalartTests` (type `bundle.unit-test`) は app ターゲット (= Supabase リンク)
-> に依存させず、`Mandalart/Vault/*.swift` と `Mandalart/Utils/Constants.swift` を**直接コンパイル**する。
-> 専用スキーム `VaultTests` が MandalartTests だけをビルド/テストするので、`xcodebuild test` を CLI で
-> 回しても Supabase をビルドせず、[pitfalls.md](pitfalls.md) #1 (SPM 依存で Simulator destination を見失う)
-> を踏まない。実行: `xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'`。
+> に依存させず、必要な Swift を**直接コンパイル**する: `Mandalart/Vault/*` + `Utils/{Constants,IDGenerator}.swift`
+> に加え、Stage DB の in-memory SwiftData テスト用に `Mandalart/Models/*` + `Services/{VaultRowsBridge,VaultDbApply,VaultDbReconcile}.swift`
+> (いずれも Foundation/SwiftData のみで **Supabase 非リンク**)。専用スキーム `VaultTests` が MandalartTests だけを
+> ビルド/テストするので、`xcodebuild test` を CLI で回しても Supabase をビルドせず、[pitfalls.md](pitfalls.md) #1
+> (SPM 依存で Simulator destination を見失う) を踏まない。実行: `xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'`。
 
 ## レイヤー / 依存方向
 

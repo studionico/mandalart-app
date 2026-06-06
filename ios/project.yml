@@ -54,6 +54,13 @@ targets:
       - path: MandalartTests
       - path: Mandalart/Vault
       - path: Mandalart/Utils/Constants.swift
+      - path: Mandalart/Utils/IDGenerator.swift
+      # Stage DB: in-memory SwiftData テスト用に @Model + vault の DB 層を直接コンパイル
+      # (いずれも Foundation/SwiftData のみ・Supabase 非リンク維持)。
+      - path: Mandalart/Models
+      - path: Mandalart/Services/VaultRowsBridge.swift
+      - path: Mandalart/Services/VaultDbApply.swift
+      - path: Mandalart/Services/VaultDbReconcile.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.mandalart.app.ios.tests

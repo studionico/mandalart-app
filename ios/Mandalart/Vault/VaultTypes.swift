@@ -126,7 +126,7 @@ struct MandalartVaultFiles {
 
 /// 1 マンダラート分の DB 行 (ピュア変換の入出力)。folder は id ではなく **name** で持つ
 /// (vault は portable な folder_name を正とし、folder_id はキャッシュ再構築時に caller が解決する)。
-struct MandalartRows {
+struct MandalartRows: Equatable {
     var mandalart: VaultMandalart
     /// mandalart.folderId が指すフォルダ名 (vault に書く portable な分類ラベル)。
     var folderName: String

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 // 注: Vault/*.swift と Utils/Constants.swift は MandalartTests ターゲットへ直接コンパイルされる
 // (app ターゲット = Supabase リンクに依存させない)。よって `@testable import Mandalart` は不要で、
@@ -95,4 +96,28 @@ func makeUniqueTempDir() -> URL {
 /// temp ディレクトリを削除 (best-effort)。
 func removeTempDir(_ url: URL) {
     try? FileManager.default.removeItem(at: url)
+}
+
+// MARK: - SwiftData テスト用 (Stage DB)
+
+/// in-memory の ModelContext を作る (実書込みテスト用、Supabase 非依存)。
+@MainActor
+func makeInMemoryContext() -> ModelContext {
+    let schema = Schema([Mandalart.self, Grid.self, Cell.self, Folder.self, StockItem.self])
+    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    // swiftlint:disable:next force_try
+    let container = try! ModelContainer(for: schema, configurations: [config])
+    return ModelContext(container)
+}
+
+/// 2 つ目の最小マンダラート (deleteMissingMandalarts テスト用)。
+func secondSampleRows() -> MandalartRows {
+    let mandalart = VaultMandalart(
+        id: "m-2", userId: "", title: "B", rootCellId: "c-b-center", showCheckbox: false,
+        lastGridId: nil, sortOrder: nil, pinned: false, folderId: nil, locked: false,
+        createdAt: TS, updatedAt: TS
+    )
+    let grids = [makeGrid("g-b-root", centerCellId: "c-b-center", parentCellId: nil, sortOrder: 0, mandalartId: "m-2")]
+    let cells = [makeCell("c-b-center", "g-b-root", 4, text: "B中心")]
+    return MandalartRows(mandalart: mandalart, folderName: "Inbox", grids: grids, cells: cells)
 }
