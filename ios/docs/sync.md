@@ -47,6 +47,15 @@ iOS はフォルダ watcher が無いため、vaultMode 中は scenePhase で **
 flush は**ファイルだけ書き DB を書かない**のでフィードバックループは無い。**起動中（フォアグラウンドのまま）の外部編集の
 ライブ取り込みは未対応**（watcher 未実装。編集は一度背面に回す or 再起動で取り込まれる）。
 
+### vault OFF 遷移時の updated_at 整備
+
+vault モード OFF でクラウド同期を再開するとき、vault 編集（本文編集は updatedAt を bump しない）が ① 未 push、② pull の
+LWW（`cloudUpdated > local.updatedAt`）で clobber される穴がある。[`SettingsView.setVaultMode(false)`](../Mandalart/Views/SettingsView.swift)
+が [`VaultExitSync.markLocalRowsDirty`](../Mandalart/Services/VaultExitSync.swift) を呼び **全行の updatedAt を now に bump** する
+（syncedAt は不変、tombstone も含む）。これで pull-LWW が false になり local が clobber されず、`needsPush`（syncedAt < updatedAt）が
+true で push され、cloud の BEFORE UPDATE トリガが `updated_at=NOW()` を付けて cloud が最新化 → **vault/ローカルが全面的に勝つ**。
+実 push は次回起動の fullSync か「今すぐ同期」ボタンに委ねる（OFF 切替時に自動同期はしない）。
+
 ## pullAll (cloud → local)
 
 ### 流れ

@@ -56,6 +56,7 @@ ios/
 │   │   ├── VaultDbApply.swift     vault→DB 実書込み (applyVaultRowsToDb: id で upsert + 削除ガード + folder ensure、applyToDb.ts 相当、Stage DB)
 │   │   ├── VaultDbReconcile.swift vault フォルダ→DB 再構築 (scanVault → vaultFilesToRows → apply + 破損検知 skipGridDeletion + 画像復元、Stage DB)
 │   │   ├── VaultAutoFlush.swift   DB 編集 → debounce(3s) → vault 差分 flush (ModelContext.didSave 購読 + flushScheduler 相当 + 背面即時 flush、vaultMode ON のみ、Stage auto-flush)
+│   │   ├── VaultExitSync.swift    vault OFF 遷移時の updated_at 整備 (markLocalRowsDirty: 全行 updatedAt=now で dirty 化 → クラウド再同期で local/vault 全面勝ち)
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template
 │   ├── Utils/

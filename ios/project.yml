@@ -61,6 +61,7 @@ targets:
       - path: Mandalart/Services/VaultRowsBridge.swift
       - path: Mandalart/Services/VaultDbApply.swift
       - path: Mandalart/Services/VaultDbReconcile.swift
+      - path: Mandalart/Services/VaultExitSync.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.mandalart.app.ios.tests

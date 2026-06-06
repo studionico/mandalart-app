@@ -239,7 +239,10 @@ struct SettingsView: View {
                 return // ON にしない
             }
         } else {
-            vaultStatus = "vault モード OFF（クラウド同期を再開）"
+            // クラウド再同期で vault 編集を失わせないため全行を dirty 化 (updatedAt=now)。実 push は
+            // 次回起動の fullSync か「今すぐ同期」ボタン (OFF で再有効化) に委ねる。
+            let n = VaultExitSync.markLocalRowsDirty(in: modelContext)
+            vaultStatus = "vault モード OFF（クラウド同期を再開。\(n) 行を再 push 対象に整備）"
         }
         config.vaultMode = enabled
         VaultConfigStore.save(config)
