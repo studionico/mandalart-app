@@ -36,6 +36,7 @@ import { useEditorStore } from '@/store/editorStore'
 import { useConvergeStore } from '@/store/convergeStore'
 import { useVaultStore } from '@/store/vaultStore'
 import { useSync } from '@/hooks/useSync'
+import { VAULT_IMPORTED_EVENT } from '@/hooks/useVaultWatcher'
 import { useDashboardDnd, type DashboardDropAction } from '@/hooks/useDashboardDnd'
 import { useTwoClickConfirmKey } from '@/hooks/useTwoClickConfirm'
 import {
@@ -166,6 +167,13 @@ export default function DashboardPage() {
   useEffect(() => {
     void loadFolders()
   }, [reloadKey, loadFolders])
+
+  // vault ライブ取り込み (外部 .md 編集 → DB) 完了時に再フェッチ (user gate 無しで vaultMode 未サインインでも反映)
+  useEffect(() => {
+    const onImported = () => { void load(); void loadFolders() }
+    window.addEventListener(VAULT_IMPORTED_EVENT, onImported)
+    return () => window.removeEventListener(VAULT_IMPORTED_EVENT, onImported)
+  }, [load, loadFolders])
 
   // 選択中フォルダが folders 一覧から消えた場合 (別デバイスでの削除等) は Inbox にフォールバック。
   // null (= 未初期化) は **bootstrap useEffect の責務** なのでここでは触らない:

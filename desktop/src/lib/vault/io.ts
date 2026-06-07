@@ -77,6 +77,16 @@ export async function pathExists(absPath: string): Promise<boolean> {
   return exists(absPath)
 }
 
+/** 絶対パスから 1 ファイルのテキストを読む (watcher の echo 判定用)。欠損/失敗時は null。 */
+export async function readVaultFile(absPath: string): Promise<string | null> {
+  try {
+    if (!(await exists(absPath))) return null
+    return await readTextFile(absPath)
+  } catch {
+    return null
+  }
+}
+
 /** AppData 相対パスの存在確認。 */
 export async function appDataExists(relPath: string): Promise<boolean> {
   try {

@@ -199,7 +199,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
             </div>
             <p className="mt-2 text-xs text-neutral-400">
               {vaultPath
-                ? 'ON にすると次回起動から毎回 vault のファイルで DB を作り直します。外部エディタ（Obsidian 等）で編集する場合は、ファイル先頭 frontmatter の cells: の JSON（"text" 等）を直接編集してください。本文の見出し（# / ##）は表示専用で、編集しても反映されません。先にバックアップを推奨します。'
+                ? 'ON にすると vault のファイルが正になり、外部エディタ（Obsidian 等）での編集が DB に反映されます。本文の見出し（## [ ] テキスト #c/色 ^pN）を自然に編集すれば取り込まれ、アプリ起動中の編集はそのまま自動で反映されます。先にバックアップを推奨します。'
                 : '先に vault フォルダを選択してください。'}
             </p>
           </div>

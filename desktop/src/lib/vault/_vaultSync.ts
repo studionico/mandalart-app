@@ -3,7 +3,8 @@ import { query } from '@/lib/db'
 import { scanVault, ensureDir, writeVaultFile, removeVaultFile, removeDir } from './io'
 import { mandalartToVaultFiles, vaultFilesToRows, MANDALART_DOC_NAME } from './vaultModel'
 import { docContentEquivalent } from './vaultFormat'
-import { diffFiles } from './reconcile'
+import { diffFiles, hashContent } from './reconcile'
+import { writeLedger } from './vaultWriteLedger'
 import { loadMandalartRows, loadAllMandalartIds } from './dbRows'
 import { applyVaultRowsToDb, type ApplyOptions, type ApplyReport } from './applyToDb'
 import { flushImagesToVault, restoreImagesFromVault } from './imageVault'
@@ -90,7 +91,9 @@ export async function exportAllToVault(vaultRoot: string): Promise<ExportReport>
     const dirAbs = await join(vaultRoot, dirName)
     await ensureDir(dirAbs)
     for (const f of files) {
-      await writeVaultFile(await join(dirAbs, f.path), f.content)
+      const absPath = await join(dirAbs, f.path)
+      await writeVaultFile(absPath, f.content)
+      writeLedger.record(absPath, await hashContent(f.content)) // baseline を「既知」にし watcher が外部扱いしない
       fileCount++
     }
     try {
@@ -155,7 +158,9 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
 
     if (renameFrom) {
       for (const f of desired.files) {
-        await writeVaultFile(await join(dirAbs, f.path), f.content)
+        const absPath = await join(dirAbs, f.path)
+        await writeVaultFile(absPath, f.content)
+        writeLedger.record(absPath, await hashContent(f.content))
         written++
       }
       await removeDir(await join(vaultRoot, renameFrom))
@@ -173,7 +178,16 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
 
       const plan = diffFiles(existing?.files ?? [], desired.files)
       for (const f of plan.write) {
-        await writeVaultFile(await join(dirAbs, f.path), f.content)
+        const absPath = await join(dirAbs, f.path)
+        const ex = exMap.get(f.path)
+        // clobber ガード: 既存 disk が前回同期以降に外部編集されていたら上書きしない (watcher→reconcile
+        // が取り込む)。新規 file (ex undefined) はガード対象外。
+        if (ex !== undefined && writeLedger.isExternallyModified(absPath, await hashContent(ex))) {
+          console.info('[vault] flush skip (外部編集を保護):', f.path)
+          continue
+        }
+        await writeVaultFile(absPath, f.content)
+        writeLedger.record(absPath, await hashContent(f.content))
         written++
       }
       for (const p of plan.deletePaths) {
@@ -221,7 +235,13 @@ export async function reconcileVaultToDb(
   // 検知: フォルダ内の grid .md 数 (= _mandalart.md 以外) より parse できた grid 数が少なければ失敗あり。
   const skipGridDeletionFor = new Set<string>()
   for (const d of dirs) {
-    const rows = vaultFilesToRows(d.files)
+    // 取り込んだ disk 状態を台帳に記録 (続く auto-flush の正準化書き戻しが clobber ガードを通過でき、
+    // watcher の echo-skip 基準にもなる)。parse 成否に関わらず全 file を記録する。
+    for (const f of d.files) {
+      writeLedger.record(await join(vaultRoot, d.dirName, f.path), await hashContent(f.content))
+    }
+    // applyBody:true = 本文 (人間可読ビュー) の編集を frontmatter にマージして DB へ反映 (本文ラウンドトリップ)。
+    const rows = vaultFilesToRows(d.files, true)
     if (!rows) continue
     all.push(rows)
     const gridFileCount = d.files.filter(

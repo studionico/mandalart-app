@@ -74,6 +74,12 @@ export const MEMO_SAVE_DEBOUNCE_MS = 800
  */
 export const VAULT_FLUSH_DEBOUNCE_MS = 3000
 
+/**
+ * vault ライブ watcher の取り込み debounce (ms)。外部 (Obsidian 等) で .md が変更されてから
+ * この時間静穏になったら vault→DB の reconcile を 1 回走らせる。エディタの連続保存を 1 回に畳む。
+ */
+export const VAULT_IMPORT_DEBOUNCE_MS = 800
+
 // --- UI 確認ダイアログ ---
 
 /**

@@ -241,8 +241,9 @@ describe('Obsidian 双方向リンク (本文 wiki-link)', () => {
   it('親→子: 子グリッドを持つ周辺セル見出しが子へのリンク、子なしは素のテキスト', () => {
     const root = fileContent(sampleRows(), 'g-root.md')
     // c-root-p2「運動」は g-drill を drill しているのでリンク、c-root-p0「食事」は子なしで素のテキスト
-    expect(root).toContain('## [[g-drill|運動]]')
-    expect(root).toContain('## 食事')
+    // (本文ラウンドトリップ正準形: `## [done] <text/link> #c/color ^pN`)
+    expect(root).toContain('## [ ] [[g-drill|運動]] ^p2')
+    expect(root).toContain('## [ ] 食事 ^p0')
     expect(root).not.toMatch(/\[\[[^\]]*食事/)
   })
 
@@ -285,12 +286,13 @@ describe('Obsidian 双方向リンク (本文 wiki-link)', () => {
     expect(attachmentName('images/pending:af2:7-1780.jpg')).toBe('pending-af2-7-1780.jpg')
   })
 
-  it('画像だけ (テキスト空) の周辺セルも embed が出る (見出しは省く)', () => {
+  it('画像だけ (テキスト空) の周辺セルも見出し (^pN) + embed が出る (本文から編集可能にするため)', () => {
     const rows = sampleRows()
     rows.cells.push(cell('c-root-p5', 'g-root', 5, { text: '', image_path: 'images/only-img.jpg' }))
     const root = mandalartToVaultFiles(rows).files.find((f) => f.path === 'g-root.md')!.content
+    // 正準形ではテキスト空でも ^pN 付き見出しを出す (パースで position を引けるように) + embed。
+    expect(root).toContain('## [ ] ^p5')
     expect(root).toContain('![[only-img.jpg]]')
-    expect(root).not.toContain('## (無題)') // テキスト無し画像のみは見出しを出さない
   })
 
   it('コロン入り image_path の embed はサニタイズされた名前で出る', () => {

@@ -127,8 +127,11 @@ export function mandalartToVaultFiles(rows: MandalartRows): MandalartVaultFiles 
 /**
  * vault ファイル群 → DB 行。`_mandalart.md` が無い / 壊れている場合は null。
  * grid ファイルの parse 失敗は skip+warn (誤削除しない方針、parse できた分だけ返す)。
+ *
+ * `applyBody=true` のとき grid 本文 (人間可読ビュー) の編集を frontmatter にマージする (本文ラウンド
+ * トリップ)。vault→DB 取り込み (reconcileVaultToDb) だけ true、DB→vault 読取は既定 false。
  */
-export function vaultFilesToRows(files: VaultFile[]): MandalartRows | null {
+export function vaultFilesToRows(files: VaultFile[], applyBody = false): MandalartRows | null {
   const mandalartFile = files.find((f) => f.path === MANDALART_DOC_NAME)
   if (!mandalartFile) return null
   const parsedMandalart = parseMandalartDoc(mandalartFile.content)
@@ -141,7 +144,7 @@ export function vaultFilesToRows(files: VaultFile[]): MandalartRows | null {
   for (const file of files) {
     if (file.path === MANDALART_DOC_NAME) continue
     if (!file.path.endsWith('.md')) continue
-    const parsed = parseGridDocument(file.content, mandalart.id)
+    const parsed = parseGridDocument(file.content, mandalart.id, applyBody)
     if (!parsed) {
       console.warn(`[vault] grid ファイルの parse をスキップ: ${file.path}`)
       continue

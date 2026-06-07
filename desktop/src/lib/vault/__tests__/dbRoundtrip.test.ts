@@ -9,6 +9,7 @@ import { getRootGrids, createGrid } from '@/lib/api/grids'
 import { upsertCellAt, updateCell, toggleCellDone } from '@/lib/api/cells'
 import { loadMandalartRows } from '@/lib/vault/dbRows'
 import { mandalartToVaultFiles, vaultFilesToRows } from '@/lib/vault/vaultModel'
+import { applyVaultRowsToDb } from '@/lib/vault/applyToDb'
 
 /**
  * Phase 2 Stage 3a: **実 SQLite (in-memory)** の行が vault ファイル経由で完全往復することを保証する。
@@ -103,5 +104,61 @@ describe('vault ⇄ 実 SQLite round-trip', () => {
       expect(b.get(id)!.parent_cell_id).toBe(g.parent_cell_id)
       expect(b.get(id)!.center_cell_id).toBe(g.center_cell_id)
     }
+  })
+})
+
+describe('本文ラウンドトリップ (applyBody:true) で本文編集が実 DB に反映される', () => {
+  it('text / done / color の本文見出し編集が applyVaultRowsToDb で DB に書かれる', async () => {
+    const m = await createMandalart('健康')
+    const root = (await getRootGrids(m.id))[0]
+    await upsertCellAt(root.id, 2, { text: '運動' })
+
+    const vault = mandalartToVaultFiles((await loadMandalartRows(m.id))!)
+    // 外部エディタで本文見出しを編集した状態を作る (frontmatter の "運動" には ` ^p2` が続かない)。
+    const edited = vault.files.map((f) =>
+      f.path === `${root.id}.md`
+        ? { ...f, content: f.content.replace('[ ] 運動 ^p2', '[x] 運動編集 #c/blue-100 ^p2') }
+        : f,
+    )
+
+    await applyVaultRowsToDb([vaultFilesToRows(edited, true)!])
+
+    const after = (await loadMandalartRows(m.id))!
+    const c = after.cells.find((x) => x.grid_id === root.id && x.position === 2)!
+    expect(c.text).toBe('運動編集')
+    expect(c.done).toBe(true)
+    expect(c.color).toBe('blue-100')
+  })
+
+  it('本文から embed を削除すると画像がクリアされる', async () => {
+    const m = await createMandalart('t')
+    const root = (await getRootGrids(m.id))[0]
+    const p1 = await upsertCellAt(root.id, 1, { text: '画像セル' })
+    await updateCell(p1.id, { image_path: 'images/x.jpg' })
+
+    const vault = mandalartToVaultFiles((await loadMandalartRows(m.id))!)
+    const edited = vault.files.map((f) =>
+      f.path === `${root.id}.md` ? { ...f, content: f.content.replace('\n![[x.jpg]]', '') } : f,
+    )
+    await applyVaultRowsToDb([vaultFilesToRows(edited, true)!])
+
+    const after = (await loadMandalartRows(m.id))!
+    const c = after.cells.find((x) => x.grid_id === root.id && x.position === 1)!
+    expect(c.image_path).toBeNull()
+  })
+
+  it('applyBody=false (既定) の DB→vault 読取は本文を読まない (回帰)', async () => {
+    const m = await createMandalart('t')
+    const root = (await getRootGrids(m.id))[0]
+    await upsertCellAt(root.id, 3, { text: '元' })
+
+    const vault = mandalartToVaultFiles((await loadMandalartRows(m.id))!)
+    const edited = vault.files.map((f) =>
+      f.path === `${root.id}.md` ? { ...f, content: f.content.replace('元 ^p3', '改竄 ^p3') } : f,
+    )
+    // 既定 (applyBody 省略) は frontmatter のみ → 本文改竄は無視される。
+    const restored = vaultFilesToRows(edited)!
+    const c = restored.cells.find((x) => x.position === 3)!
+    expect(c.text).toBe('元')
   })
 })

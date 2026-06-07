@@ -21,6 +21,7 @@ import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
 import { useCloudFoldersCleanup } from './hooks/useCloudFoldersCleanup'
 import { useWelcomeOnFirstRun } from './hooks/useWelcomeOnFirstRun'
 import { useVaultAutoFlush } from './hooks/useVaultAutoFlush'
+import { useVaultWatcher } from './hooks/useVaultWatcher'
 import { initVaultDevMode } from './lib/vault/dev'
 
 /**
@@ -40,6 +41,7 @@ export default function App() {
   useCloudEmptyCellsCleanup()
   useCloudFoldersCleanup()
   useVaultAutoFlush()
+  useVaultWatcher()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   // Phase 2 P3: 起動 bootstrap。vaultMode ON なら Routes 描画前に vault→DB 再構築をブロック実行する。

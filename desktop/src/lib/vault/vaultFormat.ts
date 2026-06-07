@@ -1,6 +1,7 @@
 import type { Grid, Cell, Mandalart } from '@/types'
 import { CENTER_POSITION } from '@/constants/grid'
 import { buildDoc, parseDoc } from './frontmatter'
+import { parseGridBody, mergeBody } from './vaultBody'
 import {
   VAULT_FORMAT,
   type GridKind,
@@ -61,12 +62,16 @@ export function buildGridDocument(grid: Grid, cells: Cell[], links?: GridBodyLin
 /**
  * `<gridId>.md` を Grid + Cell[] に復元する。format 不一致 / grid 欠損は null (skip+warn)。
  * mandalart_id は file からは判らないので caller (vaultModel) が渡す。grid_id は file の grid.id。
+ *
+ * `applyBody=true` のとき本文 (人間可読ビュー) の編集を frontmatter にマージする (本文ラウンドトリップ)。
+ * vault→DB 取り込み (reconcile) だけ true、DB→vault 読取は false (frontmatter だけ信頼)。
  */
 export function parseGridDocument(
   content: string,
   mandalartId: string,
+  applyBody = false,
 ): { grid: Grid; cells: Cell[] } | null {
-  const { format, fields } = parseDoc(content)
+  const { format, fields, body } = parseDoc(content)
   if (format !== VAULT_FORMAT) return null
   const sg = fields.grid as SerializedGrid | undefined
   if (!sg || typeof sg.id !== 'string') return null
@@ -82,7 +87,7 @@ export function parseGridDocument(
     created_at: sg.created_at,
     updated_at: sg.updated_at,
   }
-  const cells: Cell[] = sc.map((c) => ({
+  let cells: Cell[] = sc.map((c) => ({
     id: c.id,
     grid_id: sg.id,
     position: c.position,
@@ -93,6 +98,12 @@ export function parseGridDocument(
     created_at: c.created_at,
     updated_at: c.updated_at,
   }))
+
+  if (applyBody) {
+    const bodyParse = parseGridBody(body)
+    cells = mergeBody(cells, bodyParse, grid.id, grid.updated_at)
+    if (bodyParse.memo.set) grid.memo = bodyParse.memo.value
+  }
   return { grid, cells }
 }
 
@@ -190,36 +201,56 @@ export function attachmentName(imagePath: string): string {
   return base.replace(/[:*?"<>|#^[\]\\]+/g, '-')
 }
 
-/** セル見出し。子グリッドがあれば見出しを子へのリンクにする (親→子)。 */
-function renderCellHeading(
-  prefix: string,
-  cell: Cell,
-  fallback: string,
-  childByCell?: Map<string, string>,
-): string {
-  const label = cell.text.trim() || fallback
-  const childId = childByCell?.get(cell.id)
-  return childId ? `${prefix} ${wikiLink(childId, label)}` : `${prefix} ${label}`
+/**
+ * 色 → 本文タグ `#c/<color>`。preset key はそのまま、hex (先頭 `#`) は `hex-<digits>` に畳む。
+ * 色なし (null/空) は null。vaultBody の `decodeColorTag` と対の reversible 表現。
+ */
+function colorTag(color: string | null): string | null {
+  if (!color) return null
+  if (color.startsWith('#')) return `#c/hex-${color.slice(1)}`
+  return `#c/${color}`
 }
 
 /**
- * セルの見出し + (画像があれば) Obsidian embed 行。画像は vault の `attachments/<basename>` に
- * コピーされており、`![[<basename>]]` で Obsidian が表示する (basename は vault 内一意)。
+ * セル見出し (本文ラウンドトリップ正準形): `<prefix> [done] <text or [[childId|text]]> #c/<color> ^p<N>`。
+ * done は `[x]`/`[ ]`、color は `#c/...`、position は Obsidian block-ref `^pN`。vaultBody が逆に parse する。
+ * 子グリッドがあれば label を子へのリンクにする (親→子)。
+ */
+function renderCellHeading(
+  prefix: string,
+  cell: Cell,
+  childByCell?: Map<string, string>,
+): string {
+  const done = cell.done ? '[x]' : '[ ]'
+  const label = cell.text.trim()
+  const parts: string[] = [prefix, done]
+  const childId = childByCell?.get(cell.id)
+  if (childId) parts.push(wikiLink(childId, label))
+  else if (label !== '') parts.push(label)
+  const tag = colorTag(cell.color)
+  if (tag) parts.push(tag)
+  parts.push(`^p${cell.position}`)
+  return parts.join(' ')
+}
+
+/**
+ * セルの見出し + (画像があれば) Obsidian embed 行。非空セル (text / 子リンク / 画像のいずれか) は
+ * 必ず `^pN` 付き見出しを出す (= 本文から全フィールドを編集可能にするため)。画像は vault の
+ * `attachments/<basename>` にコピーされ `![[<basename>]]` で Obsidian が表示する (basename は vault 内一意)。
  * imageVault への import は循環依存になるため basename はここで素朴に抽出する。
  */
 function renderCellLines(
   prefix: string,
   cell: Cell,
-  fallback: string,
   childByCell?: Map<string, string>,
   forceHeading = false,
 ): string[] {
   const hasChild = childByCell?.has(cell.id) ?? false
+  const hasText = cell.text.trim() !== ''
+  const hasImage = !!cell.image_path
   const lines: string[] = []
-  // テキストか子リンクがあれば見出しを出す。画像だけのセルは見出しを省き embed のみ
-  // (中心セルは forceHeading でグリッドタイトルとして必ず見出しを出す)。
-  if (forceHeading || cell.text.trim() !== '' || hasChild) {
-    lines.push(renderCellHeading(prefix, cell, fallback, childByCell))
+  if (forceHeading || hasText || hasChild || hasImage) {
+    lines.push(renderCellHeading(prefix, cell, childByCell))
   }
   if (cell.image_path) {
     lines.push(`![[${attachmentName(cell.image_path)}]]`)
@@ -242,7 +273,7 @@ function renderGridBody(
     lines.push(`親: ${wikiLink(links.parent.gridId, links.parent.label)}`, '')
   }
   const center = cellsSortedByPosition.find((c) => c.position === CENTER_POSITION)
-  if (center) lines.push(...renderCellLines('#', center, '(中心)', links?.childByCell, true))
+  if (center) lines.push(...renderCellLines('#', center, links?.childByCell, true))
   else lines.push('# (中心)')
   if (memo && memo.trim() !== '') {
     for (const memoLine of memo.split('\n')) lines.push(`> ${memoLine}`)
@@ -251,7 +282,7 @@ function renderGridBody(
     if (c.position === CENTER_POSITION) continue
     // テキスト・画像・子グリッドのいずれも無い空セルだけスキップ (画像だけのセルは残す)。
     if (c.text.trim() === '' && !c.image_path && !links?.childByCell?.has(c.id)) continue
-    lines.push('', ...renderCellLines('##', c, '(無題)', links?.childByCell))
+    lines.push('', ...renderCellLines('##', c, links?.childByCell))
   }
   return lines.join('\n')
 }

@@ -32,7 +32,10 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-fs = "2.5.0"
+# watch feature = notify ベースの fs watch コマンド (plugin:fs|watch) を有効化。
+# 無効だと JS の watch() import は存在しても Rust コマンド未登録で "Command watch not found"。
+# vault ライブ watcher (useVaultWatcher) が外部 .md 編集を検知するのに必須。
+tauri-plugin-fs = { version = "2.5.0", features = ["watch"] }
 tauri-plugin-process = "2.3.1"
 tauri-plugin-deep-link = "2.4.8"
 tauri-plugin-window-state = "2"
