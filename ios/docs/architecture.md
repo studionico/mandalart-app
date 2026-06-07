@@ -63,7 +63,8 @@ ios/
 │   ├── Utils/
 │   │   ├── Constants.swift       GridConstants / LayoutConstants / TimingConstants / FontConstants / MandalartFontPreference
 │   │   ├── NeutralPalette.swift  Tailwind neutral 系列を直 RGB で持つ adaptive 背景色群 (systemBackground を意図的に回避)
-│   │   ├── PresetColors.swift    desktop と完全一致の 10 色 (light/dark 両値)
+│   │   ├── PresetColors.swift    struct PresetColor + find / backgroundColor ヘルパ (all は generated 側)
+│   │   ├── PresetColors.generated.swift  AUTO-GENERATED: all (10 色 light/dark)。単一ソース shared/constants/colors.json → `cd desktop && npm run codegen` で desktop colors.ts と同値生成
 │   │   └── ThemePreference.swift app.theme グローバル UserDefaults / 3 値 enum (light/system/dark) / colorScheme 算出
 │   ├── Vault/                vault フォルダモード (Phase 2) のピュア層を desktop から移植。
 │   │   │                     Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存。Stage 0/1〜④ で本番配線済み (vaultMode ON / DEBUG 限定)
@@ -82,7 +83,7 @@ ios/
 │   └── Resources/
 │       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)
-├── MandalartTests/          vault ピュア層のユニットテスト (XCTest)。VaultFormat/Model/Reconcile + 共有フィクスチャ
+├── MandalartTests/          vault ピュア層のユニットテスト (XCTest)。VaultFormat/Model/Reconcile + GoldenFixtureTests (repo 直下 shared/vault-fixtures/*.json を desktop vitest と共有して TS↔Swift 乖離を検出)
 └── docs/                    本ドキュメント群
 ```
 
