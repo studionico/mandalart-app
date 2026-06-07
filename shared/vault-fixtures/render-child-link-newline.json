@@ -1,0 +1,11 @@
+{
+  "kind": "gridRender",
+  "name": "改行入りセルの子リンクは単一行に畳まれる (Obsidian リンク健全性)",
+  "grid": { "id": "g1", "centerCellId": "c4", "parentCellId": null, "sortOrder": 0, "memo": null },
+  "cells": [
+    { "id": "c4", "position": 4, "text": "中心" },
+    { "id": "c2", "position": 2, "text": "発揮\n窮地に立てば潜在能力が発揮される" }
+  ],
+  "links": { "childByCell": { "c2": "g-child" } },
+  "contains": ["[[g-child|発揮 窮地に立てば潜在能力が発揮される]]"]
+}

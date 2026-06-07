@@ -1,0 +1,10 @@
+{
+  "kind": "gridRender",
+  "name": "改行入りラベルの親 (一つ上) リンクは単一行に畳まれる",
+  "grid": { "id": "g-drill", "centerCellId": "c-root-p2", "parentCellId": "c-root-p2", "sortOrder": 0, "memo": null },
+  "cells": [
+    { "id": "c-drill-p1", "position": 1, "text": "筋トレ" }
+  ],
+  "links": { "parent": { "gridId": "g-root", "label": "健康\n2026 年" } },
+  "contains": ["親: [[g-root|健康 2026 年]]"]
+}

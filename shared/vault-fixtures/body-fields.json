@@ -1,0 +1,14 @@
+{
+  "kind": "bodyParse",
+  "name": "見出しから text / done / color を抽出する",
+  "body": "## [x] 運動 #c/red-100 ^p2",
+  "expect": {
+    "cells": {
+      "2": {
+        "text": { "set": true, "value": "運動" },
+        "done": { "set": true, "value": true },
+        "color": { "set": true, "value": "red-100" }
+      }
+    }
+  }
+}
