@@ -40,6 +40,8 @@
 | 7. Clean (必要時) | `Shift+Cmd+K` |
 | 8. SwiftData schema 不整合クラッシュ時 | Simulator アプリ長押し→削除して再 Run (or VersionedSchema 移行) |
 
+**CI**: vault ピュア層のユニットテスト (`VaultTests` スキーム) は [`.github/workflows/ios-ci.yml`](../.github/workflows/ios-ci.yml) が `ios/**` 変更時に macOS runner で自動実行する (`xcodegen generate` → `xcodebuild test -scheme VaultTests`)。Supabase 非リンク・Secrets 不要。desktop フロント/Rust は [`ci.yml`](../.github/workflows/ci.yml) / `release.yml` 担当。
+
 ## Swift コード規約
 
 ### ハードコーディング禁止

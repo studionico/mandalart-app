@@ -1,0 +1,53 @@
+name: iOS CI
+
+# iOS の vault ピュア層ユニットテスト (VaultTests スキーム) を回す。
+# VaultTests は Supabase を非リンクなので Simulator destination を見失う落とし穴 #1 を踏まず、
+# Secrets.swift も不要 (app ターゲットを巻き込まないため)。macOS runner は分課金が重いので
+# iOS 関連の変更時のみ起動する。Rust/Tauri と desktop フロントエンドは ci.yml が担当。
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-ci.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-ci.yml'
+
+jobs:
+  vault-tests:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_16.app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve iOS Simulator udid
+        # runner イメージで利用可能な iPhone Simulator の udid を 1 つ解決し、name 指定の曖昧さ
+        # (同名で複数 OS) を避けて udid で固定する。一覧もログに残す (イメージ更新時のデバッグ用)。
+        run: |
+          xcrun simctl list devices available | grep -i iphone || true
+          SIM_ID=$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; ids=[x["udid"] for rt in d for x in d[rt] if x.get("isAvailable") and "iPhone" in x["name"]]; print(ids[0] if ids else "")')
+          test -n "$SIM_ID" || { echo "No iPhone simulator available"; exit 1; }
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          echo "Using simulator udid: $SIM_ID"
+
+      - name: Run VaultTests
+        run: |
+          xcodebuild test \
+            -scheme VaultTests \
+            -destination "platform=iOS Simulator,id=$SIM_ID"
