@@ -1,0 +1,15 @@
+{
+  "_comment": "セル背景色プリセットの単一ソース (desktop=Tailwind クラス / iOS=RGB)。shared/codegen/gen-constants.mjs が desktop colors.generated.ts と iOS PresetColors.generated.swift を生成する。tailwindBase+darkShade=desktop クラス用、light/dark=iOS RGB (Tailwind v3 値)。編集後は `cd desktop && npm run codegen`。",
+  "colors": [
+    { "key": "red-100",    "label": "赤",         "tailwindBase": "red",     "darkShade": 900, "light": [254, 226, 226], "dark": [127, 29, 29] },
+    { "key": "orange-100", "label": "オレンジ",   "tailwindBase": "orange",  "darkShade": 900, "light": [255, 237, 213], "dark": [124, 45, 18] },
+    { "key": "yellow-100", "label": "黄",         "tailwindBase": "yellow",  "darkShade": 900, "light": [254, 249, 195], "dark": [113, 63, 18] },
+    { "key": "green-100",  "label": "緑",         "tailwindBase": "green",   "darkShade": 900, "light": [220, 252, 231], "dark": [20, 83, 45] },
+    { "key": "teal-100",   "label": "ティール",   "tailwindBase": "teal",    "darkShade": 900, "light": [204, 251, 241], "dark": [19, 78, 74] },
+    { "key": "blue-100",   "label": "青",         "tailwindBase": "blue",    "darkShade": 900, "light": [219, 234, 254], "dark": [30, 58, 138] },
+    { "key": "indigo-100", "label": "インディゴ", "tailwindBase": "indigo",  "darkShade": 900, "light": [224, 231, 255], "dark": [49, 46, 129] },
+    { "key": "purple-100", "label": "紫",         "tailwindBase": "purple",  "darkShade": 900, "light": [243, 232, 255], "dark": [88, 28, 135] },
+    { "key": "pink-100",   "label": "ピンク",     "tailwindBase": "pink",    "darkShade": 900, "light": [252, 231, 243], "dark": [131, 24, 67] },
+    { "key": "gray-100",   "label": "グレー",     "tailwindBase": "neutral", "darkShade": 700, "light": [245, 245, 245], "dark": [64, 64, 64] }
+  ]
+}

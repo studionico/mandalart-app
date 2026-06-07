@@ -56,7 +56,7 @@
 | フォントスケール | `FontConstants` | `levelMin`, `levelMax`, `levelDefault`, `stepFactor`, `scale(for:)`、legacy `levelStorageKey` |
 | マンダラート単位設定 | `MandalartFontPreference` | `load(for:)`, `save(_:for:)` — UserDefaults キー `mandalart.fontLevel.<mandalartId>` (per-device、cross-device 同期なし) |
 | テーマ override | [`ThemePreference`](Mandalart/Utils/ThemePreference.swift) | `storageKey = "app.theme"` (グローバル UserDefaults、cross-device 同期なし) / rawValue `light` / `system` / `dark` / `colorScheme` で `.preferredColorScheme(_:)` に渡し `system` 時は `nil` で OS 追従 |
-| カラープリセット | [`PresetColors`](Mandalart/Utils/PresetColors.swift) | `all` (10 色)、`find(_:)`。desktop の `constants/colors.ts` と完全に同じ key 文字列 |
+| カラープリセット | [`PresetColors`](Mandalart/Utils/PresetColors.swift) | `find(_:)`。`all` (10 色) は [`PresetColors.generated.swift`](Mandalart/Utils/PresetColors.generated.swift) = 単一ソース [`shared/constants/colors.json`](../shared/constants/colors.json) から codegen (desktop colors.ts と同値)。変更は colors.json 編集 → `cd desktop && npm run codegen` → `xcodegen generate`。**新規生成ファイルは xcodegen 再生成しないと project 未登録でビルド失敗する** |
 
 ### モデル / 同期
 

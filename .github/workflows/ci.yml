@@ -36,6 +36,14 @@ jobs:
         # husky 等の他の prepare script は走らない (npm rebuild は対象パッケージ限定なので安全)。
         run: npm rebuild better-sqlite3
 
+      - name: Codegen drift check (shared/constants → 生成物が最新か)
+        # 単一ソース (shared/constants/*.json) から定数を再生成し、commit 済みの生成物と差分が無いか検証する。
+        # 差分があれば「単一ソースを変えたのに codegen を実行/commit していない」= ドリフトなので CI red。
+        run: |
+          npm run codegen
+          git diff --exit-code -- src/constants/colors.generated.ts ../ios/Mandalart/Utils/PresetColors.generated.swift \
+            || { echo "::error::codegen 生成物が古い。'cd desktop && npm run codegen' を実行して commit してください"; exit 1; }
+
       - name: Typecheck
         run: npm run typecheck
 

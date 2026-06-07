@@ -10,7 +10,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'src-tauri/target', 'src-tauri/gen'] },
+  // *.generated.ts は codegen 出力 (shared/codegen)。eslint --fix で整形すると codegen 再生成と
+  // 食い違い、CI の drift ガードが誤検知するので lint 対象外にする。
+  { ignores: ['dist', 'node_modules', 'src-tauri/target', 'src-tauri/gen', 'src/**/*.generated.ts'] },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

@@ -13,6 +13,7 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "codegen": "node ../shared/codegen/gen-constants.mjs",
     "prepare": "cd .. && husky desktop/.husky"
   },
   "lint-staged": {

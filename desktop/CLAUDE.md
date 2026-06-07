@@ -67,7 +67,7 @@
 | タイミング (ms) | [`timing.ts`](src/constants/timing.ts) | `ANIM_STAGGER_MS`, `ANIM_FADE_MS`, `CLICK_DELAY_MS`, `CONVERGE_DURATION_MS`, `CONVERGE_DEBUG_SLOW_FACTOR` |
 | レイアウト (px) | [`layout.ts`](src/constants/layout.ts) | `OUTER_GRID_GAP_PX`, `CELL_BASE_FONT_PX`, `DASHBOARD_CARD_SIZE_PX`, `DASHBOARD_CARD_BORDER_PX`, `DASHBOARD_CARD_INSET_PX` |
 | localStorage キー | [`storage.ts`](src/constants/storage.ts) | `STORAGE_KEYS.fontLevel`, `STORAGE_KEYS.theme` |
-| カラー | [`colors.ts`](src/constants/colors.ts) | プリセットカラー定義 |
+| カラー | [`colors.ts`](src/constants/colors.ts) | プリセットカラー定義 (`PRESET_COLORS` は [`colors.generated.ts`](src/constants/colors.generated.ts) = 単一ソース [`shared/constants/colors.json`](../shared/constants/colors.json) から codegen。iOS と値を揃えるため。変更は colors.json 編集 → `npm run codegen`。CI が drift を検出) |
 | Tab 順 | [`tabOrder.ts`](src/constants/tabOrder.ts) | `TAB_ORDER`, `nextTabPosition()` |
 
 CSS 側: Tailwind gap-2 と連動する値は CSS 変数 `--outer-grid-gap` ([`index.css`](src/index.css)) で一元化。JS 側の `OUTER_GRID_GAP_PX` と値を揃えること。
