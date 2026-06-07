@@ -17,12 +17,14 @@ Supabase 運営から **Realtime Messages 過剰使用警告** (10.4M / 2.2M 制
 
 **残している経路**: サインイン直後 1 回の syncAll/fullSync + 設定画面の手動「今すぐ同期」ボタン
 
-**復帰前のチェックリスト**:
-1. Supabase Dashboard → Project → Reports → Realtime Messages の累積グラフが水平に張り付くこと
-2. Supabase 側の `BEFORE UPDATE` トリガによる `updated_at = NOW()` 書き換え動作を確認 (echo を防ぐには無効化が必須かもしれない)
-3. echo skip ロジックを iOS / desktop 両方で完全実装
-4. subscribe 経路を 1 本に統合 (`useSync` と `useRealtime` の重複排除)
-5. iOS の 15 秒 polling は永久に廃止し、mutation 駆動の dirty flag + 60 秒以上 debounce に置換
+**復帰前のチェックリスト** (現状は 2026-06-07 時点。コード実体で確認済):
+1. Supabase Dashboard → Project → Reports → Realtime Messages の累積グラフが水平に張り付くこと — 現状(2026-06-07): 運用タスク・未実施
+2. Supabase 側の `BEFORE UPDATE` トリガによる `updated_at = NOW()` 書き換え動作を確認 (echo を防ぐには無効化が必須かもしれない) — 現状(2026-06-07): トリガ存在は確認済 ([`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md))、無効化要否の判断は復帰時
+3. echo skip ロジックを iOS / desktop 両方で完全実装 — 現状(2026-06-07): vault 経路は実装済 ([`VaultWriteLedger.swift`](ios/Mandalart/Vault/VaultWriteLedger.swift) / [`vaultWriteLedger.ts`](desktop/src/lib/vault/vaultWriteLedger.ts))、**cloud realtime 経路は未完成**
+4. subscribe 経路を 1 本に統合 (`useSync` と `useRealtime` の重複排除) — 現状(2026-06-07): ❌ 未着手。両者とも別々に `subscribeRemoteChanges` をコメントアウト保持したまま並存
+5. iOS の 15 秒 polling は永久に廃止し、mutation 駆動の dirty flag + 60 秒以上 debounce に置換 — 現状(2026-06-07): polling 廃止済 (コメントアウト) ✅ / **dirty flag + 60 秒 debounce への置換は未実装** ❌
+
+> 復帰には最低でも #4 (subscribe 統合) と #5 (dirty flag 実装) の追加実装が残っている。
 
 詳細経緯と段階復帰計画: [`/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md`](/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md)
 desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
