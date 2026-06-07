@@ -83,6 +83,12 @@ describe('parseGridBody', () => {
     expect(edit.done).toEqual({ set: true, value: false })
   })
 
+  it('clean フラグ: 全見出しが ^pN 付き or 中心 placeholder なら true、^pN 無し見出しで false', () => {
+    expect(parseGridBody('# [ ] 中心 ^p4\n## [ ] a ^p0').clean).toBe(true)
+    expect(parseGridBody('# (中心)\n## [ ] a ^p0').clean).toBe(true) // 中心 placeholder は例外
+    expect(parseGridBody('## [ ] a ^p0\n## アンカー無し').clean).toBe(false)
+  })
+
   it('次行が embed なら hasImage=true、無ければ false', () => {
     const withImg = parseGridBody('## [ ] 画像 ^p1\n![[pic.jpg]]').cellsByPosition.get(1)!
     expect(withImg.hasImage).toEqual({ set: true, value: true })
@@ -112,12 +118,29 @@ describe('mergeBody', () => {
     expect(c.created_at).toBe(TS)
   })
 
-  it('frontmatter にあり本文に無い position は維持する (誤削除回避)', () => {
-    const front = [cell(0, { text: '残す' }), cell(2, { text: '消える?' })]
-    const parse = parseGridBody('## [ ] 残す ^p0') // p2 は本文に無い
+  it('クリーンな本文で見出しが消えた position は削除する (意図的削除)', () => {
+    const front = [cell(0, { text: '残す' }), cell(2, { text: '消す' })]
+    const parse = parseGridBody('## [ ] 残す ^p0') // p2 の見出しを削除した状態 (クリーン)
+    expect(parse.clean).toBe(true)
     const merged = byPos(mergeBody(front, parse, 'g1', TS))
-    expect(merged.has(2)).toBe(true)
-    expect(merged.get(2)!.text).toBe('消える?')
+    expect(merged.has(0)).toBe(true)
+    expect(merged.has(2)).toBe(false) // 削除される
+  })
+
+  it('本文がクリーンでない (壊れた見出し) ときは missing position を維持する (誤削除回避)', () => {
+    const front = [cell(0, { text: '残す' }), cell(2, { text: '維持' })]
+    const parse = parseGridBody('## [ ] 残す ^p0\n## アンカー無し見出し') // ^pN 無し見出し = グリッチ
+    expect(parse.clean).toBe(false)
+    const merged = byPos(mergeBody(front, parse, 'g1', TS))
+    expect(merged.has(2)).toBe(true) // 壊れているので維持
+  })
+
+  it('中心セル (position 4) はクリーンでも本文に無ければ維持 (削除しない)', () => {
+    const front = [cell(4, { text: '中心' }), cell(0, { text: '残す' })]
+    const parse = parseGridBody('## [ ] 残す ^p0') // 中心 H1 が無い
+    expect(parse.clean).toBe(true)
+    const merged = byPos(mergeBody(front, parse, 'g1', TS))
+    expect(merged.has(4)).toBe(true) // 中心は削除されない
   })
 
   it('embed が消えたら image_path をクリア、embed があれば frontmatter の image_path 維持', () => {

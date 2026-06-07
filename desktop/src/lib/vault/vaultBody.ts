@@ -1,4 +1,12 @@
 import type { Cell } from '@/types'
+import { CENTER_POSITION } from '@/constants/grid'
+
+/**
+ * 中心セルを自前で持たない (X=C drilled) グリッドの本文 H1 placeholder。`^pN` を持たないが
+ * **parse 失敗ではなく正規の出力**なので、本文「クリーン」判定 (削除可否) で例外扱いする。
+ * vaultFormat.renderGridBody がこの文字列を出力する (単一情報源)。
+ */
+export const CENTER_PLACEHOLDER_LINE = '# (中心)'
 
 /**
  * 本文ラウンドトリップのパース層 (ピュア、I/O なし)。iOS [VaultBody.swift](../../../../ios/Mandalart/Vault/VaultBody.swift) の TS 移植。
@@ -32,6 +40,12 @@ export type BodyCellEdit = {
 export type BodyParse = {
   cellsByPosition: Map<number, BodyCellEdit>
   memo: BodyField<string>
+  /**
+   * 本文が「クリーン」か = 全ての見出し (`#`/`##`) が有効に parse できた (`^pN` 付き or 中心 placeholder)。
+   * false = `^pN` を持たない見出し (グリッチ/手編集ミス) があった → mergeBody は安全のため削除を行わない。
+   * true のときだけ「本文に無い position は削除」を許可する (= ユーザーが見出し行を消した = 意図的削除)。
+   */
+  clean: boolean
 }
 
 /** `gridId` + position から決定的な新規セル id を作る (本文でセルを足したとき用)。 */
@@ -58,6 +72,7 @@ export function parseGridBody(body: string): BodyParse {
   const cells = new Map<number, BodyCellEdit>()
   const memoLines: string[] = []
   let sawMemo = false
+  let clean = true
 
   let i = 0
   while (i < lines.length) {
@@ -73,6 +88,7 @@ export function parseGridBody(body: string): BodyParse {
       i = j
       const parsed = parseHeadingBlock(block)
       if (parsed) cells.set(parsed[0], parsed[1])
+      else if (block[0] !== CENTER_PLACEHOLDER_LINE) clean = false // ^pN 無し見出し (中心 placeholder 以外) = グリッチ
       continue
     }
     if (line.startsWith('>')) {
@@ -87,6 +103,7 @@ export function parseGridBody(body: string): BodyParse {
   return {
     cellsByPosition: cells,
     memo: sawMemo ? setField(memoLines.join('\n')) : ABSENT,
+    clean,
   }
 }
 
@@ -99,7 +116,11 @@ function isHeadingLine(line: string): boolean {
  * frontmatter のセル群に本文の編集を適用する。
  * - 既存 position はマッチして text/color/done/image を上書き (`.absent` は維持)。
  * - 本文にあり frontmatter に無い position は `synthCellId` で新規セル化。
- * - frontmatter にあり本文に無い position は **維持** (誤削除回避)。
+ * - frontmatter にあり本文に無い position:
+ *   - **本文がクリーン (parse.clean) なら削除** (= ユーザーが見出し行を消した = 意図的削除)。
+ *     ただし**中心セル (CENTER_POSITION) は削除しない** (構造の要)。子グリッドを持つ親セルの誤削除=孤児化は
+ *     applyToDb 側の参照ガードが別途防ぐ。
+ *   - **クリーンでないなら維持** (誤削除回避。`^pN` を壊した等のグリッチで黙ってセルを消さない)。
  * updated_at は触らない (既存セルはそのまま、新セルは grid の timestamp を共有)。
  */
 export function mergeBody(
@@ -112,8 +133,16 @@ export function mergeBody(
   const usedPositions = new Set<number>()
   for (const cell of frontCells) {
     const edit = parse.cellsByPosition.get(cell.position)
-    result.push(edit ? applyEdit(edit, cell) : cell)
-    usedPositions.add(cell.position)
+    if (edit) {
+      result.push(applyEdit(edit, cell))
+      usedPositions.add(cell.position)
+    } else if (parse.clean && cell.position !== CENTER_POSITION) {
+      // クリーンな本文に見出しが無い = 意図的削除 → result から除外 (DB 側で applyToDb が削除)。
+      continue
+    } else {
+      result.push(cell) // 維持 (unclean fallback / 中心セル)
+      usedPositions.add(cell.position)
+    }
   }
   // 本文で追加された新 position (誤って順序が変わらないよう昇順)。
   for (const position of [...parse.cellsByPosition.keys()].sort((a, b) => a - b)) {

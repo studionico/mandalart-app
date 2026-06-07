@@ -1,7 +1,7 @@
 import type { Grid, Cell, Mandalart } from '@/types'
 import { CENTER_POSITION } from '@/constants/grid'
 import { buildDoc, parseDoc } from './frontmatter'
-import { parseGridBody, mergeBody } from './vaultBody'
+import { parseGridBody, mergeBody, CENTER_PLACEHOLDER_LINE } from './vaultBody'
 import {
   VAULT_FORMAT,
   type GridKind,
@@ -274,7 +274,7 @@ function renderGridBody(
   }
   const center = cellsSortedByPosition.find((c) => c.position === CENTER_POSITION)
   if (center) lines.push(...renderCellLines('#', center, links?.childByCell, true))
-  else lines.push('# (中心)')
+  else lines.push(CENTER_PLACEHOLDER_LINE)
   if (memo && memo.trim() !== '') {
     for (const memoLine of memo.split('\n')) lines.push(`> ${memoLine}`)
   }

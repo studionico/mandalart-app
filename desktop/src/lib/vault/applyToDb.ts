@@ -128,13 +128,23 @@ export async function applyVaultRowsToDb(
           await execute('DELETE FROM grids WHERE id = ?', [g.id])
         }
       }
-      // 残った grid 内で vault に無い cell を削除
+      // 残った grid 内で vault に無い cell を削除。
+      // ただし grid の center_cell_id / parent_cell_id に参照されるセルは**削除しない** (構造の要)。
+      // 本文ラウンドトリップでの削除 (mergeBody) が子持ち親セルの見出しを消したケースでも、
+      // 子グリッドの参照先を消して孤児化させないための防御ガード (整合した vault では no-op)。
+      const referencedCellIds = new Set<string>()
+      for (const g of rows.grids) {
+        referencedCellIds.add(g.center_cell_id)
+        if (g.parent_cell_id) referencedCellIds.add(g.parent_cell_id)
+      }
       const dbCells = await query<{ id: string }>(
         'SELECT c.id FROM cells c JOIN grids g ON c.grid_id = g.id WHERE g.mandalart_id = ? AND c.deleted_at IS NULL',
         [rows.mandalart.id],
       )
       for (const c of dbCells) {
-        if (!vaultCellIds.has(c.id)) await execute('DELETE FROM cells WHERE id = ?', [c.id])
+        if (!vaultCellIds.has(c.id) && !referencedCellIds.has(c.id)) {
+          await execute('DELETE FROM cells WHERE id = ?', [c.id])
+        }
       }
     }
   }

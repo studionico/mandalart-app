@@ -1,11 +1,8 @@
 import { useEffect } from 'react'
-import { join } from '@tauri-apps/api/path'
 import { useBootstrapStore } from '@/store/bootstrapStore'
 import { useVaultStore } from '@/store/vaultStore'
-import { watchVault, scanVault } from '@/lib/vault/io'
-import { reconcileVaultToDb } from '@/lib/vault/_vaultSync'
-import { hashContent } from '@/lib/vault/reconcile'
-import { writeLedger } from '@/lib/vault/vaultWriteLedger'
+import { watchVault } from '@/lib/vault/io'
+import { reconcileVaultDirs, flushDbToVault } from '@/lib/vault/_vaultSync'
 import { createFlushScheduler } from '@/lib/vault/flushScheduler'
 import { VAULT_IMPORT_DEBOUNCE_MS } from '@/constants/timing'
 
@@ -17,32 +14,40 @@ import { VAULT_IMPORT_DEBOUNCE_MS } from '@/constants/timing'
 export const VAULT_IMPORTED_EVENT = 'app:vault-imported'
 
 /**
- * vault を scan して ledger と 1 つでも異なる .md があるか (= 真の外部編集が未取り込みで残っているか)。
- * watcher の echo-skip 判定。**event のパス形式に依存しない** (macOS FSEvents はディレクトリ / 一時
- * ファイルのパスを返すことがあり、`.md` 拡張子フィルタだと外部編集イベントを取りこぼすため)。
+ * watch イベントのパス群から、変更があった**マンダラートフォルダ名** (vault ルート直下の第1セグメント)
+ * の集合を返す。
+ *
+ * macOS FSEvents は `.md` 1 ファイルの変更時に親ディレクトリ (vault ルート含む) のイベントも併せて
+ * 報告する。dir パス (`/test` 等) や `.obsidian/workspace.json` を拾うと無駄な取り込みを誘発するので、
+ * **vaultRoot 配下で rel に dot セグメントを含まない `.md` ファイルパス**だけを対象に、その直下フォルダ名
+ * を抽出する (本物の `.md` 編集では実ファイルパスが配信されることを実機で確認済み)。
  */
-async function hasExternalChange(vaultRoot: string): Promise<boolean> {
-  const dirs = await scanVault(vaultRoot)
-  for (const d of dirs) {
-    for (const f of d.files) {
-      const abs = await join(vaultRoot, d.dirName, f.path)
-      if (writeLedger.isExternallyModified(abs, await hashContent(f.content))) return true
-    }
+export function changedMandalartDirs(vaultRoot: string, paths: string[]): string[] {
+  const prefix = vaultRoot.endsWith('/') ? vaultRoot : `${vaultRoot}/`
+  const dirs = new Set<string>()
+  for (const p of paths) {
+    if (!p.endsWith('.md') || !p.startsWith(prefix)) continue
+    const rel = p.slice(prefix.length)
+    const segments = rel.split('/')
+    if (segments.some((s) => s.startsWith('.'))) continue // .obsidian/* 等 dot 配下を除外
+    const dir = segments[0]
+    if (dir && segments.length >= 2) dirs.add(dir) // <dir>/<file>.md の形のみ
   }
-  return false
+  return [...dirs]
 }
 
 /**
  * vault ライブ watcher (Phase 2 / 外部編集のライブ取り込み)。
  *
  * vaultMode ON + vaultPath 設定済みのとき、vault フォルダを `watch` し、外部 (Obsidian 等) の .md
- * 編集を検知して debounce 後に `reconcileVaultToDb` (vault→DB、本文ラウンドトリップ applyBody:true) を
- * 走らせる。取り込み後は `VAULT_IMPORTED_EVENT` を dispatch して画面を再フェッチさせる。
+ * 編集を検知して debounce 後に **変更があったマンダラートフォルダだけ** `reconcileVaultDirs` で取り込む
+ * (vault→DB、本文ラウンドトリップ applyBody:true)。1 セル編集で vault 全体を再構築するコストを避ける。
+ * 取り込み (mandalarts>0) 後は **取り込んだマンダラートを DB→vault へ即 flush** して、却下された削除
+ * (子持ち親セル / 中心セルの見出し削除) の `##` を確実に書き戻す (auto-flush のタイミング依存を排除)。
+ * その後 `VAULT_IMPORTED_EVENT` を dispatch して画面を再フェッチさせる。
  *
- * **echo-skip**: 自分 (flush / 起動 reconcile) が書いた file の反響は無視する。判定は **vault を scan して
- * [writeLedger] と 1 つでも異なる .md があるか** で行う (event パスの形式に依存しない)。すべて台帳一致
- * (= 自分の書込み) なら reconcile しない。万一取りこぼしても続く auto-flush が「desired==disk で書込み
- * ゼロ」に収束するため無限ループにはならない。
+ * **echo-skip**: 自分 (flush / 起動 reconcile) が書いた file の反響は [reconcileVaultDirs] 内で
+ * per-dir に [writeLedger] と照合して無視する (全 echo なら report.mandalarts===0)。
  *
  * [useVaultAutoFlush] (DB→vault) とは [writeLedger] を介して clobber/echo を回避するので共存可。
  */
@@ -55,26 +60,32 @@ export function useVaultWatcher() {
     if (!ready || !vaultMode || !vaultPath) return
     let disposed = false
     let unwatch: (() => void) | null = null
+    const pendingDirs = new Set<string>() // debounce 窓の間に変更されたフォルダを集約
 
     const scheduler = createFlushScheduler({
       debounceMs: VAULT_IMPORT_DEBOUNCE_MS,
       flush: async () => {
-        if (!(await hasExternalChange(vaultPath))) {
-          console.info('[vault] watcher: 外部変更なし (echo) → reconcile skip')
+        const dirs = [...pendingDirs]
+        pendingDirs.clear()
+        if (dirs.length === 0) return
+        const { mandalartIds } = await reconcileVaultDirs(vaultPath, dirs)
+        if (mandalartIds.length === 0) {
+          console.info('[vault] watcher: 外部変更なし (echo) → reconcile skip', dirs)
           return
         }
-        const report = await reconcileVaultToDb(vaultPath)
-        console.info('[vault] watcher import vault→DB:', report)
+        // 取り込んだマンダラートを DB→vault へ即 flush。却下された削除 (子持ち親 / 中心セルの ## 削除) の
+        // 見出しを確実に書き戻し、本文編集を正準形に整える (ledger は reconcile が更新済なので clobber
+        // ガードを通過する)。スコープ指定なので他マンダラート・フォルダ削除は行わない。
+        await flushDbToVault(vaultPath, { onlyMandalartIds: new Set(mandalartIds) })
         // 取り込んだ DB 変更を画面に反映 (外部編集は React が自動追従しないため)。
         window.dispatchEvent(new CustomEvent(VAULT_IMPORTED_EVENT))
       },
     })
 
     const onChange = (paths: string[]) => {
-      // dot ディレクトリ/ファイル (Obsidian の `.obsidian/workspace.json` 等) の変更は無視する。
-      // 頻繁に書かれ、scanVault も `.` 始まりフォルダを対象外にしているので scan しても無駄。
-      // 通常の .md / フォルダイベントが 1 つでもあれば取り込みを検討する (echo は scan で弾く)。
-      if (!paths.some((p) => !p.includes('/.'))) return
+      const dirs = changedMandalartDirs(vaultPath, paths)
+      if (dirs.length === 0) return // .md ファイル変更以外 (dir イベント / .obsidian/*) は無視
+      for (const d of dirs) pendingDirs.add(d)
       scheduler.notify()
     }
 

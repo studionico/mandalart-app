@@ -1,6 +1,6 @@
 import { join } from '@tauri-apps/api/path'
 import { query } from '@/lib/db'
-import { scanVault, ensureDir, writeVaultFile, removeVaultFile, removeDir } from './io'
+import { scanVault, scanMandalartDir, ensureDir, writeVaultFile, removeVaultFile, removeDir } from './io'
 import { mandalartToVaultFiles, vaultFilesToRows, MANDALART_DOC_NAME } from './vaultModel'
 import { docContentEquivalent } from './vaultFormat'
 import { diffFiles, hashContent } from './reconcile'
@@ -128,7 +128,10 @@ export type FlushReport = {
  *
  * dev のドッグフードで「アプリ編集/削除 → flush → ファイル反映」を回すのに使う。
  */
-export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
+export async function flushDbToVault(
+  vaultRoot: string,
+  opts: { onlyMandalartIds?: Set<string> } = {},
+): Promise<FlushReport> {
   await ensureDir(vaultRoot)
   const dirs = await scanVault(vaultRoot)
   const existingById = new Map<string, { dirName: string; files: VaultFile[] }>()
@@ -137,7 +140,9 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
     if (rows) existingById.set(rows.mandalart.id, { dirName: d.dirName, files: d.files })
   }
 
-  const ids = await loadAllMandalartIds()
+  // スコープ指定 (watcher の reconcile 直後の確実な書き戻し用) のときは対象マンダラートだけ flush。
+  const allIds = await loadAllMandalartIds()
+  const ids = opts.onlyMandalartIds ? allIds.filter((id) => opts.onlyMandalartIds!.has(id)) : allIds
   let written = 0
   let deleted = 0
   let imagesCopied = 0
@@ -204,8 +209,10 @@ export async function flushDbToVault(vaultRoot: string): Promise<FlushReport> {
 
   // DB live に無くなったマンダラートの vault フォルダを削除 (アプリ削除を反映)。
   // 空 DB ガード: live が 0 件のときは何も消さない (誤適用での全消し防止)。
+  // スコープ flush (onlyMandalartIds) のときは**フォルダ削除をしない** (対象外マンダラートを誤って
+  // 全消ししないため。全体 flush=auto-flush のときだけ削除反映する)。
   let deletedDirs = 0
-  if (ids.length > 0) {
+  if (!opts.onlyMandalartIds && ids.length > 0) {
     const dbIdSet = new Set(ids)
     for (const [mid, info] of existingById) {
       if (!dbIdSet.has(mid)) {
@@ -262,4 +269,62 @@ export async function reconcileVaultToDb(
     imagesRestored,
   })
   return report
+}
+
+/**
+ * vault→DB 再構築の **スコープ版** (ライブ watcher 用、実 DB 書込み)。指定した dirName のフォルダ
+ * だけを scan→取り込む。`applyVaultRowsToDb` の grid/cell 削除はマンダラート単位 (`WHERE mandalart_id`)
+ * なので、渡したマンダラートだけが同期され他は無改変。`deleteMissingMandalarts:false` 固定で
+ * 他マンダラート削除もしない。1 セル編集で vault 全体を再構築するコストを避けるための最適化。
+ *
+ * **echo-skip (per-dir)**: フォルダ内 .md が全て [writeLedger] と一致 (= 自分の書込みの反響) なら、
+ * その dir は取り込まない。1 つでも外部編集があれば ledger 更新 + 取り込み。返り値の `mandalartIds`
+ * が取り込んだマンダラート (空なら全 echo)。caller はこの id で DB→vault の確実な書き戻しに使える。
+ */
+export async function reconcileVaultDirs(
+  vaultRoot: string,
+  dirNames: string[],
+): Promise<{ report: ApplyReport; mandalartIds: string[] }> {
+  const all: MandalartRows[] = []
+  const skipGridDeletionFor = new Set<string>()
+  for (const dirName of dirNames) {
+    let files: VaultFile[]
+    try {
+      files = await scanMandalartDir(await join(vaultRoot, dirName))
+    } catch {
+      continue // フォルダ消失など (削除は full reconcile / 再起動に委ねる)
+    }
+    if (!files.some((f) => f.path === MANDALART_DOC_NAME)) continue // 不完全フォルダは skip
+
+    // 各 .md の hash を 1 回計算し、外部変更の有無を判定する。
+    const hashes: { abs: string; hash: string }[] = []
+    let external = false
+    for (const f of files) {
+      const abs = await join(vaultRoot, dirName, f.path)
+      const hash = await hashContent(f.content)
+      hashes.push({ abs, hash })
+      if (writeLedger.isExternallyModified(abs, hash)) external = true
+    }
+    if (!external) continue // 全て自分の書込みの反響 (echo) → 取り込まない
+
+    for (const { abs, hash } of hashes) writeLedger.record(abs, hash)
+    const rows = vaultFilesToRows(files, true)
+    if (!rows) continue
+    all.push(rows)
+    const gridFileCount = files.filter(
+      (f) => f.path !== MANDALART_DOC_NAME && f.path.endsWith('.md'),
+    ).length
+    if (rows.grids.length < gridFileCount) skipGridDeletionFor.add(rows.mandalart.id)
+  }
+
+  const report = await applyVaultRowsToDb(all, { skipGridDeletionFor, deleteMissingMandalarts: false })
+  try {
+    await restoreImagesFromVault(vaultRoot, all.flatMap((r) => r.cells))
+  } catch (e) {
+    console.error('[vault] 画像復元失敗 (scoped reconcile, 続行):', e)
+  }
+  if (report.mandalarts > 0) {
+    console.info('[vault] watcher import vault→DB (scoped):', report, { dirs: all.length })
+  }
+  return { report, mandalartIds: all.map((r) => r.mandalart.id) }
 }

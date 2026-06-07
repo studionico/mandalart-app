@@ -147,6 +147,45 @@ describe('本文ラウンドトリップ (applyBody:true) で本文編集が実 
     expect(c.image_path).toBeNull()
   })
 
+  it('クリーンな本文で ## 見出しを削除するとセルが DB から削除される', async () => {
+    const m = await createMandalart('t')
+    const root = (await getRootGrids(m.id))[0]
+    await upsertCellAt(root.id, 2, { text: '残す' })
+    await upsertCellAt(root.id, 0, { text: '消す' })
+
+    const vault = mandalartToVaultFiles((await loadMandalartRows(m.id))!)
+    // p0 の見出し行 (## [ ] 消す ^p0) を削除 (クリーンな本文)
+    const edited = vault.files.map((f) =>
+      f.path === `${root.id}.md` ? { ...f, content: f.content.replace(/^##[^\n]*\^p0[^\n]*$/m, '') } : f,
+    )
+    await applyVaultRowsToDb([vaultFilesToRows(edited, true)!])
+
+    const after = (await loadMandalartRows(m.id))!
+    expect(after.cells.find((c) => c.grid_id === root.id && c.position === 0)).toBeUndefined() // 削除
+    expect(after.cells.find((c) => c.grid_id === root.id && c.position === 2)).toBeDefined() // 維持
+  })
+
+  it('子グリッドを持つ親セルの見出しを消しても孤児ガードで削除されない', async () => {
+    const m = await createMandalart('t')
+    const root = (await getRootGrids(m.id))[0]
+    const p2 = await upsertCellAt(root.id, 2, { text: '運動' })
+    // p2 を drill (X=C: center_cell_id = parent_cell_id = p2)
+    const child = await createGrid({ mandalartId: m.id, parentCellId: p2.id, centerCellId: p2.id, sortOrder: 0 })
+    await upsertCellAt(child.id, 1, { text: '筋トレ' })
+
+    const vault = mandalartToVaultFiles((await loadMandalartRows(m.id))!)
+    // root の p2 見出し (子リンク `## [ ] [[child|運動]] ^p2`) を削除
+    const edited = vault.files.map((f) =>
+      f.path === `${root.id}.md` ? { ...f, content: f.content.replace(/^##[^\n]*\^p2[^\n]*$/m, '') } : f,
+    )
+    await applyVaultRowsToDb([vaultFilesToRows(edited, true)!])
+
+    const after = (await loadMandalartRows(m.id))!
+    // p2 は子グリッドの parent/center に参照されているので削除されず、子グリッドも残る (孤児化しない)
+    expect(after.cells.find((c) => c.id === p2.id)).toBeDefined()
+    expect(after.grids.find((g) => g.id === child.id)).toBeDefined()
+  })
+
   it('applyBody=false (既定) の DB→vault 読取は本文を読まない (回帰)', async () => {
     const m = await createMandalart('t')
     const root = (await getRootGrids(m.id))[0]

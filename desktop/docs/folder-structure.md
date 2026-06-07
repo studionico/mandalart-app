@@ -140,7 +140,7 @@ src/
 │   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper (+ app:sync-pulled も listen)
 │   ├── useVisibilityResync.ts # Tauri window focus 復帰で pullAll 発火 (落とし穴 #22 保険同期、app:sync-pulled event を dispatch)
 │   ├── useVaultAutoFlush.ts  # DB 書込み (onDbWrite) → debounce → vault へ自動 flush (Phase 2 P2)。vaultMode ON のときのみ ON (master switch、OFF では自動上書きせず手動 flush のみ)
-│   ├── useVaultWatcher.ts    # vaultMode 中 vault を watch → 外部 .md 編集を debounce → reconcile で DB 取り込み (echo-skip は writeLedger)。VAULT_IMPORTED_EVENT を dispatch して画面再フェッチ
+│   ├── useVaultWatcher.ts    # vaultMode 中 vault を watch → 外部 .md 編集を debounce → 変更フォルダだけ reconcileVaultDirs で取り込み (changedMandalartDirs で .obsidian/dir イベント除外、echo-skip は writeLedger) → 直後に scoped flush で却下削除を確実復元 → VAULT_IMPORTED_EVENT で画面再フェッチ
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)
 │   ├── useSync.ts            # クラウド同期 (起動時全同期 + realtime + manual 同期 + 300ms debounce)
 │   ├── useAuthBootstrap.ts   # 起動時のセッション復元 + deep link ハンドラ登録
@@ -190,12 +190,12 @@ src/
 │   │   ├── types.ts            # VaultFile / MandalartRows / Serialized{Mandalart,Grid,Cell} 等
 │   │   ├── frontmatter.ts      # 汎用 block-scalar frontmatter codec (buildDoc / parseDoc、YAML ライブラリ非依存)
 │   │   ├── vaultFormat.ts      # md-mandalart-v1: grid 行/cell 行 ⇄ <gridId>.md、_mandalart.md の build/parse、本文正準形 render、gridKind 導出
-│   │   ├── vaultBody.ts        # 本文ラウンドトリップ parse (parseGridBody / mergeBody、三値 BodyField フォールバック、applyBody:true で本文→DB)
+│   │   ├── vaultBody.ts        # 本文ラウンドトリップ parse (parseGridBody / mergeBody、三値 BodyField フォールバック、applyBody:true で本文→DB)。clean 判定で「見出しを消した position」を削除 (中心セルは保護)
 │   │   ├── vaultModel.ts       # DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows(applyBody)、I/O なし)
 │   │   ├── reconcile.ts        # hashContent(SHA-256) / diffById / diffFiles / shouldSkipEcho (ピュアな差分計画)
 │   │   ├── vaultWriteLedger.ts # per-file 最終同期 hash 台帳 (createWriteLedger)。flush の clobber ガード + watcher の echo-skip に共用
 │   │   ├── dbRows.ts           # plugin-fs 非依存の DB 行ローダ (loadMandalartRows / loadAllMandalartIds、setupTestDb でテスト可)
-│   │   ├── applyToDb.ts        # file→DB 適用 (applyVaultRowsToDb、ON CONFLICT upsert + 削除、実 DB 書込み)
+│   │   ├── applyToDb.ts        # file→DB 適用 (applyVaultRowsToDb、ON CONFLICT upsert + マンダラート単位の削除、実 DB 書込み)。grid の center/parent 参照セルは削除しない孤児ガード付き
 │   │   ├── io.ts               # I/O アダプタ (plugin-fs の scan/watch/write/remove + binary(画像) read/write 薄ラッパ、Rust notify 不要)
 │   │   ├── imageVault.ts       # セル画像の vault attachments 化 (flushImagesToVault=AppData→vault/attachments、restoreImagesFromVault=vault→AppData、cloud 非依存)
 │   │   ├── config.ts           # vault 設定 (vaultMode / vaultPath) を AppData の vault-config.json に永続化 (plugin-store 不使用)
