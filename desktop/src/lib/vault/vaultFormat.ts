@@ -1,7 +1,7 @@
 import type { Grid, Cell, Mandalart } from '@/types'
 import { CENTER_POSITION } from '@/constants/grid'
 import { buildDoc, parseDoc } from './frontmatter'
-import { parseGridBody, mergeBody, CENTER_PLACEHOLDER_LINE } from './vaultBody'
+import { parseGridBody, mergeBody, collapseLinkLabel, CENTER_PLACEHOLDER_LINE } from './vaultBody'
 import {
   VAULT_FORMAT,
   type GridKind,
@@ -186,9 +186,13 @@ export function docContentEquivalent(a: string, b: string): boolean {
   return JSON.stringify(stripUpdatedAt(pa.fields)) === JSON.stringify(stripUpdatedAt(pb.fields))
 }
 
-/** Obsidian wiki-link (エイリアス記法)。リンク先はファイル名 (= `<gridId>.md` の basename)。 */
+/**
+ * Obsidian wiki-link (エイリアス記法)。リンク先はファイル名 (= `<gridId>.md` の basename)。
+ * エイリアスに改行があると `]]` が次行に回りリンクが壊れるので `collapseLinkLabel` で畳む
+ * (子リンクの往復改行保持は vaultBody.applyEdit が担保、表示専用リンクは畳むだけでよい)。
+ */
 function wikiLink(gridId: string, label: string): string {
-  return `[[${gridId}|${label}]]`
+  return `[[${gridId}|${collapseLinkLabel(label)}]]`
 }
 
 /**

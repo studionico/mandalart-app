@@ -53,6 +53,16 @@ export function synthCellId(gridId: string, position: number): string {
   return `${gridId}-p${position}`
 }
 
+/**
+ * wiki-link エイリアス用に改行を畳む。Obsidian の `[[id|alias]]` は alias に改行を含められない
+ * (改行があると `]]` が次行に回りリンクが壊れる) ため、改行 + 前後空白の連を半角スペース 1 個に
+ * 畳んで両端を trim する。リンク生成 (vaultFormat.wikiLink) と本文ラウンドトリップの no-op 判定
+ * (applyEdit) で**同一関数を共用**することで、畳んだエイリアスを再取り込みしても改行を保持できる。
+ */
+export function collapseLinkLabel(s: string): string {
+  return s.replace(/\s*\r?\n\s*/g, ' ').trim()
+}
+
 /** 色タグの値 (`#c/` の後) → `Cell.color` 文字列。`hex-<digits>` は `#<digits>` に戻す。 */
 export function decodeColorTag(tag: string): string {
   if (tag.startsWith('hex-')) return `#${tag.slice(4)}`
@@ -166,7 +176,15 @@ export function mergeBody(
 /** edit を 1 セルに適用した新しい Cell を返す (`.absent` は元の値を維持)。 */
 function applyEdit(edit: BodyCellEdit, cell: Cell): Cell {
   const next: Cell = { ...cell }
-  if (edit.text.set) next.text = edit.text.value
+  if (edit.text.set) {
+    // 子リンクのエイリアスは改行を空白に畳むため、本文値が frontmatter text の畳み形と
+    // 一致するなら実編集ではない → 改行を保持 (リンク単一行化と改行保持の両立)。
+    if (cell.text.includes('\n') && edit.text.value === collapseLinkLabel(cell.text)) {
+      // keep cell.text (frontmatter の改行を維持)
+    } else {
+      next.text = edit.text.value
+    }
+  }
   if (edit.done.set) next.done = edit.done.value
   if (edit.color.set) next.color = edit.color.value
   // 本文から embed が消えた = 画像クリア (embed 維持なら frontmatter の image_path を保持)。

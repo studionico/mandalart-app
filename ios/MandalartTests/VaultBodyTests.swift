@@ -40,6 +40,36 @@ final class VaultBodyTests: XCTestCase {
         XCTAssertEqual(unchanged?.text, "睡眠")
     }
 
+    /// 子リンクのエイリアスは改行を畳んで単一行で出し、往復で改行を保持する (no-op 判定)。
+    func testChildLinkCollapsesNewlineAndPreservesOnRoundTrip() {
+        let grid = makeGrid("g1", centerCellId: "c4")
+        let multiline = "発揮\n\n窮地に立てば潜在能力が発揮される"
+        let cells = [makeCell("c4", "g1", 4, text: "中心"), makeCell("c2", "g1", 2, text: multiline)]
+        let content = buildGridDocument(grid, cells, links: GridBodyLinks(childByCell: ["c2": "g-child"]))
+        // 単一行 wiki-link (改行が `[[ ]]` 内に無い)
+        XCTAssertTrue(content.contains("[[g-child|発揮 窮地に立てば潜在能力が発揮される]]"))
+        XCTAssertNil(content.range(of: "\\[\\[g-child\\|[^\\]]*\\n", options: .regularExpression))
+        // 往復で frontmatter の改行が保持される
+        let parsed = parseGridDocument(content, mandalartId: "m", applyBody: true)
+        XCTAssertEqual(parsed?.cells.first { $0.position == 2 }?.text, multiline)
+    }
+
+    /// 子リンクのエイリアスを実際に書き換えたら text 編集として反映する。
+    func testChildLinkRenameAppliesAsEdit() {
+        let grid = makeGrid("g1", centerCellId: "c4")
+        let cells = [makeCell("c4", "g1", 4, text: "中心"), makeCell("c2", "g1", 2, text: "旧\n名")]
+        let content = buildGridDocument(grid, cells, links: GridBodyLinks(childByCell: ["c2": "g-child"]))
+            .replacingOccurrences(of: "[[g-child|旧 名]]", with: "[[g-child|新名]]")
+        let parsed = parseGridDocument(content, mandalartId: "m", applyBody: true)
+        XCTAssertEqual(parsed?.cells.first { $0.position == 2 }?.text, "新名")
+    }
+
+    func testCollapseLinkLabel() {
+        XCTAssertEqual(collapseLinkLabel("a\nb"), "a b")
+        XCTAssertEqual(collapseLinkLabel("a\n\n b"), "a b")
+        XCTAssertEqual(collapseLinkLabel("健康 / 2026"), "健康 / 2026") // 改行が無ければ不変
+    }
+
     // MARK: parseGridBody フィールド抽出
 
     func testParseHeadingFields() {

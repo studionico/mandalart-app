@@ -88,6 +88,17 @@ final class VaultModelTests: XCTestCase {
         XCTAssertTrue(drill.contains("親: [[g-root|健康]]"))
     }
 
+    /// 親の中心セルテキストに改行があっても親リンクは単一行で閉じる。
+    func testChildToParentLinkCollapsesNewline() {
+        var rows = sampleRows()
+        rows.cells = rows.cells.map { c in
+            c.id == "c-root-center" ? makeCell("c-root-center", "g-root", 4, text: "健康\n2026 年", color: "red-100", done: true) : c
+        }
+        let drill = fileContent(rows, "g-drill.md")
+        XCTAssertTrue(drill.contains("親: [[g-root|健康 2026 年]]")) // 改行は空白に畳まれる
+        XCTAssertNil(drill.range(of: "\\[\\[g-root\\|[^\\]]*\\n", options: .regularExpression)) // `[[ ]]` 内に改行なし
+    }
+
     func testRootAndParallelLinkBackToMandalartDoc() {
         XCTAssertTrue(fileContent(sampleRows(), "g-root.md").contains("親: [[_mandalart|健康 / 2026]]"))
         XCTAssertTrue(fileContent(sampleRows(), "g-par.md").contains("親: [[_mandalart|健康 / 2026]]"))

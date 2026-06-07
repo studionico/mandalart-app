@@ -189,8 +189,10 @@ private func stripUpdatedAt(_ value: Any) -> Any {
 // MARK: - 本文 (人間可読ビュー) レンダリング
 
 /// Obsidian wiki-link (エイリアス記法)。リンク先はファイル名 (= `<gridId>.md` の basename)。
+/// エイリアスに改行があると `]]` が次行に回りリンクが壊れるので `collapseLinkLabel` で畳む
+/// (子リンクの往復改行保持は VaultBody.applyEdit が担保、表示専用リンクは畳むだけでよい)。
 private func wikiLink(_ gridId: String, _ label: String) -> String {
-    "[[\(gridId)|\(label)]]"
+    "[[\(gridId)|\(collapseLinkLabel(label))]]"
 }
 
 /// image_path から vault attachments 用の Obsidian/FS 安全なファイル名を作る。

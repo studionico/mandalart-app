@@ -187,6 +187,32 @@ describe('render → parse(applyBody) 往復', () => {
     expect(byPos(parsed.cells).get(1)!.text).toBe(multiline)
   })
 
+  it('子リンクのエイリアスは改行を畳んで単一行で出し、往復で改行を保持する', () => {
+    const grid = rootGrid()
+    const multiline = '発揮\n\n窮地に立てば潜在能力が発揮される'
+    const cells = [cell(4, { id: 'g1-c4', text: '中心' }), cell(2, { id: 'g1-c2', text: multiline })]
+    const childByCell = new Map([['g1-c2', 'g-child']])
+    const doc = buildGridDocument(grid, cells, { childByCell })
+    // 単一行 wiki-link (改行が `[[ ]]` 内に無い)
+    expect(doc).toContain('[[g-child|発揮 窮地に立てば潜在能力が発揮される]]')
+    expect(doc).not.toMatch(/\[\[g-child\|[^\]]*\n/)
+    // 往復で frontmatter の改行が保持される (applyEdit の no-op 判定)
+    const parsed = parseGridDocument(doc, 'm1', true)!
+    expect(byPos(parsed.cells).get(2)!.text).toBe(multiline)
+  })
+
+  it('子リンクのエイリアスを実際に書き換えたら text 編集として反映する', () => {
+    const grid = rootGrid()
+    const cells = [cell(4, { id: 'g1-c4', text: '中心' }), cell(2, { id: 'g1-c2', text: '旧\n名' })]
+    const childByCell = new Map([['g1-c2', 'g-child']])
+    const doc = buildGridDocument(grid, cells, { childByCell }).replace(
+      '[[g-child|旧 名]]',
+      '[[g-child|新名]]',
+    )
+    const parsed = parseGridDocument(doc, 'm1', true)!
+    expect(byPos(parsed.cells).get(2)!.text).toBe('新名')
+  })
+
   it('applyBody=false (既定) は frontmatter のみで本文を読まない', () => {
     const grid = rootGrid()
     const cells = [cell(4, { text: '中心' }), cell(2, { text: '元テキスト' })]

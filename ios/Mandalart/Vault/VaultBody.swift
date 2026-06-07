@@ -34,6 +34,16 @@ func synthCellId(_ gridId: String, _ position: Int) -> String {
     "\(gridId)-p\(position)"
 }
 
+/// wiki-link エイリアス用に改行を畳む。Obsidian の `[[id|alias]]` は alias に改行を含められない
+/// (改行があると `]]` が次行に回りリンクが壊れる) ため、改行 + 前後空白の連を半角スペース 1 個に
+/// 畳んで両端を trim する。リンク生成 (VaultFormat.wikiLink) と本文ラウンドトリップの no-op 判定
+/// (applyEdit) で**同一関数を共用**することで、畳んだエイリアスを再取り込みしても改行を保持できる。
+func collapseLinkLabel(_ s: String) -> String {
+    let collapsed = s.replacingOccurrences(
+        of: "\\s*\\n\\s*", with: " ", options: .regularExpression)
+    return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 /// 色タグの値 (`#c/` の後) → `Cell.color` 文字列。`hex-<digits>` は `#<digits>` に戻す。
 func decodeColorTag(_ tag: String) -> String {
     if tag.hasPrefix("hex-") {
@@ -106,7 +116,15 @@ func mergeBody(frontCells: [VaultCell], parse: BodyParse, gridId: String, timest
 }
 
 private func applyEdit(_ edit: BodyCellEdit, to cell: inout VaultCell) {
-    if case .set(let text) = edit.text { cell.text = text }
+    if case .set(let text) = edit.text {
+        // 子リンクのエイリアスは改行を空白に畳むため、本文値が frontmatter text の畳み形と
+        // 一致するなら実編集ではない → 改行を保持 (リンク単一行化と改行保持の両立)。
+        if cell.text.contains("\n"), text == collapseLinkLabel(cell.text) {
+            // keep cell.text (frontmatter の改行を維持)
+        } else {
+            cell.text = text
+        }
+    }
     if case .set(let done) = edit.done { cell.done = done }
     if case .set(let color) = edit.color { cell.color = color }
     if case .set(let hasImage) = edit.hasImage, !hasImage {

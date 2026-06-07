@@ -253,6 +253,17 @@ describe('Obsidian 双方向リンク (本文 wiki-link)', () => {
     expect(drill).toContain('親: [[g-root|健康]]')
   })
 
+  it('子→親: 親の中心セルテキストに改行があっても親リンクは単一行で閉じる', () => {
+    const rows = sampleRows()
+    // g-drill の親リンクラベルになる g-root 中心セルを複数行にする
+    rows.cells = rows.cells.map((c) =>
+      c.id === 'c-root-center' ? { ...c, text: '健康\n2026 年' } : c,
+    )
+    const drill = fileContent(rows, 'g-drill.md')
+    expect(drill).toContain('親: [[g-root|健康 2026 年]]') // 改行は空白に畳まれる
+    expect(drill).not.toMatch(/\[\[g-root\|[^\]]*\n/) // `[[ ]]` 内に改行が無い
+  })
+
   it('ルート/独立並列グリッドは _mandalart.md へ戻るリンク', () => {
     // g-root (parent_cell_id=null) も g-par (独立並列、parent_cell_id=null) も _mandalart へ戻る
     expect(fileContent(sampleRows(), 'g-root.md')).toContain('親: [[_mandalart|健康 / 2026]]')
