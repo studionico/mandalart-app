@@ -72,6 +72,7 @@ ios/
 │   │   ├── VaultFrontmatter.swift block-scalar JSON codec (buildDoc / parseDoc、YAML ライブラリ非依存)
 │   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName。本文は編集可能ビュー `<#/##> [done] text #c/color ^pN` + 画像 embed + 親子 wiki-link
 │   │   ├── VaultBody.swift        本文ラウンドトリップ parser (parseGridBody / mergeBody)。本文(ブロック単位 parse=改行入りセルも取りこぼさない)→ text/color/done/image/memo を frontmatter セルに上書き。clean な本文では消えた見出しの position を削除 (中心セル除外、孤児ガードは VaultDbApply、desktop vaultBody.ts と parity)。parseGridDocument applyBody=true で適用 (reconcile 経路で本番反映済 Stage ③)
+│   │   ├── VaultCellGuard.swift   セル空判定 / 中心セル保護の純粋判定 (CellGuard: isCellEmpty / hasPeripheralContent / canPasteIntoPeripheral)。正準定義は desktop grid.ts (空=text trim 後空 かつ imagePath nil、色/done 除外)。shared/vault-fixtures の cellGuard kind が両言語を lock。production は EditorView の SlotCell アダプタ経由 (表示スロット position、落とし穴 #10 回避)
 │   │   ├── VaultModel.swift       DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows)
 │   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / diffFilesGuarded (echo-skip)
 │   │   ├── VaultWriteLedger.swift 自分の最後の書込み hash 台帳 (clobber 安全化、Stage ④)。flush が外部編集を skip する per-file hash (process メモリのみ、reconcile が seed)

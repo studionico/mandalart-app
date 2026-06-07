@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import type { Cell, Grid } from '@/types'
 import { parseGridBody } from '../vaultBody'
 import { buildGridDocument, type GridBodyLinks } from '../vaultFormat'
+import { isCellEmpty, hasPeripheralContent, canPasteIntoPeripheral } from '@/lib/utils/grid'
 
 /**
  * shared/vault-fixtures/*.json を読み、iOS GoldenFixtureTests.swift と**同じ JSON**で vault ピュア層を
@@ -22,17 +23,24 @@ type BoolField = { set: boolean; value?: boolean }
 type CellExpect = { text?: StringField; done?: BoolField; color?: StringField; hasImage?: BoolField }
 
 type Fixture = {
-  kind: 'bodyParse' | 'gridRender'
+  kind: 'bodyParse' | 'gridRender' | 'cellGuard'
   name: string
   // bodyParse
   body?: string
   expect?: { clean?: boolean; memo?: StringField; cells?: Record<string, CellExpect> }
-  // gridRender
+  // gridRender / cellGuard (cells スキーマ共用)
   grid?: { id: string; centerCellId: string; parentCellId?: string | null; sortOrder?: number; memo?: string | null }
   cells?: Array<{ id: string; position: number; text?: string; color?: string | null; done?: boolean; imagePath?: string | null }>
   links?: { childByCell?: Record<string, string>; parent?: { gridId: string; label: string } }
   contains?: string[]
   notContains?: string[]
+  // cellGuard
+  guard?: { pasteTarget?: number }
+  expectGuard?: {
+    emptyByPosition?: Record<string, boolean>
+    hasPeripheralContent?: boolean
+    canPasteIntoTarget?: boolean
+  }
 }
 
 function loadFixtures(): Fixture[] {
@@ -116,5 +124,25 @@ describe('golden fixtures: gridRender (buildGridDocument)', () => {
     const doc = buildGridDocument(grid, cells, links)
     for (const needle of fx.contains ?? []) expect(doc).toContain(needle)
     for (const needle of fx.notContains ?? []) expect(doc).not.toContain(needle)
+  })
+})
+
+describe('golden fixtures: cellGuard (isCellEmpty / hasPeripheralContent / canPasteIntoPeripheral)', () => {
+  it.each(byKind('cellGuard').map((fx) => [fx.name, fx] as const))('%s', (_name, fx) => {
+    const cells = (fx.cells ?? []).map((c) => toCell(c, 'g-fixture'))
+    const exp = fx.expectGuard ?? {}
+    for (const [posStr, want] of Object.entries(exp.emptyByPosition ?? {})) {
+      const cell = cells.find((c) => c.position === Number(posStr))
+      expect(cell, `position ${posStr} が cells に存在する`).toBeDefined()
+      if (cell) expect(isCellEmpty(cell)).toBe(want)
+    }
+    if (exp.hasPeripheralContent !== undefined) {
+      expect(hasPeripheralContent(cells)).toBe(exp.hasPeripheralContent)
+    }
+    if (exp.canPasteIntoTarget !== undefined) {
+      const target = fx.guard?.pasteTarget
+      expect(target, 'canPasteIntoTarget 検証には guard.pasteTarget が必要').toBeDefined()
+      expect(canPasteIntoPeripheral({ position: target! }, cells)).toBe(exp.canPasteIntoTarget)
+    }
   })
 })

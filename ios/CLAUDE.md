@@ -85,7 +85,7 @@ Views → ViewModels (@Observable) → Services → SwiftData (local) / supabase
 - **ViewModels/**: `AuthStore` (@Observable / @MainActor、サインイン状態 + Auth セッション)
 - **Services/**: `SupabaseService` (umbrella SupabaseClient wrapper) / `MandalartFactory` (root grid + center cell 同時 INSERT) / `SyncEngine` (pullAll / pushPending、last-write-wins)
 - **Utils/**: `Constants` (定数)
-- **Vault/**: vault フォルダモード (Phase 2) のピュア層を desktop から移植した Stage 0/1 (VaultTypes / VaultFrontmatter / VaultFormat / VaultModel / VaultReconcile)。Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存で、**本番未配線 (dead code)**。I/O (UIDocumentPicker + iCloud Drive bookmark) / DB (SwiftData upsert) / 同期 gate は後続 Stage。詳細は [`docs/architecture.md`](docs/architecture.md)
+- **Vault/**: desktop から移植したピュア層 (Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存、`VaultTests` でロック)。vault フォルダモード本体 (本文ラウンドトリップ / reconcile / flush / clobber 安全化、Phase 12) は本番配線済 (DB 層は `Services/VaultDb*` が橋渡し)。`VaultCellGuard` (セル空判定・中心セル保護, `CellGuard`) も `EditorView` から本番利用。全ファイルの 1 行説明は [`docs/architecture.md`](docs/architecture.md) を参照 (このリストは概要のみ)
 - **Resources/**: 将来の `help/*.mp4` 等
 
 ユニットテストは `ios/MandalartTests/` (XCTest)。専用スキーム **`VaultTests`** が `Mandalart/Vault/*` を app (Supabase) 非依存で直接コンパイルするので、`xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'` が CLI で通る (落とし穴 #1 回避)。`project.yml` 編集後は `xcodegen generate`。

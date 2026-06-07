@@ -1,0 +1,12 @@
+{
+  "kind": "cellGuard",
+  "name": "done のみの周辺セルは空扱い",
+  "cells": [
+    { "id": "c4", "position": 4, "text": "中心" },
+    { "id": "c2", "position": 2, "done": true }
+  ],
+  "expectGuard": {
+    "emptyByPosition": { "2": true },
+    "hasPeripheralContent": false
+  }
+}

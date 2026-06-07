@@ -41,18 +41,27 @@ final class GoldenFixtureTests: XCTestCase {
     }
     private struct FxParent: Codable { let gridId: String; let label: String }
     private struct FxLinks: Codable { let childByCell: [String: String]?; let parent: FxParent? }
+    private struct GuardSpec: Codable { let pasteTarget: Int? }
+    private struct GuardExpect: Codable {
+        let emptyByPosition: [String: Bool]?
+        let hasPeripheralContent: Bool?
+        let canPasteIntoTarget: Bool?
+    }
     private struct Fixture: Codable {
         let kind: String
         let name: String
         // bodyParse
         let body: String?
         let expect: BodyExpect?
-        // gridRender
+        // gridRender / cellGuard (cells スキーマ共用)
         let grid: FxGrid?
         let cells: [FxCell]?
         let links: FxLinks?
         let contains: [String]?
         let notContains: [String]?
+        // cellGuard
+        let `guard`: GuardSpec?
+        let expectGuard: GuardExpect?
     }
 
     private func loadFixtures() throws -> [Fixture] {
@@ -122,6 +131,40 @@ final class GoldenFixtureTests: XCTestCase {
             }
             for needle in fx.notContains ?? [] {
                 XCTAssertFalse(doc.contains(needle), "\(ctx) 出力が \"\(needle)\" を含んではいけない")
+            }
+        }
+    }
+
+    // MARK: cellGuard
+
+    func testCellGuardFixtures() throws {
+        let fixtures = try loadFixtures().filter { $0.kind == "cellGuard" }
+        XCTAssertFalse(fixtures.isEmpty, "cellGuard fixture が 1 件も無い")
+        for fx in fixtures {
+            let ctx = "[\(fx.name)]"
+            let cells = (fx.cells ?? []).map { c in
+                VaultCell(
+                    id: c.id, gridId: "g-fixture", position: c.position, text: c.text ?? "",
+                    imagePath: c.imagePath, color: c.color, done: c.done ?? false,
+                    createdAt: Self.timestamp, updatedAt: Self.timestamp)
+            }
+            for (posStr, want) in fx.expectGuard?.emptyByPosition ?? [:] {
+                guard let pos = Int(posStr) else { continue }
+                guard let cell = cells.first(where: { $0.position == pos }) else {
+                    XCTFail("\(ctx) position \(pos) が cells に無い"); continue
+                }
+                XCTAssertEqual(CellGuard.isCellEmpty(cell), want, "\(ctx) isCellEmpty(p\(pos))")
+            }
+            if let want = fx.expectGuard?.hasPeripheralContent {
+                XCTAssertEqual(CellGuard.hasPeripheralContent(cells), want, "\(ctx) hasPeripheralContent")
+            }
+            if let want = fx.expectGuard?.canPasteIntoTarget {
+                guard let target = fx.guard?.pasteTarget else {
+                    XCTFail("\(ctx) canPasteIntoTarget には guard.pasteTarget が必要"); continue
+                }
+                XCTAssertEqual(
+                    CellGuard.canPasteIntoPeripheral(targetPosition: target, gridCells: cells),
+                    want, "\(ctx) canPasteIntoTarget")
             }
         }
     }

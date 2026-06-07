@@ -563,7 +563,7 @@ struct EditorView: View {
             ) {
                 handleParallelNav(direction: 1, mandalart: mandalart)
             }
-        } else if !mandalart.locked, currentGridHasPeripheralInput(grid: grid) {
+        } else if !mandalart.locked, hasPeripheralContent(in: grid) {
             parallelNavButton(
                 systemName: "plus",
                 visible: true,
@@ -575,18 +575,6 @@ struct EditorView: View {
             // layout 安定化用 placeholder (grid 中央寄せが揺れない)
             Color.clear.frame(width: 36, height: 36)
         }
-    }
-
-    /// 現在 grid の周辺セル (position != 4) の中に 1 つでも非空 (text/image/color/done) があるか。
-    private func currentGridHasPeripheralInput(grid: Grid) -> Bool {
-        let cells = GridRepository.displayCells(for: grid, in: modelContext)
-        for (i, c) in cells.enumerated() where i != GridConstants.centerPosition {
-            guard let c else { continue }
-            if !c.text.isEmpty || c.imagePath != nil || c.color != nil || c.done {
-                return true
-            }
-        }
-        return false
     }
 
     /// 右上 floating の showCheckbox 表示切替ボタン (= マンダラート単位の done 表示 ON/OFF)。
@@ -804,19 +792,31 @@ struct EditorView: View {
     private func isCenterEmpty(in grid: Grid) -> Bool {
         let cells = GridRepository.displayCells(for: grid, in: modelContext)
         guard let center = cells[GridConstants.centerPosition] else { return true }
-        let textEmpty = center.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return textEmpty && center.imagePath == nil
+        return CellGuard.isCellEmpty(text: center.text, imagePath: center.imagePath)
     }
 
-    /// 与えられた grid の周辺セル (position != centerPosition) のいずれかに text または imagePath があるか。
+    /// 与えられた grid の周辺セルのいずれかに内容 (text/imagePath) があるか。
+    /// 空判定の正準定義は desktop と共有 ([`CellGuard`](../Vault/VaultCellGuard.swift)、`cellGuard` fixture で lock)。
     private func hasPeripheralContent(in grid: Grid) -> Bool {
         let cells = GridRepository.displayCells(for: grid, in: modelContext)
-        for (pos, optCell) in cells.enumerated() where pos != GridConstants.centerPosition {
-            guard let cell = optCell else { continue }
-            let textNonEmpty = !cell.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if textNonEmpty || cell.imagePath != nil { return true }
+        return CellGuard.hasPeripheralContent(slotCells(cells))
+    }
+
+    /// `displayCells` の表示スロット配列 (`[Cell?]`、index=表示 position) を `CellGuard` 用の
+    /// `SlotCell` 配列へ変換する。**position は表示スロット index を使う** — X=C drilled grid の中心セルは
+    /// 実 `cell.position` が 4 でないため (落とし穴 #10)、`cell.position` をそのまま渡してはいけない。
+    private func slotCells(_ cells: [Cell?]) -> [SlotCell] {
+        cells.enumerated().compactMap { index, cell in
+            guard let cell else { return nil }
+            return SlotCell(position: index, text: cell.text, imagePath: cell.imagePath)
         }
-        return false
+    }
+
+    /// `CellGuard` 用の最小 cell 表現。`position` は表示スロット index (落とし穴 #10 回避)。
+    private struct SlotCell: CellGuardCell {
+        let position: Int
+        let text: String
+        let imagePath: String?
     }
 
     // MARK: - Back / cleanup
