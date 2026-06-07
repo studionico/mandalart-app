@@ -4,7 +4,7 @@ import XCTest
 /// 検証する golden test。TS↔Swift の仕様乖離 (例: wiki-link の改行畳み) を両言語で同時に検出する。
 ///
 /// fixture には「両プラットフォームで同一であるべき契約」だけが書かれている。複数行 heading の parse や
-/// 本文削除 (clean) は iOS が行ベース parse で未対応なため fixture に含めない (含めると偽 fail する)。
+/// clean フラグも iOS が desktop と parity 化済 (ブロック parse + clean 削除) なので両言語で検証する。
 final class GoldenFixtureTests: XCTestCase {
 
     private static let timestamp = "2026-06-02T00:00:00.000Z"
@@ -20,6 +20,7 @@ final class GoldenFixtureTests: XCTestCase {
         let hasImage: BoolField?
     }
     private struct BodyExpect: Codable {
+        let clean: Bool?
         let memo: StringField?
         let cells: [String: CellExpect]?
     }
@@ -76,6 +77,9 @@ final class GoldenFixtureTests: XCTestCase {
         for fx in fixtures {
             let parse = parseGridBody(fx.body ?? "")
             let ctx = "[\(fx.name)]"
+            if let clean = fx.expect?.clean {
+                XCTAssertEqual(parse.clean, clean, "\(ctx) clean")
+            }
             if let memo = fx.expect?.memo {
                 assertStringField(parse.memo, memo, "\(ctx) memo")
             }

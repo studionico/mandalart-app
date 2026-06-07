@@ -1,0 +1,13 @@
+{
+  "kind": "bodyParse",
+  "name": "全見出しが ^pN 付き → clean=true (本文に無い position は意図的削除として扱える)",
+  "body": "# [ ] 中心 ^p4\n## [ ] 残す ^p0",
+  "expect": {
+    "clean": true,
+    "cells": {
+      "0": {
+        "text": { "set": true, "value": "残す" }
+      }
+    }
+  }
+}

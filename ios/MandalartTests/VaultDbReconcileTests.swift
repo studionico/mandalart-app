@@ -102,19 +102,51 @@ final class VaultDbReconcileTests: XCTestCase {
         XCTAssertNil(fetchCell("c-root-p2")?.imagePath, "本文の embed 削除で画像がクリアされる")
     }
 
-    /// 本文から見出しを丸ごと削除しても、frontmatter にあるセルは誤削除されない (欠落 position 維持)。
-    func testReconcileKeepsCellMissingFromBody() throws {
+    /// クリーンな本文から周辺セルの見出しを丸ごと削除すると、その position が DB から削除される (意図的削除)。
+    func testReconcileCleanBodyDeletesMissingCell() throws {
         _ = try VaultSync.exportAllToVault(rows: [sampleRows()], to: vaultRoot, appSupportDir: appSupport)
         _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
         XCTAssertEqual(fetchCell("c-root-p0")?.text, "食事")
 
-        // 本文の "食事" 見出し行だけ削除 (frontmatter には残す)。
+        // 本文の "食事" 見出し行だけ削除 (frontmatter には残すが、本文がクリーンなので意図的削除扱い)。
+        // c-root-p0 は子グリッド/中心の参照先ではない素の周辺セルなので削除される。
         try editGridFile("g-root.md") {
             $0.replacingOccurrences(of: "\n## [ ] 食事 ^p0", with: "")
         }
 
         _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
-        XCTAssertEqual(fetchCell("c-root-p0")?.text, "食事", "本文に無い position は frontmatter 値で維持される")
+        XCTAssertNil(fetchCell("c-root-p0"), "クリーンな本文で消えた見出しの position は削除される")
+    }
+
+    /// クリーンな本文で見出しを消しても、子グリッドの centerCellId/parentCellId に参照されるセルは孤児ガードで維持される。
+    func testReconcileOrphanGuardKeepsReferencedCell() throws {
+        _ = try VaultSync.exportAllToVault(rows: [sampleRows()], to: vaultRoot, appSupportDir: appSupport)
+        _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
+        XCTAssertEqual(fetchCell("c-root-p2")?.text, "運動")
+
+        // c-root-p2 は g-drill の center/parent 参照先。本文の見出し + embed を消してもガードで維持される。
+        try editGridFile("g-root.md") {
+            $0.replacingOccurrences(of: "\n## [ ] [[g-drill|運動]] ^p2\n![[c-root-p2-1.jpg]]", with: "")
+        }
+
+        _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
+        XCTAssertEqual(fetchCell("c-root-p2")?.text, "運動", "参照されるセルは孤児ガードで削除されない")
+    }
+
+    /// 本文がクリーンでない (壊れた見出し) ときは、消えた見出しの position を誤削除しない (フォールバック)。
+    func testReconcileUncleanBodyKeepsMissingCell() throws {
+        _ = try VaultSync.exportAllToVault(rows: [sampleRows()], to: vaultRoot, appSupportDir: appSupport)
+        _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
+        XCTAssertEqual(fetchCell("c-root-p0")?.text, "食事")
+
+        // "食事" 見出しを削除しつつ、別の見出しの `^pN` を壊して本文を unclean にする → 誤削除回避で維持。
+        try editGridFile("g-root.md") {
+            $0.replacingOccurrences(of: "\n## [ ] 食事 ^p0", with: "")
+                .replacingOccurrences(of: "^p2", with: "")
+        }
+
+        _ = try VaultDbReconcile.reconcileVaultToDb(vaultRoot: vaultRoot, in: context, appSupportDir: appSupport)
+        XCTAssertEqual(fetchCell("c-root-p0")?.text, "食事", "unclean な本文では欠落 position を維持する")
     }
 
     // MARK: - clobber 安全化 keystone (Stage ③/④ 連動): reconcile が台帳 seed → 次 flush で frontmatter 整合

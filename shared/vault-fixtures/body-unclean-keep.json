@@ -1,0 +1,13 @@
+{
+  "kind": "bodyParse",
+  "name": "^pN 無し見出し (グリッチ) があると clean=false (mergeBody は誤削除を回避)",
+  "body": "## [ ] 残す ^p0\n## アンカー無し見出し",
+  "expect": {
+    "clean": false,
+    "cells": {
+      "0": {
+        "text": { "set": true, "value": "残す" }
+      }
+    }
+  }
+}

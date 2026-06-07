@@ -99,6 +99,26 @@ final class VaultBodyTests: XCTestCase {
         XCTAssertNotNil(parse.cellsByPosition[4])
     }
 
+    func testParseMultilineHeadingBlock() {
+        // 改行入り見出しブロックから position と複数行 text を取り出す (^pN が ## と別行)。
+        let edit = parseGridBody("## [ ] 発揮\n\n窮地に立てば潜在能力が発揮される ^p1").cellsByPosition[1]!
+        XCTAssertEqual(edit.text, .set("発揮\n\n窮地に立てば潜在能力が発揮される"))
+        XCTAssertEqual(edit.done, .set(false))
+    }
+
+    func testParseCleanFlag() {
+        // 全見出しが ^pN 付き or 中心 placeholder なら clean=true、^pN 無し見出しで false。
+        XCTAssertTrue(parseGridBody("# [ ] 中心 ^p4\n## [ ] a ^p0").clean)
+        XCTAssertTrue(parseGridBody("# (中心)\n## [ ] a ^p0").clean) // 中心 placeholder は例外
+        XCTAssertFalse(parseGridBody("## [ ] a ^p0\n## アンカー無し").clean)
+    }
+
+    func testParseEmbedHasImage() {
+        // 次行が embed なら hasImage=true、無ければ false。
+        XCTAssertEqual(parseGridBody("## [ ] 画像 ^p1\n![[pic.jpg]]").cellsByPosition[1]?.hasImage, .set(true))
+        XCTAssertEqual(parseGridBody("## [ ] 文字だけ ^p1").cellsByPosition[1]?.hasImage, .set(false))
+    }
+
     // MARK: mergeBody (frontmatter 母集合 + 本文上書き)
 
     func testMergeOverridesTextKeepsAbsentFields() {
@@ -106,7 +126,7 @@ final class VaultBodyTests: XCTestCase {
             makeCell("c4", "g", 4, text: "A"),
             makeCell("c0", "g", 0, text: "B", color: "red-100"),
         ]
-        let parse = BodyParse(cellsByPosition: [0: BodyCellEdit(text: .set("B-編集"))], memo: .absent)
+        let parse = BodyParse(cellsByPosition: [0: BodyCellEdit(text: .set("B-編集"))], memo: .absent, clean: false)
         let merged = mergeBody(frontCells: front, parse: parse, gridId: "g", timestamp: TS)
         let p0 = merged.first { $0.position == 0 }!
         XCTAssertEqual(p0.text, "B-編集")
@@ -116,21 +136,40 @@ final class VaultBodyTests: XCTestCase {
 
     func testMergeNewPositionCreatesSynthCell() {
         let front = [makeCell("c4", "g", 4, text: "A")]
-        let parse = BodyParse(cellsByPosition: [5: BodyCellEdit(text: .set("新規"))], memo: .absent)
+        let parse = BodyParse(cellsByPosition: [5: BodyCellEdit(text: .set("新規"))], memo: .absent, clean: false)
         let merged = mergeBody(frontCells: front, parse: parse, gridId: "g", timestamp: TS)
         let p5 = merged.first { $0.position == 5 }
         XCTAssertEqual(p5?.id, "g-p5")
         XCTAssertEqual(p5?.text, "新規")
     }
 
-    func testMergeMissingPositionKept() {
-        // 本文に無い position は誤削除しない。
+    func testMergeMissingPositionKeptWhenUnclean() {
+        // 本文がクリーンでない (壊れた見出し) ときは missing position を誤削除しない。
         let merged = mergeBody(
             frontCells: [makeCell("c0", "g", 0, text: "B")],
-            parse: BodyParse(cellsByPosition: [:], memo: .absent),
+            parse: BodyParse(cellsByPosition: [:], memo: .absent, clean: false),
             gridId: "g", timestamp: TS)
         XCTAssertEqual(merged.count, 1)
         XCTAssertEqual(merged[0].text, "B")
+    }
+
+    func testMergeCleanDeletesMissingPosition() {
+        // クリーンな本文で見出しが消えた position は削除する (= ユーザーが見出し行を消した = 意図的削除)。
+        let front = [makeCell("c0", "g", 0, text: "残す"), makeCell("c2", "g", 2, text: "消す")]
+        let parse = parseGridBody("## [ ] 残す ^p0") // p2 の見出しを削除した状態 (クリーン)
+        XCTAssertTrue(parse.clean)
+        let merged = mergeBody(frontCells: front, parse: parse, gridId: "g", timestamp: TS)
+        XCTAssertTrue(merged.contains { $0.position == 0 })
+        XCTAssertFalse(merged.contains { $0.position == 2 }) // 削除される
+    }
+
+    func testMergeCleanKeepsCenter() {
+        // 中心セル (position 4) はクリーンでも本文に無ければ維持 (削除しない)。
+        let front = [makeCell("c4", "g", 4, text: "中心"), makeCell("c0", "g", 0, text: "残す")]
+        let parse = parseGridBody("## [ ] 残す ^p0") // 中心 H1 が無い
+        XCTAssertTrue(parse.clean)
+        let merged = mergeBody(frontCells: front, parse: parse, gridId: "g", timestamp: TS)
+        XCTAssertTrue(merged.contains { $0.position == 4 }) // 中心は削除されない
     }
 
     func testMergeImageClearedWhenEmbedAbsent() {
@@ -138,13 +177,13 @@ final class VaultBodyTests: XCTestCase {
         // embed 無し (hasImage .set(false)) → 画像クリア
         let cleared = mergeBody(
             frontCells: front,
-            parse: BodyParse(cellsByPosition: [0: BodyCellEdit(text: .set("B"), hasImage: .set(false))], memo: .absent),
+            parse: BodyParse(cellsByPosition: [0: BodyCellEdit(text: .set("B"), hasImage: .set(false))], memo: .absent, clean: false),
             gridId: "g", timestamp: TS)
         XCTAssertNil(cleared[0].imagePath)
         // embed あり (hasImage .set(true)) → frontmatter の image_path 維持
         let kept = mergeBody(
             frontCells: front,
-            parse: BodyParse(cellsByPosition: [0: BodyCellEdit(text: .set("B"), hasImage: .set(true))], memo: .absent),
+            parse: BodyParse(cellsByPosition: [0: BodyCellEdit(text: .set("B"), hasImage: .set(true))], memo: .absent, clean: false),
             gridId: "g", timestamp: TS)
         XCTAssertEqual(kept[0].imagePath, "images/x.jpg")
     }

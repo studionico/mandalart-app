@@ -58,10 +58,19 @@ enum VaultDbApply {
 
             // parse 失敗があったマンダラートは削除をスキップ (破損ファイルでの誤削除を防ぐ)。
             if !options.skipGridDeletionFor.contains(rows.mandalart.id) {
+                // grid の centerCellId / parentCellId に参照されるセルは削除しない (構造の要)。
+                // 本文ラウンドトリップでの削除 (mergeBody) が子持ち親セルの見出しを消したケースでも、
+                // 子グリッドの参照先を消して孤児化させないための防御ガード (整合した vault では no-op)。
+                var referencedCellIds = Set<String>()
+                for g in rows.grids {
+                    referencedCellIds.insert(g.centerCellId)
+                    if let parent = g.parentCellId { referencedCellIds.insert(parent) }
+                }
                 deleteMissingGridsAndCells(
                     mandalartId: rows.mandalart.id,
                     vaultGridIds: vaultGridIds,
                     vaultCellIds: vaultCellIds,
+                    referencedCellIds: referencedCellIds,
                     in: context
                 )
             }
@@ -173,10 +182,12 @@ enum VaultDbApply {
     // MARK: - 削除
 
     /// vault に無い grid (とその cells) を hard delete し、残った grid 内で vault に無い cell を削除。
+    /// ただし `referencedCellIds` (grid の centerCellId / parentCellId に参照されるセル) は削除しない孤児ガード。
     private static func deleteMissingGridsAndCells(
         mandalartId: String,
         vaultGridIds: Set<String>,
         vaultCellIds: Set<String>,
+        referencedCellIds: Set<String>,
         in context: ModelContext
     ) {
         let gridDescriptor = FetchDescriptor<Grid>(
@@ -193,7 +204,7 @@ enum VaultDbApply {
             }
         }
         for gid in survivingGridIds {
-            deleteCells(ofGrid: gid, in: context) { !vaultCellIds.contains($0) }
+            deleteCells(ofGrid: gid, in: context) { !vaultCellIds.contains($0) && !referencedCellIds.contains($0) }
         }
     }
 

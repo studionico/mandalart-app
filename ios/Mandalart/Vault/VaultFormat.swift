@@ -265,7 +265,7 @@ private func renderGridBody(_ cellsSortedByPosition: [VaultCell], memo: String?,
     if let center {
         lines.append(contentsOf: renderCellLines("#", center, childByCell: links?.childByCell, forceHeading: true))
     } else {
-        lines.append("# (中心)")
+        lines.append(CENTER_PLACEHOLDER_LINE)
     }
     if let memo, !memo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         for memoLine in memo.components(separatedBy: "\n") {

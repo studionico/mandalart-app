@@ -10,8 +10,8 @@ import { buildGridDocument, type GridBodyLinks } from '../vaultFormat'
  * shared/vault-fixtures/*.json を読み、iOS GoldenFixtureTests.swift と**同じ JSON**で vault ピュア層を
  * 検証する。TS↔Swift の仕様乖離 (例: wiki-link の改行畳み) を両言語で同時に検出するための golden test。
  *
- * fixture には「両プラットフォームで同一であるべき契約」だけを書く。複数行 heading の parse や本文削除
- * (clean) は iOS が行ベース parse で未対応なため**意図的に含めない** (含めると iOS で偽 fail する)。
+ * fixture には「両プラットフォームで同一であるべき契約」だけを書く。複数行 heading の parse や clean
+ * フラグも iOS が desktop と parity 化済 (ブロック parse + clean 削除) なので両言語で同じ JSON を検証する。
  */
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../../shared/vault-fixtures')
@@ -26,7 +26,7 @@ type Fixture = {
   name: string
   // bodyParse
   body?: string
-  expect?: { memo?: StringField; cells?: Record<string, CellExpect> }
+  expect?: { clean?: boolean; memo?: StringField; cells?: Record<string, CellExpect> }
   // gridRender
   grid?: { id: string; centerCellId: string; parentCellId?: string | null; sortOrder?: number; memo?: string | null }
   cells?: Array<{ id: string; position: number; text?: string; color?: string | null; done?: boolean; imagePath?: string | null }>
@@ -76,6 +76,7 @@ describe('golden fixtures: bodyParse (parseGridBody)', () => {
   it.each(byKind('bodyParse').map((fx) => [fx.name, fx] as const))('%s', (_name, fx) => {
     const parse = parseGridBody(fx.body ?? '')
     const exp = fx.expect ?? {}
+    if (exp.clean !== undefined) expect(parse.clean).toBe(exp.clean)
     if (exp.memo) {
       expect(parse.memo.set).toBe(exp.memo.set)
       if (exp.memo.set) expect((parse.memo as { value: string }).value).toBe(exp.memo.value)

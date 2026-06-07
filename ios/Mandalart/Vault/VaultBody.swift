@@ -8,6 +8,11 @@ import Foundation
 /// 本文編集が部分的に壊れても **フィールド単位でフォールバック** する (`.absent` = frontmatter 値を使う)
 /// ことでサイレント全損を防ぐ。
 
+/// 中心セルを自前で持たない (X=C drilled) グリッドの本文 H1 placeholder。`^pN` を持たないが
+/// **parse 失敗ではなく正規の出力**なので、本文「クリーン」判定 (削除可否) で例外扱いする。
+/// VaultFormat.renderGridBody がこの文字列を出力する (単一情報源)。
+let CENTER_PLACEHOLDER_LINE = "# (中心)"
+
 /// 本文に該当マーカーが「あった/なかった」を区別する三値。`.absent` は frontmatter 値へフォールバック。
 enum BodyField<T: Equatable>: Equatable {
     case set(T)
@@ -27,6 +32,10 @@ struct BodyCellEdit: Equatable {
 struct BodyParse: Equatable {
     var cellsByPosition: [Int: BodyCellEdit]
     var memo: BodyField<String>
+    /// 本文が「クリーン」か = 全ての見出し (`#`/`##`) が有効に parse できた (`^pN` 付き or 中心 placeholder)。
+    /// false = `^pN` を持たない見出し (グリッチ/手編集ミス) があった → mergeBody は安全のため削除を行わない。
+    /// true のときだけ「本文に無い position は削除」を許可する (= ユーザーが見出し行を消した = 意図的削除)。
+    var clean: Bool
 }
 
 /// `gridId` + position から決定的な新規セル id を作る (本文でセルを足したとき用)。
@@ -53,25 +62,36 @@ func decodeColorTag(_ tag: String) -> String {
 }
 
 /// 本文を parse して position → 編集値、および memo を返す。
+///
+/// 見出しは **複数行ブロック** で扱う: `# `/`## ` 行から次の見出し / memo (`>`) までを 1 ブロックに
+/// 集約し、`^pN` (末尾の最後の出現)・`[done]`・`#c/color`・embed をブロック全体から抽出する。これにより
+/// **改行を含むセル本文** (`## 発揮\n\n窮地に… ^p1` のように `^pN` が `##` と別行に来るケース) も
+/// 取りこぼさない。`^pN` を持たないブロック (例 `# (中心)` placeholder) は round-trip 対象外。
 func parseGridBody(_ body: String) -> BodyParse {
     let lines = body.components(separatedBy: "\n")
     var cells: [Int: BodyCellEdit] = [:]
     var memoLines: [String] = []
     var sawMemo = false
+    var clean = true
 
     var i = 0
     while i < lines.count {
         let line = lines[i]
-        if let parsed = parseHeadingLine(line) {
-            var edit = parsed.1
-            // 次行が embed なら画像あり、無ければ画像なし (クリア指示)。
-            if i + 1 < lines.count, isEmbedLine(lines[i + 1]) {
-                edit.hasImage = .set(true)
-            } else {
-                edit.hasImage = .set(false)
+        if isHeadingLine(line) {
+            // 見出しブロックを次の見出し / memo まで集める (空行・本文継続・embed を含む)。
+            var block = [line]
+            var j = i + 1
+            while j < lines.count {
+                if isHeadingLine(lines[j]) || lines[j].hasPrefix(">") { break }
+                block.append(lines[j])
+                j += 1
             }
-            cells[parsed.0] = edit
-            i += 1
+            i = j
+            if let parsed = parseHeadingBlock(block) {
+                cells[parsed.0] = parsed.1
+            } else if block[0] != CENTER_PLACEHOLDER_LINE {
+                clean = false // ^pN 無し見出し (中心 placeholder 以外) = グリッチ
+            }
             continue
         }
         if line.hasPrefix(">") {
@@ -85,20 +105,33 @@ func parseGridBody(_ body: String) -> BodyParse {
 
     return BodyParse(
         cellsByPosition: cells,
-        memo: sawMemo ? .set(memoLines.joined(separator: "\n")) : .absent
+        memo: sawMemo ? .set(memoLines.joined(separator: "\n")) : .absent,
+        clean: clean
     )
+}
+
+/// `# ` / `## ` で始まる見出し行か。
+private func isHeadingLine(_ line: String) -> Bool {
+    line.hasPrefix("## ") || line.hasPrefix("# ")
 }
 
 /// frontmatter のセル群に本文の編集を適用する。
 /// - 既存 position はマッチして text/color/done/image を上書き (`.absent` は維持)。
 /// - 本文にあり frontmatter に無い position は `synthCellId` で新規セル化。
-/// - frontmatter にあり本文に無い position は **維持** (誤削除回避)。
+/// - frontmatter にあり本文に無い position:
+///   - **本文がクリーン (parse.clean) なら削除** (= ユーザーが見出し行を消した = 意図的削除)。
+///     ただし**中心セル (CENTER_POSITION) は削除しない** (構造の要)。子グリッドを持つ親セルの誤削除=孤児化は
+///     VaultDbApply 側の参照ガードが別途防ぐ。
+///   - **クリーンでないなら維持** (誤削除回避。`^pN` を壊した等のグリッチで黙ってセルを消さない)。
 func mergeBody(frontCells: [VaultCell], parse: BodyParse, gridId: String, timestamp: String) -> [VaultCell] {
     var result: [VaultCell] = []
     var usedPositions = Set<Int>()
     for var cell in frontCells {
         if let edit = parse.cellsByPosition[cell.position] {
             applyEdit(edit, to: &cell)
+        } else if parse.clean && cell.position != GridConstants.centerPosition {
+            // クリーンな本文に見出しが無い = 意図的削除 → result から除外 (DB 側で VaultDbApply が削除)。
+            continue
         }
         result.append(cell)
         usedPositions.insert(cell.position)
@@ -140,26 +173,40 @@ private func isEmbedLine(_ line: String) -> Bool {
     return t.hasPrefix("![[") && t.hasSuffix("]]")
 }
 
-/// 見出し行 `<#/##> [done] <text or [[id|label]]> #c/<color> ^p<N>` を分解する。
-/// `^pN` を持たない見出し (例 `# (中心)`) は round-trip 対象外で nil。
-private func parseHeadingLine(_ line: String) -> (Int, BodyCellEdit)? {
-    var s: String
-    if line.hasPrefix("## ") {
-        s = String(line.dropFirst(3))
-    } else if line.hasPrefix("# ") {
-        s = String(line.dropFirst(2))
+/// 見出しブロック `<#/##> [done] <text or [[id|label]]> #c/<color> ^p<N>` (+ 改行を含む本文 + embed 行)
+/// を分解する。先頭行から `#`/`##` マーカーを剥がし、embed 行を除いた残りから position (末尾の最後の
+/// `^pN`)・done・color を抽出し、残りを text とする。`^pN` を持たないブロック (例 `# (中心)`) は nil。
+private func parseHeadingBlock(_ block: [String]) -> (Int, BodyCellEdit)? {
+    let first = block[0]
+    var head: String
+    if first.hasPrefix("## ") {
+        head = String(first.dropFirst(3))
+    } else if first.hasPrefix("# ") {
+        head = String(first.dropFirst(2))
     } else {
         return nil
     }
 
-    // position: 末尾側の `^pN` (.backwards で最後の出現)
+    // embed (`![[ ]]`) 行を分離 (= 画像あり判定。text には含めない)。
+    var hasImage = false
+    var contentLines: [String] = []
+    for l in [head] + block.dropFirst() {
+        if isEmbedLine(l) {
+            hasImage = true
+        } else {
+            contentLines.append(l)
+        }
+    }
+    var s = contentLines.joined(separator: "\n")
+
+    // position: ブロック全体の末尾側 `^pN` (.backwards で最後の出現)。改行入り本文では別行末に来る。
     guard let posRange = s.range(of: "\\^p[0-9]+", options: [.regularExpression, .backwards]),
           let position = Int(s[posRange].dropFirst(2)) else {
         return nil
     }
     s.removeSubrange(posRange)
 
-    var edit = BodyCellEdit()
+    var edit = BodyCellEdit(hasImage: .set(hasImage))
 
     // done: 先頭側の `[x]`/`[ ]`
     if let doneRange = s.range(of: "\\[[ xX]\\]", options: .regularExpression) {
@@ -168,15 +215,15 @@ private func parseHeadingLine(_ line: String) -> (Int, BodyCellEdit)? {
         s.removeSubrange(doneRange)
     }
 
-    // color: `#c/<tag>`
-    if let colorRange = s.range(of: "#c/[^ \\t]+", options: .regularExpression) {
+    // color: `#c/<tag>` (改行を跨がない)
+    if let colorRange = s.range(of: "#c/[^ \\t\\n]+", options: .regularExpression) {
         let tag = String(s[colorRange].dropFirst(3))
         edit.color = .set(decodeColorTag(tag))
         s.removeSubrange(colorRange)
     }
 
-    // text: 残りを trim。`[[id|label]]` は label を取る。
-    let remaining = s.trimmingCharacters(in: .whitespaces)
+    // text: 残りを trim (改行は保持)。`[[id|label]]` 単体なら label を取る。
+    let remaining = s.trimmingCharacters(in: .whitespacesAndNewlines)
     edit.text = .set(wikiLinkLabel(remaining) ?? remaining)
 
     return (position, edit)
