@@ -38,7 +38,7 @@
 | `npm run tauri build` | ネイティブ .dmg / .msi ビルド | リリース時 |
 
 - **pre-commit hook** ([`.husky/pre-commit`](.husky/pre-commit)): `lint-staged` → `typecheck` の順。失敗で commit 拒否
-- **CI** ([`../.github/workflows/ci.yml`](../.github/workflows/ci.yml)): 全 branch push + PR で typecheck / lint / test / build
+- **CI** ([`../.github/workflows/ci.yml`](../.github/workflows/ci.yml)): 全 branch push + PR で codegen drift check / typecheck / lint / test / build。加えて `cross-platform-parity` job が desktop の純粋契約 (vault*/grid.ts) を片側だけ変更したとき `::warning::` を出す (非ブロッキング、[`../shared/DIVERGENCES.md`](../shared/DIVERGENCES.md) 参照)。共有 fixture 変更時は [`ios-ci.yml`](../.github/workflows/ios-ci.yml) が iOS VaultTests を起動して契約乖離を実検証する
 
 ### プロジェクト専用 slash command
 

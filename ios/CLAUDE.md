@@ -40,7 +40,7 @@
 | 7. Clean (必要時) | `Shift+Cmd+K` |
 | 8. SwiftData schema 不整合クラッシュ時 | Simulator アプリ長押し→削除して再 Run (or VersionedSchema 移行) |
 
-**CI**: vault ピュア層のユニットテスト (`VaultTests` スキーム) は [`.github/workflows/ios-ci.yml`](../.github/workflows/ios-ci.yml) が `ios/**` 変更時に macOS runner で自動実行する (`xcodegen generate` → `xcodebuild test -scheme VaultTests`)。Supabase 非リンク・Secrets 不要。desktop フロント/Rust は [`ci.yml`](../.github/workflows/ci.yml) / `release.yml` 担当。
+**CI**: vault ピュア層のユニットテスト (`VaultTests` スキーム) は [`.github/workflows/ios-ci.yml`](../.github/workflows/ios-ci.yml) が **`ios/**` または `shared/vault-fixtures/**` 変更時**に macOS runner で自動実行する (`xcodegen generate` → `xcodebuild test -scheme VaultTests`)。後者は共有 golden fixture (両OS契約) を変えたら iOS 側も検証する実ゲート (片側 sleep 防止)。Supabase 非リンク・Secrets 不要。desktop フロント/Rust は [`ci.yml`](../.github/workflows/ci.yml) / `release.yml` 担当。`ci.yml` の `cross-platform-parity` job は desktop の純粋契約 (vaultBody/Format/frontmatter/grid.ts 等) が片側だけ変わると `::warning::` を出す (非ブロッキング・[`shared/DIVERGENCES.md`](../shared/DIVERGENCES.md) 参照)。
 
 ## Swift コード規約
 

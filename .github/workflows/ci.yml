@@ -56,3 +56,45 @@ jobs:
       - name: Build (Vite only)
         # Supabase env は CI では未設定でも起動できる (client.ts がフォールバック)
         run: npm run build
+
+  # desktop の「iOS に純粋ミラーがある契約ファイル」が片側だけ変更されたのを検知して
+  # ::warning:: を出す (非ブロッキング)。fixture でロックされた契約の乖離は ios-ci.yml が
+  # shared/vault-fixtures/** trigger で実際に落とす (= 実ゲート)。こちらはその穴 (fixture 未カバーの
+  # 純粋ロジック) を埋めるリマインダーで、iOS ミラー更新漏れ or 意図的乖離 (shared/DIVERGENCES.md) を促す。
+  cross-platform-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 任意の base sha を diff するため全履歴を取得
+
+      - name: Warn if desktop 純粋契約 changed without iOS follow-up
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+          # 新規ブランチ初回 push 等で BASE が無効 (全 0 / 履歴に無い) なら HEAD~1 にフォールバック
+          git cat-file -e "${BASE}^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
+          # iOS に完全ミラーがあり乖離が危険な純粋契約ファイルに限定 (desktop 専用 io/config/dbRows 等は除外)
+          SHARED="$(echo "$CHANGED" | grep -E '^desktop/src/lib/vault/(vaultBody|vaultFormat|frontmatter|vaultModel|reconcile|vaultWriteLedger)\.ts$|^desktop/src/lib/utils/grid\.ts$' || true)"
+          IOS="$(echo "$CHANGED" | grep -E '^ios/' || true)"
+          if [ -n "$SHARED" ] && [ -z "$IOS" ]; then
+            echo "::warning::desktop の共有ピュア契約が変更されましたが iOS (ios/) が同 changeset に含まれません。iOS ミラー更新漏れ、または意図的な乖離 (shared/DIVERGENCES.md に追記) を確認してください。"
+            {
+              echo "### ⚠️ cross-platform parity 警告"
+              echo ""
+              echo "以下の desktop 共有契約が変更されましたが iOS は未追従です:"
+              echo '```'
+              echo "$SHARED"
+              echo '```'
+              echo "→ iOS ミラー更新 or shared/DIVERGENCES.md への追記を確認してください。"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "parity OK (desktop 共有契約の変更なし、または iOS も同時更新済み)"
+          fi

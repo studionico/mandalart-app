@@ -10,10 +10,14 @@ on:
     branches: ['**']
     paths:
       - 'ios/**'
+      # 共有 golden fixture (両OS契約) の変更でも iOS 側を検証する。これが無いと
+      # shared/vault-fixtures/** だけ変えたとき iOS VaultTests が走らず契約乖離を取りこぼす。
+      - 'shared/vault-fixtures/**'
       - '.github/workflows/ios-ci.yml'
   pull_request:
     paths:
       - 'ios/**'
+      - 'shared/vault-fixtures/**'
       - '.github/workflows/ios-ci.yml'
 
 jobs:

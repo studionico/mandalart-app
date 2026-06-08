@@ -11,6 +11,7 @@ desktop (Tauri/TS) と iOS (Swift) は二重実装で、乖離を systematic に
 - 区分: **A 停止中/復帰待ち** ・ **B 意図的非対称 (unify 禁止)** ・ **C 解消済 (再検出しない)** ・ **D 要確認**。
 - 値・実装状況を表に書くときは **必ず一次ソースで再確認**する (過去に Explore が画像圧縮を 1920/0.8 と誤報告した実績あり)。
 - スコープ外: tasks.md / Phase 進捗と重複する「iOS が Phase 的に未実装の port」(cell swap / folder UI 等) は**載せない** (= tasks.md が一次情報源)。
+- **CI による検知 (レバー C)**: 共有 fixture (`shared/vault-fixtures/**`) を変えると [`ios-ci.yml`](../.github/workflows/ios-ci.yml) が iOS VaultTests を起動し、契約乖離は fixture lock で **CI red** になる (実ゲート)。fixture 未カバーの純粋契約 (vaultBody/Format/frontmatter/grid.ts 等) が片側だけ変わると [`ci.yml`](../.github/workflows/ci.yml) の `cross-platform-parity` job が `::warning::` でリマインドする (非ブロッキング)。
 
 関連: root [`CLAUDE.md`](../CLAUDE.md) / desktop [`CLAUDE.md`](../desktop/CLAUDE.md) 落とし穴 / [`shared/vault-fixtures/`](vault-fixtures/) (契約ロック)。
 
