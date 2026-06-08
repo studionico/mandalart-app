@@ -11,7 +11,7 @@ ios/
 ├── Mandalart.xcodeproj/     ← xcodegen で生成 (gitignore)
 ├── Mandalart/
 │   ├── App/
-│   │   ├── MandalartApp.swift    @main / ModelContainer 設定 / vaultMode 起動時 rebuild (shouldRebuildOnStartup→reconcileVaultToDb、初期化中…ゲート) / fullSync を vaultMode で gate (Stage 反転) / VaultAutoFlush 起動 + scenePhase 背面 flush (Stage auto-flush)
+│   │   ├── MandalartApp.swift    @main / ModelContainer 設定 / サインイン直後 fullSync / scenePhase 背面遷移で MirrorAutoFlush.flushNow (一方向 DB→ファイル)
 │   │   └── ContentView.swift     ルーティング (Dashboard ↔ Editor)
 │   ├── Models/             SwiftData @Model (5 ファイル)
 │   │   ├── Mandalart.swift
@@ -24,7 +24,7 @@ ios/
 │   │   ├── EditorView.swift      編集画面 (Landscape 2 ペイン + drill state + 不変条件 enforcement + 空マンダラート自動 hard delete)
 │   │   ├── TrashView.swift       ゴミ箱 (deletedAt != nil の一覧 + 復元 / 完全削除 / すべて削除、desktop の TrashDialog 等価)
 │   │   ├── DashboardTransferSupport.swift Dashboard の Export/Import modifier 切り出し (SourceKit timeout 回避、pitfalls.md #12)
-│   │   ├── SettingsView.swift    アカウント / 同期ボタン (vaultMode 中は disabled + 注記、@AppStorage("vault.mode")) + #if DEBUG「Vault（実験的）」: フォルダ選択 + bookmark + vaultMode トグル(ON=baseline export) + export/dry-run + 確認付き「vault から再構築」。Stage I/O-b/DB/反転
+│   │   ├── SettingsView.swift    アカウント / 同期ボタン + 「ローカル JSON ミラー」: フォルダ選択 (security-scoped bookmark) + 有効化トグル + 「今すぐ書き出す」(出荷、DEBUG 限定ではない)
 │   │   ├── SignInView.swift      Email サインイン / 新規登録
 │   │   └── Components/
 │   │       ├── CellView.swift    1 セル (tap → drill or inline edit、長押しで色 / シュレッダー context menu、編集中以外は overlay で hit テスト)
@@ -53,47 +53,38 @@ ios/
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
 │   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO / backfillImages (Storage 未アップロード画像の回収)
-│   │   ├── VaultRowsBridge.swift  @Model → vault のピュア行型 [MandalartRows] への read-only 変換 (dbRows.ts 相当、SwiftData 依存で app 限定、Stage I/O-b)
-│   │   ├── VaultDbApply.swift     vault→DB 実書込み (applyVaultRowsToDb: id で upsert + 削除ガード + folder ensure、applyToDb.ts 相当、Stage DB)
-│   │   ├── VaultDbReconcile.swift vault フォルダ→DB 再構築 (scanVault → vaultFilesToRows → apply + 破損検知 skipGridDeletion + 画像復元、Stage DB)
-│   │   ├── VaultAutoFlush.swift   DB 編集 → debounce(3s) → vault 差分 flush (ModelContext.didSave 購読 + flushScheduler 相当 + 背面即時 flush、vaultMode ON のみ、Stage auto-flush)
-│   │   ├── VaultExitSync.swift    vault OFF 遷移時の updated_at 整備 (markLocalRowsDirty: 全行 updatedAt=now で dirty 化 → クラウド再同期で local/vault 全面勝ち)
+│   │   ├── MirrorConfig.swift     ミラー設定 (有効フラグ / security-scoped bookmark / パス) を UserDefaults 永続化 (キー mirror.enabled / mirror.bookmark / mirror.path)
+│   │   ├── MirrorFilename.swift   マンダラート 1 件のファイル名 `<slug-title>-<id>.json` を決める純関数 (LogicTests でロック)
+│   │   ├── MirrorSync.swift       全マンダラートを GridSnapshot → JSON 化してミラーフォルダに書き出し + 不要ファイル掃除 (一方向 DB→ファイル)
+│   │   ├── MirrorAutoFlush.swift  DB 編集 → debounce(3s) → ミラー書き出し (ModelContext.didSave 購読 + 背面即時 flushNow、mirrorEnabled ON のみ。ファイルのみ書き DB 非改変)
+│   │   ├── SecurityScopedBookmark.swift  ミラーフォルダの security-scoped bookmark make/resolve/withAccess ラッパ
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template
 │   ├── Utils/
+│   │   ├── CellGuard.swift       セル空判定 / 中心セル保護の純粋判定 (CellGuard: isCellEmpty / hasPeripheralContent / canPasteIntoPeripheral、CellGuardCell)。正準定義は desktop grid.ts。EditorView の SlotCell アダプタ経由で本番利用 (表示スロット position、落とし穴 #10 回避)。LogicTests でロック
 │   │   ├── Constants.swift       GridConstants / LayoutConstants / TimingConstants / FontConstants / MandalartFontPreference
 │   │   ├── NeutralPalette.swift  Tailwind neutral 系列を直 RGB で持つ adaptive 背景色群 (systemBackground を意図的に回避)
 │   │   ├── PresetColors.swift    struct PresetColor + find / backgroundColor ヘルパ (all は generated 側)
 │   │   ├── PresetColors.generated.swift  AUTO-GENERATED: all (10 色 light/dark)。単一ソース shared/constants/colors.json → `cd desktop && npm run codegen` で desktop colors.ts と同値生成
 │   │   └── ThemePreference.swift app.theme グローバル UserDefaults / 3 値 enum (light/system/dark) / colorScheme 算出
-│   ├── Vault/                vault フォルダモード (Phase 2) のピュア層を desktop から移植。
-│   │   │                     Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存。Stage 0/1〜④ で本番配線済み (vaultMode ON / DEBUG 限定)
-│   │   ├── VaultTypes.swift       行型 (VaultGrid/VaultCell/VaultMandalart) + Serialized 型 + VaultFile / MandalartRows
-│   │   ├── VaultFrontmatter.swift block-scalar JSON codec (buildDoc / parseDoc、YAML ライブラリ非依存)
-│   │   ├── VaultFormat.swift      md-mandalart-v1: grid/mandalart doc build/parse + docContentEquivalent + attachmentName。本文は編集可能ビュー `<#/##> [done] text #c/color ^pN` + 画像 embed + 親子 wiki-link
-│   │   ├── VaultBody.swift        本文ラウンドトリップ parser (parseGridBody / mergeBody)。本文(ブロック単位 parse=改行入りセルも取りこぼさない)→ text/color/done/image/memo を frontmatter セルに上書き。clean な本文では消えた見出しの position を削除 (中心セル除外、孤児ガードは VaultDbApply、desktop vaultBody.ts と parity)。parseGridDocument applyBody=true で適用 (reconcile 経路で本番反映済 Stage ③)
-│   │   ├── VaultCellGuard.swift   セル空判定 / 中心セル保護の純粋判定 (CellGuard: isCellEmpty / hasPeripheralContent / canPasteIntoPeripheral)。正準定義は desktop grid.ts (空=text trim 後空 かつ imagePath nil、色/done 除外)。shared/vault-fixtures の cellGuard kind が両言語を lock。production は EditorView の SlotCell アダプタ経由 (表示スロット position、落とし穴 #10 回避)
-│   │   ├── VaultModel.swift       DB 行 ⇄ vault ファイル群の純変換 (mandalartToVaultFiles / vaultFilesToRows)
-│   │   ├── VaultReconcile.swift   hashContent(SHA-256) / diffById / diffFiles / diffFilesGuarded (echo-skip)
-│   │   ├── VaultWriteLedger.swift 自分の最後の書込み hash 台帳 (clobber 安全化、Stage ④)。flush が外部編集を skip する per-file hash (process メモリのみ、reconcile が seed)
-│   │   ├── VaultIO.swift          FileManager I/O ラッパ (scanVault / scanMandalartDir / ensureDir / write / remove / readBytes、URL ベース、Stage I/O)
-│   │   ├── VaultImageStore.swift  セル画像の vault attachments 化 (flushImagesToVault / restoreImagesFromVault、appSupportDir/vaultRoot を引数注入、ImageStorage 非依存)
-│   │   ├── VaultConfig.swift      vault 設定 (vaultMode / security-scoped bookmark / vaultPath) を UserDefaults 永続化 + bookmark make/resolve/withAccess + shouldRebuildOnStartup
-│   │   ├── VaultTimestamp.swift   ISO8601 Date↔String (SyncEngine と同形式、cloud/desktop と一致、Stage I/O-b)
-│   │   └── VaultSync.swift        orchestration: exportAllToVault / dryRunScan / flushDbToVault (DB→vault 差分書き出し、churn 抑止 + dir 削除 + echo-skip clobber 安全化)。Stage I/O-b/auto-flush/④
 │   └── Resources/
 │       ├── Assets.xcassets/      AppIcon (赤地 3×3 白枠 / 単一 1024 PNG / project.yml の ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon で参照)
 │       └── help/                 Welcome 動画 (Phase 9 で追加予定)
-├── MandalartTests/          vault ピュア層のユニットテスト (XCTest)。VaultFormat/Model/Reconcile + GoldenFixtureTests (repo 直下 shared/vault-fixtures/*.json を desktop vitest と共有して TS↔Swift 乖離を検出)
+├── MandalartTests/          ピュアロジックのユニットテスト (XCTest)。CellGuard (セル空判定 / 中心セル保護) + MirrorFilename (ファイル名生成) のみ — Supabase / SwiftData 非依存
 └── docs/                    本ドキュメント群
 ```
 
+> **注**: 旧 `Mandalart/Vault/` ディレクトリ (双方向 Markdown vault のピュア層 + I/O 層) は撤去された。
+> ファイル → DB を取り込む vault モードは廃止され、一方向ローカル JSON ミラー (`Services/Mirror*` + `SecurityScopedBookmark`)
+> に置き換えられている。セル空判定 / 中心セル保護の純粋判定 (`CellGuard` / `CellGuardCell`) は元々 vault 固有ではなく
+> 一般的な不変則だったため `Mandalart/Utils/CellGuard.swift` へ移設した (型名は不変)。
+
 > **テストターゲット**: `MandalartTests` (type `bundle.unit-test`) は app ターゲット (= Supabase リンク)
-> に依存させず、必要な Swift を**直接コンパイル**する: `Mandalart/Vault/*` + `Utils/{Constants,IDGenerator}.swift`
-> に加え、Stage DB の in-memory SwiftData テスト用に `Mandalart/Models/*` + `Services/{VaultRowsBridge,VaultDbApply,VaultDbReconcile}.swift`
-> (いずれも Foundation/SwiftData のみで **Supabase 非リンク**)。専用スキーム `VaultTests` が MandalartTests だけを
-> ビルド/テストするので、`xcodebuild test` を CLI で回しても Supabase をビルドせず、[pitfalls.md](pitfalls.md) #1
-> (SPM 依存で Simulator destination を見失う) を踏まない。実行: `xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'`。
+> に依存させず、必要な Swift を**直接コンパイル**する: `Utils/{CellGuard,Constants,IDGenerator}.swift` +
+> `Services/MirrorFilename.swift` のみ (いずれも Foundation のみで **Supabase / SwiftData 非リンク**)。専用スキーム
+> `LogicTests` (旧 `VaultTests` から改名) が MandalartTests だけをビルド/テストするので、`xcodebuild test` を CLI で
+> 回しても Supabase をビルドせず、[pitfalls.md](pitfalls.md) #1 (SPM 依存で Simulator destination を見失う) を踏まない。
+> 実行: `xcodebuild test -scheme LogicTests -destination 'platform=iOS Simulator,name=iPhone 16'`。
 
 ## レイヤー / 依存方向
 

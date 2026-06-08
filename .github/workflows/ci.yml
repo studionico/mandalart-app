@@ -81,8 +81,8 @@ jobs:
           # 新規ブランチ初回 push 等で BASE が無効 (全 0 / 履歴に無い) なら HEAD~1 にフォールバック
           git cat-file -e "${BASE}^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
           CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
-          # iOS に完全ミラーがあり乖離が危険な純粋契約ファイルに限定 (desktop 専用 io/config/dbRows 等は除外)
-          SHARED="$(echo "$CHANGED" | grep -E '^desktop/src/lib/vault/(vaultBody|vaultFormat|frontmatter|vaultModel|reconcile|vaultWriteLedger)\.ts$|^desktop/src/lib/utils/grid\.ts$' || true)"
+          # iOS に完全ミラーがあり乖離が危険な純粋契約ファイルに限定 (desktop 専用 io/config 等は除外)
+          SHARED="$(echo "$CHANGED" | grep -E '^desktop/src/lib/utils/grid\.ts$|^desktop/src/lib/mirror/mirrorFilename\.ts$' || true)"
           IOS="$(echo "$CHANGED" | grep -E '^ios/' || true)"
           if [ -n "$SHARED" ] && [ -z "$IOS" ]; then
             echo "::warning::desktop の共有ピュア契約が変更されましたが iOS (ios/) が同 changeset に含まれません。iOS ミラー更新漏れ、または意図的な乖離 (shared/DIVERGENCES.md に追記) を確認してください。"

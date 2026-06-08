@@ -4,7 +4,6 @@ import { backfillUploadLocalImages } from '@/lib/api/imageSync'
 // EMERGENCY STOP (2026-05-04): subscribe 経路を停止中だが、復帰時に必要なので import は残す。
 import { subscribeRemoteChanges } from '@/lib/realtime'
 import { useAuthStore } from '@/store/authStore'
-import { useVaultStore } from '@/store/vaultStore'
 import { SYNC_DEBOUNCE_MS } from '@/constants/timing'
 
 // 緊急停止中の未使用 import 警告 (TS6133) 回避用 reference (復帰時に削除)
@@ -15,8 +14,6 @@ export type SyncStatus = 'idle' | 'syncing' | 'error' | 'offline'
 
 export function useSync() {
   const user = useAuthStore((s) => s.user)
-  // vaultMode ON のときは Supabase 同期を完全オフ (vault が正なので pull が DB を上書きする衝突を防ぐ)。
-  const vaultMode = useVaultStore((s) => s.vaultMode)
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -26,7 +23,6 @@ export function useSync() {
 
   const sync = useCallback(async () => {
     if (!user) return
-    if (vaultMode) return // vaultMode 中はクラウド同期しない (手動経路が残っても発火させない防御)
     if (inflight.current) return
     inflight.current = true
     setStatus('syncing')
@@ -53,19 +49,18 @@ export function useSync() {
     } finally {
       inflight.current = false
     }
-  }, [user, vaultMode])
+  }, [user])
 
-  // 初回サインイン or 起動時にフル同期 (vaultMode 中は走らせない)
+  // 初回サインイン or 起動時にフル同期
   useEffect(() => {
-    if (user && !vaultMode) sync()
-  }, [user, vaultMode, sync])
+    if (user) sync()
+  }, [user, sync])
 
   // ⚠️ EMERGENCY STOP (2026-05-04): Supabase Realtime Messages 過剰使用警告のため停止中。
   // useSync と useRealtime (EditorLayout) の 2 箇所で subscribeRemoteChanges を呼んでおり、
   // 1 user に対して 2 channels が並列購読 → 1 push で 2 倍の messages を受信していた。
   // Dashboard で使用量が止まったことを確認してから段階的に再有効化。復帰時は subscribe 経路を
-  // 1 本に統合し、echo skip ロジックを完全実装すること。**かつ vaultMode 中は購読しないこと**
-  // (P4: vaultMode はクラウド同期を完全オフにする)。
+  // 1 本に統合し、echo skip ロジックを完全実装すること。
   // 詳細: /Users/maro02/.claude/plans/ios-swift-glistening-thacker.md
   // useEffect(() => {
   //   if (!user) return

@@ -1,7 +1,7 @@
 name: iOS CI
 
-# iOS の vault ピュア層ユニットテスト (VaultTests スキーム) を回す。
-# VaultTests は Supabase を非リンクなので Simulator destination を見失う落とし穴 #1 を踏まず、
+# iOS の純粋ロジックユニットテスト (LogicTests スキーム) を回す。
+# LogicTests は Supabase を非リンクなので Simulator destination を見失う落とし穴 #1 を踏まず、
 # Secrets.swift も不要 (app ターゲットを巻き込まないため)。macOS runner は分課金が重いので
 # iOS 関連の変更時のみ起動する。Rust/Tauri と desktop フロントエンドは ci.yml が担当。
 
@@ -10,18 +10,14 @@ on:
     branches: ['**']
     paths:
       - 'ios/**'
-      # 共有 golden fixture (両OS契約) の変更でも iOS 側を検証する。これが無いと
-      # shared/vault-fixtures/** だけ変えたとき iOS VaultTests が走らず契約乖離を取りこぼす。
-      - 'shared/vault-fixtures/**'
       - '.github/workflows/ios-ci.yml'
   pull_request:
     paths:
       - 'ios/**'
-      - 'shared/vault-fixtures/**'
       - '.github/workflows/ios-ci.yml'
 
 jobs:
-  vault-tests:
+  logic-tests:
     runs-on: macos-15
     defaults:
       run:
@@ -58,8 +54,8 @@ jobs:
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
           echo "Using simulator udid: $SIM_ID"
 
-      - name: Run VaultTests
+      - name: Run LogicTests
         run: |
           xcodebuild test \
-            -scheme VaultTests \
+            -scheme LogicTests \
             -destination "platform=iOS Simulator,id=$SIM_ID"

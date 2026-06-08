@@ -20,41 +20,14 @@ iOS                                     Supabase
 - supabase 共有 instance: [`../Mandalart/Services/SupabaseService.swift`](../Mandalart/Services/SupabaseService.swift) (umbrella `SupabaseClient`)
 - 同期トリガ UI: [`../Mandalart/Views/SettingsView.swift`](../Mandalart/Views/SettingsView.swift) の「今すぐ同期」ボタン (Phase 0-3 時点は手動のみ、自動同期は Phase 3 残作業)
 
-## vaultMode 中はクラウド同期を完全停止 (Stage 反転)
+## ローカル JSON ミラーはクラウド同期に影響しない
 
-vault フォルダモード ([`docs/tasks.md`](tasks.md) Phase 12) を ON にすると **クラウド同期を完全に止める**:
-[`MandalartApp.fullSync`](../Mandalart/App/MandalartApp.swift) は冒頭で `if VaultConfigStore.load().vaultMode { return }`、
-SettingsView の「今すぐ同期」は `@AppStorage("vault.mode")` で disabled + 注記。理由は vaultMode 中は**起動時に
-vault→DB 再構築** (`reconcileVaultToDb`) が走るので、pull が再構築直後の DB を cloud 内容で上書きする衝突を防ぐため
-(vault が正・ファイル同期に委譲。desktop P4 / 落とし穴 #24 と同根)。
-
-> **緊急停止からの復帰時の必須条件**: 下記 realtime / scenePhase / auto-push 経路を再有効化する際は、**必ず
-> `!vaultMode` を条件に含める** (vaultMode 中は購読・pull・push しない)。`vault.mode` は `VaultConfigStore.load().vaultMode`
-> / `@AppStorage(VaultConfigStore.Keys.mode)` で読む。
-
-### vault のファイル往復 (scenePhase ペア)
-
-iOS はフォルダ watcher が無いため、vaultMode 中は scenePhase で **書き出し / 取り込み**を往復させる
-([`MandalartApp`](../Mandalart/App/MandalartApp.swift) `onChange(of: scenePhase)`):
-
-- **`.background`（離れる確定点）= 書き出し**: `VaultAutoFlush.flushNow()`（DB→vault 差分 flush）でアプリ内編集を確定し `wasBackgrounded=true`。
-- **`.active`（復帰、`wasBackgrounded` 限定）= 取り込み**: `importVaultOnForeground()`（`reconcileVaultToDb` = vault→DB）で
-  **背面中に外部編集された .md を DB に反映**。これが無いと外部編集が次の flush で上書きされる（= 症状2 の原因だった）。
-- **`.inactive` は何もしない**: 復帰シーケンスは `.background → .inactive → .active` の順で `.inactive` も発火するため、ここで
-  flush すると**復帰の途中で外部編集を潰し**、続く `.active` の取り込みが潰れた vault を読む（= 症状2 の再発バグだった。離脱の確定点は `.background` のみ）。
-
-加えて編集中は `ModelContext.didSave` 駆動の debounce(3s) flush が走る（[`VaultAutoFlush`](../Mandalart/Services/VaultAutoFlush.swift)）。
-flush は**ファイルだけ書き DB を書かない**のでフィードバックループは無い。**起動中（フォアグラウンドのまま）の外部編集の
-ライブ取り込みは未対応**（watcher 未実装。編集は一度背面に回す or 再起動で取り込まれる）。
-
-### vault OFF 遷移時の updated_at 整備
-
-vault モード OFF でクラウド同期を再開するとき、vault 編集（本文編集は updatedAt を bump しない）が ① 未 push、② pull の
-LWW（`cloudUpdated > local.updatedAt`）で clobber される穴がある。[`SettingsView.setVaultMode(false)`](../Mandalart/Views/SettingsView.swift)
-が [`VaultExitSync.markLocalRowsDirty`](../Mandalart/Services/VaultExitSync.swift) を呼び **全行の updatedAt を now に bump** する
-（syncedAt は不変、tombstone も含む）。これで pull-LWW が false になり local が clobber されず、`needsPush`（syncedAt < updatedAt）が
-true で push され、cloud の BEFORE UPDATE トリガが `updated_at=NOW()` を付けて cloud が最新化 → **vault/ローカルが全面的に勝つ**。
-実 push は次回起動の fullSync か「今すぐ同期」ボタンに委ねる（OFF 切替時に自動同期はしない）。
+DB の内容をフォルダへ JSON で書き出す**一方向ローカル JSON ミラー** ([`docs/tasks.md`](tasks.md) 旧 Phase 12 の置換、
+仕様は desktop [`requirements.md`](../../desktop/docs/requirements.md#ローカル-json-ミラー)) は **DB → ファイルの一方向のみ** で、
+ファイル → DB の取り込みも起動時の再構築も行わない。したがって **クラウド同期を一切停止させない** (ミラーの有効/無効に
+関わらず pull / push は通常どおり動く)。実装は [`MirrorSync`](../Mandalart/Services/MirrorSync.swift) / [`MirrorAutoFlush`](../Mandalart/Services/MirrorAutoFlush.swift)
+(`ModelContext.didSave` 駆動の debounce(3s) + scenePhase `.background` で `flushNow`、`mirror.enabled` ON のときだけ。ファイルのみ
+書き DB は非改変なのでフィードバックループ無し)。クラウド同期と競合しないため、緊急停止経路の復帰条件に追加の gate は不要。
 
 ## pullAll (cloud → local)
 

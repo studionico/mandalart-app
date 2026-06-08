@@ -796,7 +796,7 @@ struct EditorView: View {
     }
 
     /// 与えられた grid の周辺セルのいずれかに内容 (text/imagePath) があるか。
-    /// 空判定の正準定義は desktop と共有 ([`CellGuard`](../Vault/VaultCellGuard.swift)、`cellGuard` fixture で lock)。
+    /// 空判定の正準定義は desktop と共有 ([`CellGuard`](../Utils/CellGuard.swift)、desktop `grid.ts` のミラー)。
     private func hasPeripheralContent(in grid: Grid) -> Bool {
         let cells = GridRepository.displayCells(for: grid, in: modelContext)
         return CellGuard.hasPeripheralContent(slotCells(cells))

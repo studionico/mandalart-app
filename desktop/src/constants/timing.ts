@@ -66,19 +66,13 @@ export const SYNC_DEBOUNCE_MS = 300
 /** MemoTab の auto-save debounce (ms)。typing 後この時間内に追加入力が無ければ保存。 */
 export const MEMO_SAVE_DEBOUNCE_MS = 800
 
-// --- vault auto-flush (Phase 2 productize P2) ---
+// --- ローカル JSON ミラー (一方向 DB→ファイル) ---
 
 /**
- * vault auto-flush の debounce (ms)。DB 書込み後この時間内に追加書込みが無ければ
- * vault へ flush する。連続編集中は走らせず、止めてからまとめて 1 回書き出すための間。
+ * JSON ミラー auto-flush の debounce (ms)。DB 書込み後この時間内に追加書込みが無ければ
+ * 選択フォルダへ各マンダラートの .json を書き出す。連続編集は 1 回に畳む。
  */
-export const VAULT_FLUSH_DEBOUNCE_MS = 3000
-
-/**
- * vault ライブ watcher の取り込み debounce (ms)。外部 (Obsidian 等) で .md が変更されてから
- * この時間静穏になったら vault→DB の reconcile を 1 回走らせる。エディタの連続保存を 1 回に畳む。
- */
-export const VAULT_IMPORT_DEBOUNCE_MS = 800
+export const MIRROR_FLUSH_DEBOUNCE_MS = 3000
 
 // --- UI 確認ダイアログ ---
 

@@ -44,7 +44,7 @@ settings:
 
 これだけでは `xcodebuild` の destination 解決は治らない (= CLI ビルドは引き続きダメ) が、defensive な意味で残置。
 
-**運用上の対処**: **app の build / run は Xcode GUI で行う** ([`getting-started.md`](getting-started.md))。GUI 側は同じ scheme でも destination を正しく列挙してビルドできる。**ただしユニットテストは `VaultTests` スキーム** (Supabase 非リンク) なら CLI / CI で `xcodebuild test` が通る — [`.github/workflows/ios-ci.yml`](../../.github/workflows/ios-ci.yml) が `ios/**` 変更時に自動実行する。app target を CLI でビルドしたい場合のみこの destination 問題が残る。
+**運用上の対処**: **app の build / run は Xcode GUI で行う** ([`getting-started.md`](getting-started.md))。GUI 側は同じ scheme でも destination を正しく列挙してビルドできる。**ただしユニットテストは `LogicTests` スキーム** (Supabase 非リンク) なら CLI / CI で `xcodebuild test` が通る — [`.github/workflows/ios-ci.yml`](../../.github/workflows/ios-ci.yml) が `ios/**` 変更時に自動実行する。app target を CLI でビルドしたい場合のみこの destination 問題が残る。
 
 ### #2. Nested `.sheet` 内で `@Environment(AuthStore)` が伝搬しない
 

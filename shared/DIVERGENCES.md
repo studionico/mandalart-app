@@ -11,9 +11,9 @@ desktop (Tauri/TS) と iOS (Swift) は二重実装で、乖離を systematic に
 - 区分: **A 停止中/復帰待ち** ・ **B 意図的非対称 (unify 禁止)** ・ **C 解消済 (再検出しない)** ・ **D 要確認**。
 - 値・実装状況を表に書くときは **必ず一次ソースで再確認**する (過去に Explore が画像圧縮を 1920/0.8 と誤報告した実績あり)。
 - スコープ外: tasks.md / Phase 進捗と重複する「iOS が Phase 的に未実装の port」(cell swap / folder UI 等) は**載せない** (= tasks.md が一次情報源)。
-- **CI による検知 (レバー C)**: 共有 fixture (`shared/vault-fixtures/**`) を変えると [`ios-ci.yml`](../.github/workflows/ios-ci.yml) が iOS VaultTests を起動し、契約乖離は fixture lock で **CI red** になる (実ゲート)。fixture 未カバーの純粋契約 (vaultBody/Format/frontmatter/grid.ts 等) が片側だけ変わると [`ci.yml`](../.github/workflows/ci.yml) の `cross-platform-parity` job が `::warning::` でリマインドする (非ブロッキング)。
+- **CI による検知 (レバー C)**: iOS 関連変更時に [`ios-ci.yml`](../.github/workflows/ios-ci.yml) が iOS `LogicTests` (純粋契約 `CellGuard` / `MirrorFilename` を Supabase 非リンクで検証) を起動する。desktop の共有純粋契約 (`grid.ts` / `mirror/mirrorFilename.ts`) が片側だけ変わると [`ci.yml`](../.github/workflows/ci.yml) の `cross-platform-parity` job が `::warning::` でリマインドする (非ブロッキング)。
 
-関連: root [`CLAUDE.md`](../CLAUDE.md) / desktop [`CLAUDE.md`](../desktop/CLAUDE.md) 落とし穴 / [`shared/vault-fixtures/`](vault-fixtures/) (契約ロック)。
+関連: root [`CLAUDE.md`](../CLAUDE.md) / desktop [`CLAUDE.md`](../desktop/CLAUDE.md) 落とし穴。
 
 ---
 
@@ -25,7 +25,7 @@ Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止
 | # | 項目 | desktop | iOS | status |
 |---|---|---|---|---|
 | A1 | Realtime 自動同期経路 | 全 subscribe/pull 経路をコメントアウト | RealtimeService / 15s polling / scenePhase pull-push を停止 | ⏸ 両OS停止中。サインイン1回 + 手動「今すぐ同期」のみ |
-| A2 | echo-skip (cloud realtime) | 未完成 (vault 経路 `vaultWriteLedger` は実装済) | 未完成 (vault 経路 `VaultWriteLedger` は実装済) | ❌ 復帰チェックリスト #3 |
+| A2 | echo-skip (cloud realtime) | 未完成 | 未完成 | ❌ 復帰チェックリスト #3 |
 | A3 | subscribe 経路統合 | `useSync` と `useRealtime` が別々に購読保持 (二重) | (単一経路) | ❌ desktop で #4 未統合 |
 | A4 | iOS 15s polling → dirty flag + 60s debounce | (該当なし) | polling 廃止済 / mutation 駆動 dirty flag への置換は未実装 | ❌ 復帰チェックリスト #5 |
 
@@ -55,8 +55,7 @@ Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止
 
 | 項目 | 解消法 | 日付 |
 |---|---|---|
-| セル空判定 / 中心セル保護 (色・done・trim) | desktop 準拠に統一 + [`cellGuard`](vault-fixtures/) fixture で両OS lock | 2026-06-08 |
-| vault 本文 parse parity (複数行 heading / clean 削除) | ブロック parse 移植 + golden fixture lock | 2026-06-07 |
+| セル空判定 / 中心セル保護 (色・done・trim) | desktop 準拠に統一。両OS の純粋ユニットテスト (desktop [`grid.test.ts`](../desktop/src/lib/utils/__tests__/grid.test.ts) / iOS `CellGuardTests`) で lock | 2026-06-08 |
 | UUID 大文字小文字 | 両OS lowercase 統一 (iOS `IDGenerator.uuid()`) | desktop 落とし穴 #23 / iOS pitfalls #6 |
 | カラープリセット | [`shared/constants/colors.json`](constants/colors.json) 単一ソース codegen | — |
 | zombie cleanup / PGRST204 thrash 対策 | 両OS実装 (desktop `push.ts` 冒頭サニタイズ / iOS `SyncEngine.sanitizeZombies`) | desktop 落とし穴 #12/#17 |
@@ -71,6 +70,5 @@ Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止
 |---|---|---|---|
 | D1 | 画像圧縮値の根拠 | なぜ iOS が低 (1200/0.7) かが未明文化。意図的差なら B に理由付きで残す | [`imageSync.ts`](../desktop/src/lib/api/imageSync.ts) / [`ImageStorage.swift`](../ios/Mandalart/Services/ImageStorage.swift) |
 | D2 | 画像同期 end-to-end | 相互 download 含む実機検証が未実施。api-spec.md 未反映 | auto-memory `project_image_cloud_sync` |
-| D3 | vault ライブ watcher (旧 C) | desktop は FSEvents 常時取込 / iOS は前面 watcher 無し→背面復帰時 reconcile のみ | auto-memory `reference_ios_vault_parse_divergence` |
-| D4 | vault-exit の updatedAt bump (旧 E) | iOS [`VaultExitSync.swift`](../ios/Mandalart/Services/VaultExitSync.swift) のみ・desktop に相当処理なし | 同上 |
-| D5 | vault 中の cloud-off transport (旧 D) | 両OS とも vault ON 時は cloud 同期 OFF = 端末間転送は外部フォルダ同期に全依存 (フォルダ未共有・片方だけ vault ON は永久乖離) | root/desktop CLAUDE.md vault 節 |
+
+> 旧 D3-D5 (vault ライブ watcher / vault-exit updatedAt bump / vault 中 cloud-off transport) は Obsidian 風 Markdown vault 廃止 (2026-06-08) に伴い消滅。vault は一方向 JSON ミラーに置換され、ミラーはクラウド同期に干渉しない。

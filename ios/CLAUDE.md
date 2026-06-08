@@ -40,7 +40,7 @@
 | 7. Clean (必要時) | `Shift+Cmd+K` |
 | 8. SwiftData schema 不整合クラッシュ時 | Simulator アプリ長押し→削除して再 Run (or VersionedSchema 移行) |
 
-**CI**: vault ピュア層のユニットテスト (`VaultTests` スキーム) は [`.github/workflows/ios-ci.yml`](../.github/workflows/ios-ci.yml) が **`ios/**` または `shared/vault-fixtures/**` 変更時**に macOS runner で自動実行する (`xcodegen generate` → `xcodebuild test -scheme VaultTests`)。後者は共有 golden fixture (両OS契約) を変えたら iOS 側も検証する実ゲート (片側 sleep 防止)。Supabase 非リンク・Secrets 不要。desktop フロント/Rust は [`ci.yml`](../.github/workflows/ci.yml) / `release.yml` 担当。`ci.yml` の `cross-platform-parity` job は desktop の純粋契約 (vaultBody/Format/frontmatter/grid.ts 等) が片側だけ変わると `::warning::` を出す (非ブロッキング・[`shared/DIVERGENCES.md`](../shared/DIVERGENCES.md) 参照)。
+**CI**: 純粋ロジックのユニットテスト (`LogicTests` スキーム = `CellGuard` / `MirrorFilename`) は [`.github/workflows/ios-ci.yml`](../.github/workflows/ios-ci.yml) が **`ios/**` 変更時**に macOS runner で自動実行する (`xcodegen generate` → `xcodebuild test -scheme LogicTests`)。Supabase 非リンク・Secrets 不要。desktop フロント/Rust は [`ci.yml`](../.github/workflows/ci.yml) / `release.yml` 担当。`ci.yml` の `cross-platform-parity` job は desktop の純粋契約 (`grid.ts` / `mirror/mirrorFilename.ts`) が片側だけ変わると `::warning::` を出す (非ブロッキング・[`shared/DIVERGENCES.md`](../shared/DIVERGENCES.md) 参照)。
 
 ## Swift コード規約
 
@@ -85,10 +85,10 @@ Views → ViewModels (@Observable) → Services → SwiftData (local) / supabase
 - **ViewModels/**: `AuthStore` (@Observable / @MainActor、サインイン状態 + Auth セッション)
 - **Services/**: `SupabaseService` (umbrella SupabaseClient wrapper) / `MandalartFactory` (root grid + center cell 同時 INSERT) / `SyncEngine` (pullAll / pushPending、last-write-wins)
 - **Utils/**: `Constants` (定数)
-- **Vault/**: desktop から移植したピュア層 (Foundation + CryptoKit のみ依存・SwiftData/Supabase 非依存、`VaultTests` でロック)。vault フォルダモード本体 (本文ラウンドトリップ / reconcile / flush / clobber 安全化、Phase 12) は本番配線済 (DB 層は `Services/VaultDb*` が橋渡し)。`VaultCellGuard` (セル空判定・中心セル保護, `CellGuard`) も `EditorView` から本番利用。全ファイルの 1 行説明は [`docs/architecture.md`](docs/architecture.md) を参照 (このリストは概要のみ)
+- **ローカル JSON ミラー (一方向)**: 旧 Obsidian 風 Markdown vault は廃止 (2026-06-08)。代わりに `Services/Mirror*` (`MirrorConfig` / `MirrorFilename` / `MirrorSync` / `MirrorAutoFlush` / `SecurityScopedBookmark`) が DB 編集を選択フォルダへ `<slug>-<id>.json` で書き出す (取り込み無し・クラウド同期に非干渉)。セル空判定 / 中心セル保護は [`Utils/CellGuard.swift`](Mandalart/Utils/CellGuard.swift) (`CellGuard` / `CellGuardCell`、desktop `grid.ts` のミラー) に移動し `EditorView` から本番利用。全ファイルの 1 行説明は [`docs/architecture.md`](docs/architecture.md) を参照
 - **Resources/**: 将来の `help/*.mp4` 等
 
-ユニットテストは `ios/MandalartTests/` (XCTest)。専用スキーム **`VaultTests`** が `Mandalart/Vault/*` を app (Supabase) 非依存で直接コンパイルするので、`xcodebuild test -scheme VaultTests -destination 'platform=iOS Simulator,name=iPhone 16'` が CLI で通る (落とし穴 #1 回避)。`project.yml` 編集後は `xcodegen generate`。
+ユニットテストは `ios/MandalartTests/` (XCTest)。専用スキーム **`LogicTests`** が純粋契約 (`Utils/CellGuard.swift` / `Services/MirrorFilename.swift`) を app (Supabase) 非依存で直接コンパイルするので、`xcodebuild test -scheme LogicTests -destination 'platform=iOS Simulator,name=iPhone 16'` が CLI で通る (落とし穴 #1 回避)。`project.yml` 編集後は `xcodegen generate`。`MirrorSync` (SwiftData + TransferService 依存) のロジックは desktop の `mirrorSync.test.ts` が同等にロックする。
 
 詳細は [`docs/architecture.md`](docs/architecture.md)。
 

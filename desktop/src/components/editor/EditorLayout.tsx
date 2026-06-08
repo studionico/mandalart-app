@@ -6,7 +6,6 @@ import { useConvergeStore } from '@/store/convergeStore'
 import { useGrid } from '@/hooks/useGrid'
 import { useSubGrids, type SubGridData } from '@/hooks/useSubGrids'
 import { useRealtime } from '@/hooks/useRealtime'
-import { VAULT_IMPORTED_EVENT } from '@/hooks/useVaultWatcher'
 import { useOffline } from '@/hooks/useOffline'
 import { useUndo } from '@/hooks/useUndo'
 import { useDragAndDrop, type DndUndoable } from '@/hooks/useDragAndDrop'
@@ -779,13 +778,6 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // 叩く必要はない (重複呼出の削減)。
     reload()
   }, [reload])
-
-  // vault ライブ取り込み (外部 .md 編集 → DB) 完了時に表示中グリッドを再フェッチする。
-  useEffect(() => {
-    const onImported = () => reloadAll()
-    window.addEventListener(VAULT_IMPORTED_EVENT, onImported)
-    return () => window.removeEventListener(VAULT_IMPORTED_EVENT, onImported)
-  }, [reloadAll])
 
   const handleStockPasteDrop = useCallback(async (stockItemId: string, targetCellId: string) => {
     if (isLocked) return  // ロック中は stock → cell 貼付けを block (migration 011)

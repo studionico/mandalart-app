@@ -30,8 +30,6 @@
     "fs:allow-remove",
     "fs:allow-exists",
     "fs:allow-read-dir",
-    "fs:allow-watch",
-    "fs:allow-unwatch",
     "dialog:allow-open",
     {
       "identifier": "fs:scope",

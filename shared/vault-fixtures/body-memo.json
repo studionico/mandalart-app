@@ -1,8 +1,0 @@
-{
-  "kind": "bodyParse",
-  "name": "blockquote 行を memo に集約する",
-  "body": "# [ ] 中心 ^p4\n> 1 行目\n> 2 行目",
-  "expect": {
-    "memo": { "set": true, "value": "1 行目\n2 行目" }
-  }
-}
