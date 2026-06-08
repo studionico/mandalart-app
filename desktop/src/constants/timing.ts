@@ -66,14 +66,6 @@ export const SYNC_DEBOUNCE_MS = 300
 /** MemoTab の auto-save debounce (ms)。typing 後この時間内に追加入力が無ければ保存。 */
 export const MEMO_SAVE_DEBOUNCE_MS = 800
 
-// --- ローカル JSON ミラー (一方向 DB→ファイル) ---
-
-/**
- * JSON ミラー auto-flush の debounce (ms)。DB 書込み後この時間内に追加書込みが無ければ
- * 選択フォルダへ各マンダラートの .json を書き出す。連続編集は 1 回に畳む。
- */
-export const MIRROR_FLUSH_DEBOUNCE_MS = 3000
-
 // --- UI 確認ダイアログ ---
 
 /**

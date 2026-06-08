@@ -15,7 +15,6 @@ import { useBeforeQuit } from './hooks/useBeforeQuit'
 import { useCloudEmptyCellsCleanup } from './hooks/useCloudEmptyCellsCleanup'
 import { useCloudFoldersCleanup } from './hooks/useCloudFoldersCleanup'
 import { useWelcomeOnFirstRun } from './hooks/useWelcomeOnFirstRun'
-import { useMirrorAutoFlush } from './hooks/useMirrorAutoFlush'
 
 /**
  * Help / Welcome モーダルの表示モード。
@@ -33,7 +32,6 @@ export default function App() {
   useBeforeQuit()
   useCloudEmptyCellsCleanup()
   useCloudFoldersCleanup()
-  useMirrorAutoFlush()
   const { status, downloadAndInstall, dismiss } = useAppUpdate()
 
   // Welcome / Help dialog state

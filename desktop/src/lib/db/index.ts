@@ -2,19 +2,6 @@ import Database from '@tauri-apps/plugin-sql'
 
 let db: Database | null = null
 
-/**
- * DB 書込み (execute = INSERT/UPDATE/DELETE) 成功時に発火する購読者。
- * ローカル JSON ミラー auto-flush が「実 mutation が起きた」合図として使う。
- * 読取 (query=select) と getDb 内の PRAGMA は通らないので、純粋に mutation だけを拾える。
- */
-const writeListeners = new Set<() => void>()
-
-/** DB 書込み完了の通知を購読する。返り値で解除。 */
-export function onDbWrite(listener: () => void): () => void {
-  writeListeners.add(listener)
-  return () => writeListeners.delete(listener)
-}
-
 export async function getDb(): Promise<Database> {
   if (!db) {
     db = await Database.load('sqlite:mandalart.db')
@@ -44,14 +31,6 @@ export async function query<T>(sql: string, params: unknown[] = []): Promise<T[]
 export async function execute(sql: string, params: unknown[] = []): Promise<void> {
   const database = await getDb()
   await database.execute(sql, params)
-  // 書込み成功後に購読者へ通知 (ミラー auto-flush 等)。リスナー例外で DB 書込みを壊さない。
-  for (const listener of writeListeners) {
-    try {
-      listener()
-    } catch (e) {
-      console.error('[db] onDbWrite listener failed:', e)
-    }
-  }
 }
 
 export function generateId(): string {
