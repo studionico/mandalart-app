@@ -4,11 +4,7 @@ import SwiftData
 @main
 struct MandalartApp: App {
     @State private var auth = AuthStore()
-    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(ThemePreference.storageKey) private var rawTheme: String = ThemePreference.system.rawValue
-    /// DB 編集 → debounce → 出力先フォルダへ各マンダラートを書き出す auto-flush ドライバ
-    /// (一方向 DB→ファイル。mirrorEnabled ON のときだけ書く。取り込みはしない)。
-    @State private var mirror = MirrorAutoFlush()
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -35,8 +31,6 @@ struct MandalartApp: App {
                 .environment(auth)
                 .preferredColorScheme(ThemePreference(rawValue: rawTheme)?.colorScheme)
                 .task { await auth.bootstrap() }
-                // DB 編集を出力先フォルダへ自動ミラーする購読を開始 (一方向 DB→ファイル)。
-                .task { mirror.start(context: sharedModelContainer.mainContext) }
                 // サインイン状態が変わるたびに発火 (= bootstrap で session 復元時 / 手動サインイン時)。
                 // サインイン直後: フル同期のみ。
                 //
@@ -69,16 +63,6 @@ struct MandalartApp: App {
                 // }
         }
         .modelContainer(sharedModelContainer)
-        // ⚠️ EMERGENCY STOP (2026-05-04): scenePhase 遷移ごとの pull/push も停止中。
-        // ロック解除 / Slide Over / Multitask 等で頻発し broadcast を増幅していた可能性あり。
-        // 手動「今すぐ同期」ボタン (SettingsView) で代替。
-        .onChange(of: scenePhase) { _, newPhase in
-            // 背面遷移時に未 flush の編集を出力先へ確定する (一方向 DB→ファイル、保険 flush)。
-            // クラウド同期は触らない (落とし穴 #24 に抵触しない)。
-            if newPhase == .background {
-                mirror.flushNow()
-            }
-        }
     }
 
     /// 起動時 / サインイン直後の初回フル同期。pull → push の順で実行

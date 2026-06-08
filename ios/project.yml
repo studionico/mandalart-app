@@ -44,7 +44,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   # 純粋ロジックのユニットテスト専用ターゲット。
   # app ターゲット (= Supabase リンク) に依存させず、Foundation のみ依存の純粋契約
-  # (CellGuard / MirrorFilename) と GridConstants だけを直接コンパイルする。これで
+  # (CellGuard) と GridConstants だけを直接コンパイルする。これで
   # `xcodebuild test` を LogicTests スキームで回しても Supabase をビルドせず、
   # 落とし穴 #1 (SPM 依存で Simulator destination を見失う) を踏まない。
   MandalartTests:
@@ -55,7 +55,6 @@ targets:
       - path: MandalartTests
       - path: Mandalart/Utils/Constants.swift
       - path: Mandalart/Utils/CellGuard.swift
-      - path: Mandalart/Services/MirrorFilename.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.mandalart.app.ios.tests
