@@ -81,5 +81,6 @@ desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
 - [`desktop/docs/`](desktop/docs/): 機能要件 / data-model / API / アニメ / Supabase setup / リリース手順 等の詳細仕様 (canonical)
 - [`ios/CLAUDE.md`](ios/CLAUDE.md): iOS 固有のビルド手順・Swift 規約・iOS 落とし穴インデックス
 - [`ios/docs/`](ios/docs/): xcodegen workflow / Swift モデル ↔ Supabase スキーマ対応 / SyncEngine 詳細 / iOS 固有 pitfalls 等
+- [`shared/DIVERGENCES.md`](shared/DIVERGENCES.md): **desktop ↔ iOS の既知の乖離レジストリ** (停止中 / 意図的非対称=unify 禁止 / 解消済 / 要確認)。クロスプラットフォーム作業で「この表に無い挙動差 = 偶発の乖離 (バグ) を疑う」起点。乖離を見つけ/解消したら更新する
 
 shared な仕様 (data-model 詳細 / 機能要件 / Supabase setup) は **desktop/docs/ を canonical** とし、iOS docs は差分のみ書いて重複を避ける。
