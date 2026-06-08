@@ -100,8 +100,7 @@ src/
 │   ├── CardLikeText.tsx      # 中心セル / カード / ストックエントリのテキスト描画共通 (ConvergeOverlay polling 互換構造)
 │   │
 │   ├── dashboard/
-│   │   ├── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
-│   │   └── SettingsDialog.tsx # アプリ設定モーダル。ローカル JSON ミラー: フォルダ選択 + 有効化トグル + 「今すぐ書き出す」
+│   │   └── TrashDialog.tsx   # ゴミ箱ダイアログ (復元・完全削除)
 │   │
 │   ├── help/                 # 操作説明 / Welcome
 │   │   ├── HelpDialog.tsx       # Carousel 式モーダル (7 スライド、自動進行 / dots / キーボード)
@@ -144,7 +143,6 @@ src/
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
 │   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper (+ app:sync-pulled も listen)
 │   ├── useVisibilityResync.ts # Tauri window focus 復帰で pullAll 発火 (落とし穴 #22 保険同期、app:sync-pulled event を dispatch)
-│   ├── useMirrorAutoFlush.ts # DB 書込み (onDbWrite) → 3s debounce → ローカル JSON ミラーへ自動書き出し (mirrorEnabled ON のときのみ、一方向 DB→ファイル)
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)
 │   ├── useSync.ts            # クラウド同期 (起動時全同期 + realtime + manual 同期 + 300ms debounce)
 │   ├── useAuthBootstrap.ts   # 起動時のセッション復元 + deep link ハンドラ登録
@@ -188,11 +186,6 @@ src/
 │   │   ├── reorderArray.ts           # drag-and-drop 用 pure 関数: src → target に要素移動した新配列を返す (DashboardPage の card-reorder で使用)
 │   │   ├── export.ts                 # エクスポート各形式を `$DOWNLOAD` (OS ダウンロードフォルダ) に直接 writeFile で保存 (Tauri WebKit で `<a download>` が動かないため)
 │   │   └── captureCardLikeSource.ts  # カード相当 DOM (中心セル / dashboard カード / ストックエントリ) から ConvergeOverlay morph source 値 (rect / border / radius / inset / font) を共通計測
-│   ├── mirror/               # ローカル JSON ミラー (DB → ファイルの一方向書き出し、取り込みなし)
-│   │   ├── mirrorFilename.ts   # マンダラート 1 件のファイル名 `<slug-title>-<id>.json` を決める純関数
-│   │   ├── mirrorConfig.ts     # ミラー設定 (mirrorEnabled / mirrorPath) を AppData の mirror-config.json に永続化
-│   │   ├── mirrorSync.ts       # 全マンダラートを exportToJSON で JSON 化して mirrorPath に書き出し + 不要ファイル掃除 (mirrorAllToFolder)
-│   │   └── mirrorDialog.ts     # plugin-dialog のフォルダ選択ラッパ (pickMirrorFolder、import をこの 1 ファイルに隔離)
 │   ├── import-parser.ts      # インデントテキスト / Markdown → GridSnapshot (箇条書き記号除去あり、frontmatter なし fallback)
 │   ├── markdown-frontmatter.ts # md-lossless-v1: GridSnapshot ⇄ YAML frontmatter (build/extract、ロスレス Markdown)
 │   ├── realtime.ts           # Supabase Realtime (postgres_changes) 購読

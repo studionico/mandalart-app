@@ -20,14 +20,9 @@ iOS                                     Supabase
 - supabase 共有 instance: [`../Mandalart/Services/SupabaseService.swift`](../Mandalart/Services/SupabaseService.swift) (umbrella `SupabaseClient`)
 - 同期トリガ UI: [`../Mandalart/Views/SettingsView.swift`](../Mandalart/Views/SettingsView.swift) の「今すぐ同期」ボタン (Phase 0-3 時点は手動のみ、自動同期は Phase 3 残作業)
 
-## ローカル JSON ミラーはクラウド同期に影響しない
-
-DB の内容をフォルダへ JSON で書き出す**一方向ローカル JSON ミラー** ([`docs/tasks.md`](tasks.md) 旧 Phase 12 の置換、
-仕様は desktop [`requirements.md`](../../desktop/docs/requirements.md#ローカル-json-ミラー)) は **DB → ファイルの一方向のみ** で、
-ファイル → DB の取り込みも起動時の再構築も行わない。したがって **クラウド同期を一切停止させない** (ミラーの有効/無効に
-関わらず pull / push は通常どおり動く)。実装は [`MirrorSync`](../Mandalart/Services/MirrorSync.swift) / [`MirrorAutoFlush`](../Mandalart/Services/MirrorAutoFlush.swift)
-(`ModelContext.didSave` 駆動の debounce(3s) + scenePhase `.background` で `flushNow`、`mirror.enabled` ON のときだけ。ファイルのみ
-書き DB は非改変なのでフィードバックループ無し)。クラウド同期と競合しないため、緊急停止経路の復帰条件に追加の gate は不要。
+> **注**: 旧 Obsidian 風 Markdown vault も、その後継の一方向ローカル JSON ミラーも撤去された (2026-06-08)。
+> ローカルファイル保存は廃止し、クラウド同期 + 手動 export ([`TransferService`](../Mandalart/Services/TransferService.swift)) に
+> 一本化した。同期経路にローカルミラー由来の gate は存在しない。
 
 ## pullAll (cloud → local)
 

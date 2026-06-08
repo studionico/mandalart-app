@@ -333,20 +333,6 @@ Shift+Tab は逆順
 
 ---
 
-## ローカル JSON ミラー
-
-DB の内容を、ユーザーが選んだフォルダに **JSON ファイルとして一方向 (DB → ファイル) でミラー** する機能。バックアップ・外部ツール連携・git 管理などの用途を想定する。**ファイル → DB の取り込みは行わない** (= ファイルを手編集しても DB には戻らない)。クラウド同期とは独立しており、ミラーを有効にしてもクラウド同期は止まらない。
-
-- **書き出しトリガ**: DB 書込み (`onDbWrite`) を契機に **3 秒 debounce** (`MIRROR_FLUSH_DEBOUNCE_MS`) でまとめて書き出す ([`useMirrorAutoFlush`](../src/hooks/useMirrorAutoFlush.ts))。各マンダラートを `<slug-title>-<id>.json` (1 マンダラート 1 ファイル) として保存する。スナップショットは既存の `exportToJSON` / `GridSnapshot` ([`transfer.ts`](../src/lib/api/transfer.ts)) を再利用する
-- **リネーム / 削除の整合**: タイトル変更でファイル名が変わったり、マンダラートが削除された場合は、対応する古いファイル (stale file) を掃除して DB の現状とフォルダ内容を一致させる
-- **設定 UI**: アプリ設定モーダル ([`SettingsDialog.tsx`](../src/components/dashboard/SettingsDialog.tsx)) の「ローカル JSON ミラー」セクションで、フォルダ選択 + 有効化トグル + 「今すぐ書き出す」ボタンを提供する
-- **設定の永続化**: 有効フラグとフォルダパス (`{ mirrorEnabled, mirrorPath }`) を AppData の `mirror-config.json` に保存する
-- **クラウド同期との関係**: 一方向 (DB → ファイル) なので、クラウド pull が DB を更新してもミラーが衝突を起こすことはない。ミラーがクラウド同期を停止させることもない
-
-> 手動の「ファイルへエクスポート」機能 (JSON / Markdown / インデントテキスト / PNG / PDF) とは別物。エクスポートはユーザーが明示的に保存する 1 回限りの出力、ミラーは DB 変更に追従する自動の片方向ミラーリング。
-
----
-
 ## ヘルプ / Welcome モーダル
 
 新規ユーザー導入用に、操作説明を Carousel 形式のモーダルで提供する。

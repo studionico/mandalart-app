@@ -27,10 +27,6 @@ query<T>(sql: string, params?: unknown[]): Promise<T[]>
 // INSERT / UPDATE / DELETE
 execute(sql: string, params?: unknown[]): Promise<void>
 
-// DB 書込み (execute) 成功時に発火する購読を登録する (返り値で解除)。
-// ローカル JSON ミラーの auto-flush が「実 mutation が起きた」合図として使う (query/PRAGMA は通らない)。
-onDbWrite(listener: () => void): () => void
-
 // UUID 生成 (crypto.randomUUID)
 generateId(): string
 
@@ -465,38 +461,6 @@ parseTextToSnapshot(text: string): GridSnapshot
 
 ---
 
-## lib/mirror/ — ローカル JSON ミラー
-
-DB の内容を、ユーザーが選んだフォルダに JSON ファイルとして **一方向 (DB → ファイル)** でミラーする層。
-ファイル → DB の取り込みはせず、クラウド同期も止めない (仕様は [`requirements.md`](./requirements.md#ローカル-json-ミラー) 参照)。
-
-```typescript
-// lib/mirror/mirrorFilename.ts
-// タイトルを FS 安全な slug に変換する純関数 (空 / 記号のみは 'untitled' にフォールバック)。
-slugTitle(title: string): string
-// マンダラート 1 件のファイル名を `<slug-title>-<id>.json` で決定する純関数。
-mirrorFilename(title: string, id: string): string
-
-// lib/mirror/mirrorConfig.ts
-// 有効フラグ + フォルダパスを AppData の mirror-config.json に永続化する。
-loadMirrorConfig(): Promise<{ mirrorEnabled: boolean; mirrorPath: string | null }>
-saveMirrorConfig(config: { mirrorEnabled: boolean; mirrorPath: string | null }): Promise<void>
-
-// lib/mirror/mirrorSync.ts
-// 全マンダラートを exportToJSON で GridSnapshot 化し、各 <slug-title>-<id>.json を
-// mirrorPath 配下に書き出す。リネーム / 削除で不要になった古いファイル (stale file) は掃除して
-// DB の現状とフォルダ内容を一致させる。
-mirrorAllToFolder(mirrorPath: string): Promise<void>
-
-// lib/mirror/mirrorDialog.ts
-// plugin-dialog のフォルダ選択ラッパ (import をこの 1 ファイルに隔離)。
-pickMirrorFolder(): Promise<string | null>
-```
-
-ミラーを駆動するフックは [`useMirrorAutoFlush`](../src/hooks/useMirrorAutoFlush.ts): `onDbWrite` (= `lib/db/index.ts` の DB 書込み購読) の唯一の consumer で、書込みを `MIRROR_FLUSH_DEBOUNCE_MS` (3000ms) で debounce してから `mirrorAllToFolder` を呼ぶ。`mirrorEnabled` が OFF のときは何もしない。
-
----
-
 ## lib/api/auth.ts — Supabase Auth 連携
 
 ```typescript
@@ -805,5 +769,6 @@ clear(): void
 `targetId` は polymorphic id (前 2 つは `mandalart.id`、`stock` は `stock_item.id`)。`centerCell` は起点側 DOM の実測値で overlay の**初期**スタイルとして使い、終端値は polling した target DOM の `getComputedStyle` から読む。
 
 > **注**: 旧 `bootstrapStore` (起動時の vault→DB 再構築ゲート) と `vaultStore` (vaultMode の反応的ミラー) は、
-> bidirectional vault 機能の撤去に伴い削除された。App.tsx に起動時の rebuild ゲートは無く Routes は無条件描画される。
-> ローカル JSON ミラーは一方向 (DB → ファイル) で起動時の再構築を持たないため、これらのストアは不要。
+> bidirectional vault 機能の撤去に伴い削除された。後継の一方向 JSON ミラーも 2026-06-08 に撤去され
+> (クラウド同期 + 手動 export に一本化)、起動時の rebuild ゲートやローカルファイル同期ストアは存在しない。
+> App.tsx は Routes を無条件描画する。

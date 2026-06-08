@@ -11,7 +11,7 @@ desktop (Tauri/TS) と iOS (Swift) は二重実装で、乖離を systematic に
 - 区分: **A 停止中/復帰待ち** ・ **B 意図的非対称 (unify 禁止)** ・ **C 解消済 (再検出しない)** ・ **D 要確認**。
 - 値・実装状況を表に書くときは **必ず一次ソースで再確認**する (過去に Explore が画像圧縮を 1920/0.8 と誤報告した実績あり)。
 - スコープ外: tasks.md / Phase 進捗と重複する「iOS が Phase 的に未実装の port」(cell swap / folder UI 等) は**載せない** (= tasks.md が一次情報源)。
-- **CI による検知 (レバー C)**: iOS 関連変更時に [`ios-ci.yml`](../.github/workflows/ios-ci.yml) が iOS `LogicTests` (純粋契約 `CellGuard` / `MirrorFilename` を Supabase 非リンクで検証) を起動する。desktop の共有純粋契約 (`grid.ts` / `mirror/mirrorFilename.ts`) が片側だけ変わると [`ci.yml`](../.github/workflows/ci.yml) の `cross-platform-parity` job が `::warning::` でリマインドする (非ブロッキング)。
+- **CI による検知 (レバー C)**: iOS 関連変更時に [`ios-ci.yml`](../.github/workflows/ios-ci.yml) が iOS `LogicTests` (純粋契約 `CellGuard` を Supabase 非リンクで検証) を起動する。desktop の共有純粋契約 (`grid.ts`) が片側だけ変わると [`ci.yml`](../.github/workflows/ci.yml) の `cross-platform-parity` job が `::warning::` でリマインドする (非ブロッキング)。
 
 関連: root [`CLAUDE.md`](../CLAUDE.md) / desktop [`CLAUDE.md`](../desktop/CLAUDE.md) 落とし穴。
 
@@ -71,4 +71,4 @@ Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止
 | D1 | 画像圧縮値の根拠 | なぜ iOS が低 (1200/0.7) かが未明文化。意図的差なら B に理由付きで残す | [`imageSync.ts`](../desktop/src/lib/api/imageSync.ts) / [`ImageStorage.swift`](../ios/Mandalart/Services/ImageStorage.swift) |
 | D2 | 画像同期 end-to-end | 相互 download 含む実機検証が未実施。api-spec.md 未反映 | auto-memory `project_image_cloud_sync` |
 
-> 旧 D3-D5 (vault ライブ watcher / vault-exit updatedAt bump / vault 中 cloud-off transport) は Obsidian 風 Markdown vault 廃止 (2026-06-08) に伴い消滅。vault は一方向 JSON ミラーに置換され、ミラーはクラウド同期に干渉しない。
+> 旧 D3-D5 (vault ライブ watcher / vault-exit updatedAt bump / vault 中 cloud-off transport) は Obsidian 風 Markdown vault 廃止 (2026-06-08) に伴い消滅。その後継だった一方向 JSON ミラーも同日撤去され (クラウド同期 + 手動 export に一本化)、ローカルファイル保存の乖離項目は両 OS とも存在しない。
