@@ -300,6 +300,19 @@ guard displayPosition != GridConstants.centerPosition else { ... }
 3. **`.fileExporter` で PNG/PDF を出すには `MandalartExportDocument` に `writableContentTypes` (png/pdf 含む) を定義**。無いと writable 先頭の `.json` にフォールバックして拡張子が壊れる。
 4. export は **`.environment(\.colorScheme, .light)` 固定 + `NeutralPalette.rootBackground`** (ダークでもライトで保存、ユーザー指定)。クラウドのみ存在する画像は off-screen で `CellView` の `.task` download が走らず空白 (ローカル画像は同期ロードで写る)。
 
+### #17. Supabase Realtime postgres_changes は非対称 JWT (ES256) 移行で配信不達 → 前面復帰 pull で代替
+
+プロジェクトが Supabase の **JWT Signing Keys (非対称・ES256)** に移行すると、Realtime の postgres_changes 認可 (RLS 評価のための JWT 検証) が機能せず、**channel subscribe は成功する (status=subscribed / heartbeat OK) のに変更イベントが 1 件も配信されない**。publication 4 テーブル登録・`realtimeV2.setAuth()`・プロジェクト再起動でも変わらない。PostgREST (REST の pull/push) は ES256 を検証できるので**手動同期・前面復帰 pull は正常**という非対称が判別の手がかり。
+
+- 切り分け: SDK ログに `Received event postgres_changes` が出るか / 自分の編集すら受け取らないか。deprecated `subscribe()` は join 失敗を `try?` で握り潰すので **`subscribeWithError()`** を使う ([`RealtimeService`](../Mandalart/Services/RealtimeService.swift))。
+- **対処**: realtime 復活は Supabase 側対応 (サポート issue / 署名キー rotate back) が必要でアプリ側スコープ外。**desktop→iOS の実反映は前面復帰 (scene `.active`) pull** が主経路 ([`MandalartApp.foregroundResync`](../Mandalart/App/MandalartApp.swift)、desktop `useVisibilityResync` 等価)。pull は REST(GET) で Realtime Messages quota を消費しない。realtime 購読は heartbeat のみで残置 (将来サーバ修正で自動復活)。詳細: [`sync.md`](sync.md) realtime 節 / 落とし穴 #24。
+
+### #18. 空マンダラート自動 hard delete は「中心セルが空か」だけで判定すると同期由来の一過性 empty でデータ損失する
+
+戻る時の空マンダラート自動 hard delete (cloud cascade 込み、[`EditorView.shouldHardDeleteOnExit`](../Mandalart/Views/EditorView.swift)) は中心セルの空判定に依存し、「**周辺入力あり → 中心非空**」という不変則を前提にしている。だがこの不変則は **編集時にしか enforce されず、pull (前面復帰同期) で中心が空表示になると破れる**。その状態で戻ると、周辺に内容のあるマンダラートを丸ごと hard delete + cloud cascade してしまう (実際にデータ損失が発生)。
+
+- **対処**: hard delete 条件に `hasPeripheralContent` ガードを追加 — 中心が空でも周辺に内容があれば「空マンダラート」ではないので削除しない。desktop `EditorLayout.handleNavigateHome` も同型 latent bug だったため同じガードを追加済 (両 OS 対応)。同期は任意のローカル状態を作りうるので、**削除判定に編集時不変則を流用しない**のが教訓。
+
 ## 参考: 0d375c9 commit の経緯
 
 iOS 版 Phase 0-3 を実装する過程で実際に踏んだ落とし穴は、commit message ([`git log 0d375c9`](https://github.com/studionico/mandalart-app/commit/0d375c9)) にも要点を記録してある。本ファイルと矛盾する情報があれば本ファイルを正とする。

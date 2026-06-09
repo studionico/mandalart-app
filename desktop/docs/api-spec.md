@@ -501,11 +501,20 @@ export const isSupabaseConfigured: boolean
 
 ---
 
+## lib/sync/lock.ts
+
+```typescript
+// SQLite への書き込み手 (pullAll / pushAll / realtime apply*) を直列化する mutex。
+// 各書き込み操作の全体を囲い、read-then-write 窓の交錯 (UNIQUE 衝突) を根絶する
+// (落とし穴 #24 Realtime 復帰で 3 経路が並行化したため)。非再入。
+withSyncLock<T>(fn: () => Promise<T>): Promise<T>
+```
+
 ## lib/sync/push.ts
 
 ```typescript
 // 未同期 (synced_at < updated_at もしくは synced_at IS NULL) のローカル行を
-// Supabase に行単位で upsert する
+// Supabase に行単位で upsert する。本体は withSyncLock で直列化される
 // deleted_at もペイロードに含めるのでソフトデリートも伝播する
 // 1 行失敗しても全体を止めず、失敗行を集約して最後にまとめて throw
 pushAll(userId: string): Promise<{ mandalarts: number; grids: number; cells: number }>
@@ -515,8 +524,8 @@ pushAll(userId: string): Promise<{ mandalarts: number; grids: number; cells: num
 
 ```typescript
 // Supabase から mandalarts / grids / cells を全行 SELECT し、
-// updated_at 比較で local に反映 (last-write-wins)
-// 失敗行は console.error に詳細を出して throw
+// updated_at 比較で local に反映 (last-write-wins)。本体は withSyncLock で直列化される
+// per-row 耐性化: 1 行の INSERT/UPDATE 失敗は console.error で log して続行 (pull 全体は止めない)
 pullAll(): Promise<{ mandalarts: number; grids: number; cells: number }>
 ```
 
@@ -524,7 +533,8 @@ pullAll(): Promise<{ mandalarts: number; grids: number; cells: number }>
 
 ```typescript
 // pullAll → pushAll の順で実行
-// useSync から呼ばれる (起動時 / 手動同期ボタン / realtime 受信時)
+// useSync から呼ばれる (起動時 / 手動同期ボタン)。realtime 受信は useRealtimeSync が
+// app:sync-pulled を dispatch → 各画面が reload する経路で、syncAll は呼ばない
 syncAll(userId: string): Promise<SyncStats>
 
 export type SyncStats = {

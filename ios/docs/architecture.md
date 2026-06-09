@@ -51,7 +51,8 @@ ios/
 │   │   ├── TransferService.swift Export/Import (JSON / Markdown=md-lossless-v1 frontmatter / IndentText + PNG/PDF 画像)。Markdown は memo/color/image/done/位置をロスレス往復、画像は MandalartImageRenderer に委譲
 │   │   ├── MandalartImageRenderer.swift 現在表示中の 3×3 / 9×9 を ImageRenderer で PNG / UIGraphicsPDFRenderer で PDF 化 (画面と同じ size・readOnly:false・ライト固定。Phase 8 export、罠は pitfalls #16)
 │   │   ├── CloudDeleteTombstone.swift permanent delete cloud cascade のリトライキュー (UserDefaults 永続)
-│   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 + debounced pullAll
+│   │   ├── RealtimeService.swift Supabase realtime (postgres_changes) 購読 (subscribeWithError + setAuth) + 1秒 debounced pullAll。※ES256 非対称 JWT 移行で配信不達のため事実上 dead、将来復活に備えた残置 (sync.md 参照)
+│   │   ├── SyncDirtyTracker.swift mutation (ModelContext.didSave) 駆動 + 60秒 sliding debounce で pushPending (旧 15秒 polling の置換、落とし穴 #24)
 │   │   ├── SyncEngine.swift      pullAll / pushPending / DTO / backfillImages (Storage 未アップロード画像の回収)
 │   │   ├── Secrets.swift         Supabase URL / anon key (gitignore)
 │   │   └── Secrets.swift.template

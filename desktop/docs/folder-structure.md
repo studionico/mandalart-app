@@ -84,7 +84,7 @@ samples/
 ```
 src/
 ├── main.tsx                  # React エントリーポイント
-├── App.tsx                   # HashRouter + Routes + グローバル hooks (useTheme / useAuthBootstrap / useVisibilityResync / useGlobalShortcut / useAppUpdate)
+├── App.tsx                   # HashRouter + Routes + グローバル hooks (useTheme / useAuthBootstrap / useRealtimeSync / useVisibilityResync / useGlobalShortcut / useAppUpdate)
 ├── index.css                 # グローバルスタイル (Tailwind + @custom-variant dark 定義、@keyframes 群)
 ├── vite-env.d.ts
 │
@@ -141,10 +141,11 @@ src/
 │   ├── useCellImageUrl.ts    # セル / カード相当の image_path → blob URL 解決 (sync cache + async fallback、remount まばたき抑止)
 │   ├── useTwoClickConfirm.ts # window.confirm 不能 (落とし穴 #7) の代替 2 クリック確認 hook (boolean / keyed の 2 形式)
 │   ├── useUndo.ts            # Undo/Redo キーボードハンドラ + push
-│   ├── useRealtime.ts        # subscribeRemoteChanges の thin wrapper (+ app:sync-pulled も listen)
+│   ├── useRealtimeSync.ts    # Supabase Realtime を App で 1 本だけ購読し app:sync-pulled を dispatch (落とし穴 #24 二重購読解消)
+│   ├── useRealtime.ts        # app:sync-pulled listener (購読は useRealtimeSync に集約、editor の reload 経路に徹する)
 │   ├── useVisibilityResync.ts # Tauri window focus 復帰で pullAll 発火 (落とし穴 #22 保険同期、app:sync-pulled event を dispatch)
 │   ├── useOffline.ts         # オフライン状態検知 (現状スタブ、lib/offline.ts と対)
-│   ├── useSync.ts            # クラウド同期 (起動時全同期 + realtime + manual 同期 + 300ms debounce)
+│   ├── useSync.ts            # クラウド同期 (起動時全同期 + manual 同期 + app:sync-pulled reload、購読は持たない)
 │   ├── useAuthBootstrap.ts   # 起動時のセッション復元 + deep link ハンドラ登録
 │   ├── useTheme.ts           # themeStore → <html>.dark クラスの適用 + prefers-color-scheme 追従
 │   ├── useGlobalShortcut.ts  # Cmd+Shift+M でウィンドウ表示/非表示
@@ -175,7 +176,8 @@ src/
 │   │   └── auth.ts           # Supabase Auth 連携 (メール + OAuth + deep link)
 │   ├── sync/                 # クラウド同期
 │   │   ├── push.ts           # per-row upsert + 失敗集約
-│   │   ├── pull.ts           # Supabase → local に last-write-wins で反映
+│   │   ├── pull.ts           # Supabase → local に last-write-wins で反映 (per-row 耐性化: 1 行衝突で中断しない)
+│   │   ├── lock.ts           # withSyncLock: pullAll/pushAll/realtime apply を直列化する mutex (落とし穴 #24 並行レース根絶)
 │   │   └── index.ts          # syncAll = pullAll → pushAll
 │   ├── supabase/
 │   │   └── client.ts         # Supabase クライアント (env 欠損時フォールバック)

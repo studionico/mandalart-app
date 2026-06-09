@@ -52,7 +52,7 @@
 |---|---|---|
 | グリッド構造 | `GridConstants` | `centerPosition`, `gridSide`, `gridCellCount`, `orbitOrder`, `tabOrder`, `peripheralPositionsByTab` |
 | レイアウト (pt) | `LayoutConstants` | `outerGridGap`, `cellBaseFontSize`, `cellNineByNineFontSize`, `dashboardCardSize`, `locationMapCellSize` |
-| タイミング (ms) | `TimingConstants` | `animStaggerMs`, `animFadeMs`, `convergeDurationMs` |
+| タイミング (ms/秒) | `TimingConstants` | `animStaggerMs`, `animFadeMs`, `convergeDurationMs`, `dirtyPushDebounceSec` (秒、mutation 駆動 push の sliding debounce、落とし穴 #24) |
 | フォントスケール | `FontConstants` | `levelMin`, `levelMax`, `levelDefault`, `stepFactor`, `scale(for:)`、legacy `levelStorageKey` |
 | マンダラート単位設定 | `MandalartFontPreference` | `load(for:)`, `save(_:for:)` — UserDefaults キー `mandalart.fontLevel.<mandalartId>` (per-device、cross-device 同期なし) |
 | テーマ override | [`ThemePreference`](Mandalart/Utils/ThemePreference.swift) | `storageKey = "app.theme"` (グローバル UserDefaults、cross-device 同期なし) / rawValue `light` / `system` / `dark` / `colorScheme` で `.preferredColorScheme(_:)` に渡し `system` 時は `nil` で OS 追従 |
