@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase/client'
 import { execute, query } from '@/lib/db'
 import { useEditorStore } from '@/store/editorStore'
+import { withSyncLock } from '@/lib/sync/lock'
 import type { Cell, Grid } from '@/types'
 
 type CloudCell = Cell
@@ -50,7 +51,9 @@ function registerTableHandler(
     async (payload) => {
       if (payload.table !== table) return
       try {
-        if (await apply(payload as RealtimePayload)) onChange()
+        // pullAll / pushAll と同じ withSyncLock で直列化し、realtime apply の read-then-write が
+        // 並行 pull と交錯してレース (UNIQUE 衝突) を起こすのを防ぐ (落とし穴 #24)。
+        if (await withSyncLock(() => apply(payload as RealtimePayload))) onChange()
       } catch (e) {
         console.error(`[realtime] apply ${table} change failed:`, e, payload)
       }

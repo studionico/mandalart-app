@@ -1,21 +1,31 @@
 import { query, execute } from '@/lib/db'
 import { supabase } from '@/lib/supabase/client'
+import { withSyncLock } from './lock'
 
-async function tryInsert(label: string, sql: string, params: unknown[]) {
+/**
+ * per-row INSERT。1 行失敗しても **throw せず log して続行** する (落とし穴 #24 Realtime 復帰)。
+ * 従来は rethrow して pull パス全体を中断していたが、1 行の衝突 (スロット分岐など) で残り行が
+ * 次回まで未取込になる部分同期を招いていた。レース自体は withSyncLock で根絶し、ここはレース後も
+ * 残りうる真の乖離 (= スロット分岐) に対する耐性として log+continue にする。
+ * @returns 成功なら true
+ */
+async function tryInsert(label: string, sql: string, params: unknown[]): Promise<boolean> {
   try {
     await execute(sql, params)
+    return true
   } catch (e) {
     console.error(`[pull] ${label} INSERT failed:`, params, e)
-    throw e
+    return false
   }
 }
 
-async function tryUpdate(label: string, sql: string, params: unknown[]) {
+async function tryUpdate(label: string, sql: string, params: unknown[]): Promise<boolean> {
   try {
     await execute(sql, params)
+    return true
   } catch (e) {
     console.error(`[pull] ${label} UPDATE failed:`, params, e)
-    throw e
+    return false
   }
 }
 
@@ -70,6 +80,9 @@ type CloudCell = {
  * 現在ユーザーの全データを Supabase から取得し、ローカルに反映する。
  */
 export async function pullAll(): Promise<{ mandalarts: number; grids: number; cells: number }> {
+  // 書き込みを withSyncLock で直列化し、realtime apply / 並行 pullAll との read-then-write レースを
+  // 根絶する (落とし穴 #24)。ロックは fetch も含めて囲い、操作全体を atomic にする。
+  return withSyncLock(async () => {
   let mCount = 0
   let gCount = 0
   let cCount = 0
@@ -113,17 +126,15 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
       'SELECT updated_at FROM mandalarts WHERE id = ?', [cm.id],
     )
     if (local.length === 0) {
-      await tryInsert('mandalarts',
+      if (await tryInsert('mandalarts',
         'INSERT INTO mandalarts (id, title, root_cell_id, show_checkbox, last_grid_id, sort_order, pinned, folder_id, locked, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
         [cm.id, cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.locked ? 1 : 0, cm.created_at, cm.updated_at, cm.deleted_at, cm.updated_at],
-      )
-      mCount++
+      )) mCount++
     } else if (cm.updated_at > local[0].updated_at) {
-      await tryUpdate('mandalarts',
+      if (await tryUpdate('mandalarts',
         'UPDATE mandalarts SET title=?, root_cell_id=?, show_checkbox=?, last_grid_id=?, sort_order=?, pinned=?, folder_id=?, locked=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
         [cm.title, cm.root_cell_id, cm.show_checkbox ? 1 : 0, cm.last_grid_id ?? null, cm.sort_order ?? null, cm.pinned ? 1 : 0, cm.folder_id ?? null, cm.locked ? 1 : 0, cm.updated_at, cm.deleted_at, cm.updated_at, cm.id],
-      )
-      mCount++
+      )) mCount++
     }
   }
 
@@ -133,17 +144,15 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
       'SELECT updated_at FROM grids WHERE id = ?', [cg.id],
     )
     if (local.length === 0) {
-      await tryInsert('grids',
+      if (await tryInsert('grids',
         'INSERT INTO grids (id, mandalart_id, center_cell_id, parent_cell_id, sort_order, memo, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
         [cg.id, cg.mandalart_id, cg.center_cell_id, cg.parent_cell_id, cg.sort_order, cg.memo, cg.created_at, cg.updated_at, cg.deleted_at, cg.updated_at],
-      )
-      gCount++
+      )) gCount++
     } else if (cg.updated_at > local[0].updated_at) {
-      await tryUpdate('grids',
+      if (await tryUpdate('grids',
         'UPDATE grids SET mandalart_id=?, center_cell_id=?, parent_cell_id=?, sort_order=?, memo=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
         [cg.mandalart_id, cg.center_cell_id, cg.parent_cell_id, cg.sort_order, cg.memo, cg.updated_at, cg.deleted_at, cg.updated_at, cg.id],
-      )
-      gCount++
+      )) gCount++
     }
   }
 
@@ -153,19 +162,20 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
       'SELECT updated_at FROM cells WHERE id = ?', [cc.id],
     )
     if (local.length === 0) {
-      await tryInsert('cells',
+      // cells は id PK と (grid_id, position) UNIQUE の 2 制約を持つ。後者の衝突 (= 同スロットに
+      // 別 id セルが既にある乖離) でも pull 全体を止めないよう tryInsert で log+continue する。
+      if (await tryInsert('cells',
         'INSERT INTO cells (id, grid_id, position, text, image_path, color, done, created_at, updated_at, deleted_at, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
         [cc.id, cc.grid_id, cc.position, cc.text, cc.image_path, cc.color, cc.done ? 1 : 0, cc.created_at, cc.updated_at, cc.deleted_at, cc.updated_at],
-      )
-      cCount++
+      )) cCount++
     } else if (cc.updated_at > local[0].updated_at) {
-      await tryUpdate('cells',
+      if (await tryUpdate('cells',
         'UPDATE cells SET grid_id=?, position=?, text=?, image_path=?, color=?, done=?, updated_at=?, deleted_at=?, synced_at=? WHERE id=?',
         [cc.grid_id, cc.position, cc.text, cc.image_path, cc.color, cc.done ? 1 : 0, cc.updated_at, cc.deleted_at, cc.updated_at, cc.id],
-      )
-      cCount++
+      )) cCount++
     }
   }
 
   return { mandalarts: mCount, grids: gCount, cells: cCount }
+  })
 }

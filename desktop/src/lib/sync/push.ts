@@ -1,6 +1,7 @@
 import { query, execute } from '@/lib/db'
 import { supabase } from '@/lib/supabase/client'
 import type { Cell, Grid, Mandalart, Folder } from '@/types'
+import { withSyncLock } from './lock'
 
 /**
  * 未同期 (synced_at が NULL or updated_at < synced_at) のローカル行を Supabase にアップサートする。
@@ -9,6 +10,9 @@ import type { Cell, Grid, Mandalart, Folder } from '@/types'
 export async function pushAll(userId: string): Promise<{ mandalarts: number; grids: number; cells: number }> {
   if (!userId) throw new Error('Not signed in')
 
+  // 書き込みを withSyncLock で直列化し、realtime apply / pullAll との read-then-write レースを
+  // 防ぐ (落とし穴 #24)。pull → push の各操作がそれぞれ atomic に走る。
+  return withSyncLock(async () => {
   let mCount = 0
   let gCount = 0
   let cCount = 0
@@ -225,4 +229,5 @@ export async function pushAll(userId: string): Promise<{ mandalarts: number; gri
   }
 
   return { mandalarts: mCount, grids: gCount, cells: cCount }
+  })
 }
