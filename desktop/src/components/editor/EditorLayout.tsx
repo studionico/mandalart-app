@@ -1677,7 +1677,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       breadcrumb.length === 1 &&
       parallelGrids.length === 1 &&
       gridData.center_cell_id === center?.id
-    const willDelete = centerEmpty && isSoleRoot
+    // 防御 (落とし穴 #24 / 同期データ損失防止): 「周辺入力あり → 中心非空」の不変則は *編集時* にしか
+    // enforce されず、pull (useVisibilityResync の保険同期) で中心が空表示になると破れ得る。その状態で
+    // hard delete すると、周辺に内容があるマンダラートを誤って全消ししてしまう (iOS 側 EditorView で
+    // 同型のデータ損失を確認・修正済)。中心が空でも周辺に内容があれば「空マンダラート」ではないので削除しない。
+    const willDelete = centerEmpty && isSoleRoot && !hasPeripheralContent(gridData.cells)
     if (willDelete) {
       await permanentDeleteMandalart(mandalartId)
     } else {

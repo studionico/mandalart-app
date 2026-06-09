@@ -827,7 +827,16 @@ struct EditorView: View {
     private func shouldHardDeleteOnExit(grid: Grid) -> Bool {
         guard breadcrumb.count == 1 else { return false }
         guard parallelGrids.count == 1 else { return false }
-        return isCenterEmpty(in: grid)
+        guard isCenterEmpty(in: grid) else { return false }
+        // 防御 (落とし穴 #24 / 同期データ損失防止): 「周辺入力あり → 中心非空」の不変則は *編集時* にしか
+        // enforce されず、pull (前面復帰同期) で中心が空表示になると破れ得る。その状態で hard delete
+        // (cloud cascade 込み) すると、周辺に内容があるマンダラートを誤って全消ししてしまう。中心が空でも
+        // 周辺に内容があれば「空マンダラート」ではないので削除しない。
+        if hasPeripheralContent(in: grid) {
+            print("[editor][guard] skip hard delete: center empty だが周辺に内容あり (mandalart=\(mandalart?.id ?? "?"))")
+            return false
+        }
+        return true
     }
 
     /// 戻るボタン / 中心セル tap (root) 共通の出口。空マンダラートなら hard delete してから onBack。
