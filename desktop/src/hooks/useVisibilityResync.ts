@@ -2,13 +2,8 @@ import { useEffect, useRef } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useAuthStore } from '@/store/authStore'
 import { isSupabaseConfigured } from '@/lib/supabase/client'
-// EMERGENCY STOP (2026-05-04): pullAll を停止中だが、復帰時に必要なので import は残す。
 import { pullAll } from '@/lib/sync'
 import { adoptOrphanMandalartsToInbox } from '@/lib/api/folders'
-
-// 緊急停止中の未使用 import 警告 (TS6133) 回避用 reference (復帰時に削除)
-void pullAll
-void adoptOrphanMandalartsToInbox
 
 const DEBOUNCE_MS = 5000
 
@@ -56,22 +51,18 @@ export function useVisibilityResync() {
         return
       }
       lastRunRef.current = now
-      // ⚠️ EMERGENCY STOP (2026-05-04): Supabase Realtime Messages 過剰使用警告のため
-      // pullAll を停止中。pullAll 自体は GET (broadcast を生成しない) だが、pull 結果で
-      // 何かが書き換わって push 経路に飛ぶ可能性を排除するため一旦停止。focus 検知ログだけ残す。
-      // Dashboard で使用量が止まったことを確認してから先に復帰させて様子見する経路。
-      // 詳細: /Users/maro02/.claude/plans/ios-swift-glistening-thacker.md
-      console.debug(`[visibility-resync] EMERGENCY STOP — pullAll skipped (reason: ${reason})`)
-      // try {
-      //   const stats = await pullAll()
-      //   // 他デバイス (iOS 等、folder API 未実装) が folder_id=null で push したマンダラートを
-      //   // Inbox に振り分ける。これがないと Dashboard の folder filter でヒットせず宙ぶらりん。
-      //   const adopted = await adoptOrphanMandalartsToInbox()
-      //   console.debug('[visibility-resync] pullAll done:', stats, 'orphans adopted:', adopted)
-      //   window.dispatchEvent(new CustomEvent('app:sync-pulled'))
-      // } catch (e) {
-      //   console.error('[visibility-resync] pullAll failed:', e)
-      // }
+      // pullAll 自体は GET (broadcast を生成しない) ので Realtime Messages quota に寄与しない。
+      // realtime 購読 (useRealtimeSync) の silent drop 取りこぼしを focus 復帰時に保険同期する。
+      try {
+        const stats = await pullAll()
+        // 他デバイス (iOS 等、folder API 未実装) が folder_id=null で push したマンダラートを
+        // Inbox に振り分ける。これがないと Dashboard の folder filter でヒットせず宙ぶらりん。
+        const adopted = await adoptOrphanMandalartsToInbox()
+        console.debug('[visibility-resync] pullAll done:', stats, 'orphans adopted:', adopted)
+        window.dispatchEvent(new CustomEvent('app:sync-pulled'))
+      } catch (e) {
+        console.error('[visibility-resync] pullAll failed:', e)
+      }
     }
 
     // Tauri native window focus event (macOS app hide/show / Cmd+Tab に反応)

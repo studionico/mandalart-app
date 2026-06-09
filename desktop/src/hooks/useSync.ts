@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { syncAll, type SyncStats } from '@/lib/sync'
 import { backfillUploadLocalImages } from '@/lib/api/imageSync'
-// EMERGENCY STOP (2026-05-04): subscribe 経路を停止中だが、復帰時に必要なので import は残す。
-import { subscribeRemoteChanges } from '@/lib/realtime'
 import { useAuthStore } from '@/store/authStore'
-import { SYNC_DEBOUNCE_MS } from '@/constants/timing'
-
-// 緊急停止中の未使用 import 警告 (TS6133) 回避用 reference (復帰時に削除)
-void subscribeRemoteChanges
-void SYNC_DEBOUNCE_MS
 
 export type SyncStatus = 'idle' | 'syncing' | 'error' | 'offline'
 
@@ -56,29 +49,9 @@ export function useSync() {
     if (user) sync()
   }, [user, sync])
 
-  // ⚠️ EMERGENCY STOP (2026-05-04): Supabase Realtime Messages 過剰使用警告のため停止中。
-  // useSync と useRealtime (EditorLayout) の 2 箇所で subscribeRemoteChanges を呼んでおり、
-  // 1 user に対して 2 channels が並列購読 → 1 push で 2 倍の messages を受信していた。
-  // Dashboard で使用量が止まったことを確認してから段階的に再有効化。復帰時は subscribe 経路を
-  // 1 本に統合し、echo skip ロジックを完全実装すること。
-  // 詳細: /Users/maro02/.claude/plans/ios-swift-glistening-thacker.md
-  // useEffect(() => {
-  //   if (!user) return
-  //   let pending: ReturnType<typeof setTimeout> | null = null
-  //   const unsubscribe = subscribeRemoteChanges(() => {
-  //     if (pending) return
-  //     pending = setTimeout(() => {
-  //       pending = null
-  //       setReloadKey((k) => k + 1)
-  //     }, SYNC_DEBOUNCE_MS)
-  //   })
-  //   return () => {
-  //     if (pending) clearTimeout(pending)
-  //     unsubscribe()
-  //   }
-  // }, [user])
-
-  // useVisibilityResync が pullAll 完了後に dispatch する `app:sync-pulled` を listen。
+  // Realtime の購読は持たない: 購読は App レベルの useRealtimeSync に 1 本化されている
+  // (落とし穴 #24)。useSync は購読 hook / useVisibilityResync が dispatch する `app:sync-pulled`
+  // を listen して reloadKey を bump する reload 経路に徹する。
   // realtime 取りこぼしの保険同期で SQLite に追加された行を UI に反映させるため、
   // reloadKey を bump して dashboard 等の load() を再実行する (落とし穴 #22)。
   useEffect(() => {
