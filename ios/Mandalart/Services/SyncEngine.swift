@@ -367,7 +367,12 @@ final class SyncEngine {
                 .execute()
             for c in pendingCells { c.syncedAt = c.updatedAt }
         }
-        try context.save()
+        // 変更があるときだけ save する。pending 0 件 + zombie 変更なしの空 push で無条件 save すると
+        // ModelContext.didSave が発火し、SyncDirtyTracker が再 push を arm して空 push がループする
+        // (落とし穴 #24 復帰時の dirty-flag 駆動と組み合わせると顕在化)。挙動は等価で defensive。
+        if context.hasChanges {
+            try context.save()
+        }
 
         return (pendingFolders.count, pendingMandalarts.count, pendingGrids.count, pendingCells.count)
     }

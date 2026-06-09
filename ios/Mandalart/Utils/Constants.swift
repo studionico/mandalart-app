@@ -56,6 +56,10 @@ enum TimingConstants {
     static let animStaggerMs: Int = 50
     static let animFadeMs: Int = 200
     static let convergeDurationMs: Int = 600
+    /// mutation 駆動 push の sliding debounce 秒数。最後の編集から本秒数アイドルしてから
+    /// `pushPending` を 1 回実行する。旧 15 秒 auto-push polling (Realtime Messages 過剰使用の
+    /// 主犯、落とし穴 #24) の置換。短すぎると broadcast 量産に戻るので 60 秒以上を維持すること。
+    static let dirtyPushDebounceSec: Int = 60
 }
 
 /// 文字サイズ調整 (desktop editorStore.ts ミラー)。

@@ -4,7 +4,10 @@ import SwiftData
 @main
 struct MandalartApp: App {
     @State private var auth = AuthStore()
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(ThemePreference.storageKey) private var rawTheme: String = ThemePreference.system.rawValue
+    /// 前面復帰 pull の最終実行時刻。cold launch の fullSync との二重 pull / 連続復帰を間引く。
+    @State private var lastForegroundResync: Date?
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -32,35 +35,39 @@ struct MandalartApp: App {
                 .preferredColorScheme(ThemePreference(rawValue: rawTheme)?.colorScheme)
                 .task { await auth.bootstrap() }
                 // サインイン状態が変わるたびに発火 (= bootstrap で session 復元時 / 手動サインイン時)。
-                // サインイン直後: フル同期のみ。
+                // サインイン直後: フル同期 → realtime 購読開始 + mutation 駆動 push のトラッカー開始。
+                // サインアウト時: 購読停止 + トラッカー停止。
                 //
-                // ⚠️ EMERGENCY STOP (2026-05-04): Supabase Realtime Messages 過剰使用警告のため
-                // realtime 購読を停止中。Dashboard で使用量が止まったことを確認してから段階的に再有効化。
-                // 復帰前に: (a) BEFORE UPDATE トリガによる updated_at 書き換えを Supabase 側で確認、
-                // (b) echo skip ロジックを完全実装、(c) subscribe 経路を 1 本に統合。
-                // 詳細: /Users/maro02/.claude/plans/ios-swift-glistening-thacker.md
+                // 旧 15 秒 auto-push polling は永久廃止し SyncDirtyTracker (mutation 駆動 + 60 秒
+                // sliding debounce) に置換 (落とし穴 #24)。realtime 購読は「任意 change → 1 秒 debounce
+                // pullAll」方式で echo-safe (pull は GET + 非 dirty write で broadcast を生まない)。
                 .task(id: auth.isSignedIn) {
+                    let context = sharedModelContainer.mainContext
                     if auth.isSignedIn {
                         await fullSync()
-                        // await RealtimeService.shared.subscribe(
-                        //     into: sharedModelContainer.mainContext
-                        // )
+                        await RealtimeService.shared.subscribe(into: context)
+                        SyncDirtyTracker.shared.start(context: context)
                     } else {
-                        // await RealtimeService.shared.unsubscribe()
+                        await RealtimeService.shared.unsubscribe()
+                        SyncDirtyTracker.shared.stop()
                     }
                 }
-                // ⚠️ EMERGENCY STOP (2026-05-04): 15 秒 auto-push polling は Supabase Realtime Messages
-                // 過剰使用の主犯候補 (cloud BEFORE UPDATE トリガで毎回 broadcast 生成)。停止中。
-                // 復帰時は mutation 駆動の dirty flag + 60 秒以上 debounce に置換すること。
-                // .task(id: auth.isSignedIn) {
-                //     guard auth.isSignedIn else { return }
-                //     while !Task.isCancelled {
-                //         try? await Task.sleep(for: .seconds(15))
-                //         if Task.isCancelled { break }
-                //         let context = sharedModelContainer.mainContext
-                //         _ = try? await SyncEngine.shared.pushPending(from: context)
-                //     }
-                // }
+                // scene phase 連動の保険同期。
+                // - .background: 残 dirty を即 push (debounce 待ちの取りこぼし防止)
+                // - .active: 前面復帰時に pullAll で他端末の変更を取り込む (desktop useVisibilityResync 等価)。
+                //   realtime postgres_changes が Supabase の非対称 JWT 移行で配信不達のため (落とし穴 #24)、
+                //   この foreground 保険 pull が desktop→iOS 反映の主経路になる。pull は REST(GET) なので
+                //   Realtime Messages quota は消費しない。
+                .onChange(of: scenePhase) { _, newPhase in
+                    switch newPhase {
+                    case .background:
+                        SyncDirtyTracker.shared.flushNow()
+                    case .active:
+                        Task { @MainActor in await foregroundResync() }
+                    default:
+                        break
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
     }
@@ -75,8 +82,23 @@ struct MandalartApp: App {
             _ = try await SyncEngine.shared.pushPending(from: context)
             // ローカル画像のうち Storage 未アップロード分を回収 (best-effort)
             await SyncEngine.shared.backfillImages(from: context)
+            lastForegroundResync = Date()  // 直後の .active 復帰 pull を debounce で間引く
         } catch {
             print("[auto-sync] fullSync failed:", error)
+        }
+    }
+
+    /// 前面復帰 (scene .active) 時の保険 pull。realtime 不達分をここで取り込む。
+    /// cold launch の fullSync 直後 / 連続復帰は 5 秒 debounce で間引く。
+    @MainActor
+    private func foregroundResync() async {
+        guard auth.isSignedIn else { return }
+        if let last = lastForegroundResync, Date().timeIntervalSince(last) < 5 { return }
+        lastForegroundResync = Date()
+        do {
+            _ = try await SyncEngine.shared.pullAll(into: sharedModelContainer.mainContext)
+        } catch {
+            print("[foreground-resync] pullAll failed:", error)
         }
     }
 }

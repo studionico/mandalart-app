@@ -36,6 +36,10 @@ final class RealtimeService {
         await unsubscribe()
         contextForSync = context
 
+        // realtime 接続を現在の auth トークンで認証してから購読する。postgres_changes はサーバ側で
+        // RLS を評価するため、接続が未認証 (anon) だと自分の行も含め全行が弾かれて配信ゼロになる。
+        await client.realtimeV2.setAuth()
+
         // `client.realtime` は V1 (legacy)、`realtimeV2` が postgres_changes Async API を持つ。
         let ch = client.realtimeV2.channel("mandalart-app")
         channel = ch
@@ -54,7 +58,16 @@ final class RealtimeService {
             subscriptions.append(sub)
         }
 
-        await ch.subscribe()
+        // deprecated な subscribe() は `try? await subscribeWithError()` で join 失敗を握り潰すため、
+        // subscribeWithError() で明示的に例外を捕捉する (join 失敗が無音化すると events が一切来ない)。
+        // 注: 2026-06-09 時点、Supabase の非対称 JWT (ES256) 移行で realtime の postgres_changes 認可が
+        // 機能せず配信不達 (落とし穴 #24)。subscribe 自体は残置 (将来サーバ側修正で自動復活)、
+        // desktop→iOS の実反映は MandalartApp の前面復帰 pull が担う。
+        do {
+            try await ch.subscribeWithError()
+        } catch {
+            print("[realtime] subscribe failed:", error)
+        }
     }
 
     /// 購読を停止しチャンネルを切断する。
