@@ -55,6 +55,7 @@ targets:
       - path: MandalartTests
       - path: Mandalart/Utils/Constants.swift
       - path: Mandalart/Utils/CellGuard.swift
+      - path: Mandalart/Services/RemoteDeletionReconciler.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.mandalart.app.ios.tests

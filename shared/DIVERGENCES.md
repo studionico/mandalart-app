@@ -59,6 +59,7 @@ Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止
 | UUID 大文字小文字 | 両OS lowercase 統一 (iOS `IDGenerator.uuid()`) | desktop 落とし穴 #23 / iOS pitfalls #6 |
 | カラープリセット | [`shared/constants/colors.json`](constants/colors.json) 単一ソース codegen | — |
 | zombie cleanup / PGRST204 thrash 対策 | 両OS実装 (desktop `push.ts` 冒頭サニタイズ / iOS `SyncEngine.sanitizeZombies`) | desktop 落とし穴 #12/#17 |
+| pull reconcile (cloud hard-delete の取り込み) | 両OS実装。pull は upsert 専用で「cloud から物理削除された行」を検知できず、対向デバイスの `permanentDelete*` が伝播しなかった (desktop→iOS でマンダラート削除が反映しない症状)。`synced_at != null` かつ cloud 不在の mandalart/grid を hard delete (cell は cascade)。誤削除ガード (`synced` + truncation) は純粋ロジックに切り出し両OSでテスト (desktop `reconcileDeletions.ts`/`.test.ts` / iOS `RemoteDeletionReconciler.swift`/`RemoteDeletionReconcilerTests`) | 2026-06-09 |
 
 ---
 

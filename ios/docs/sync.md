@@ -158,6 +158,19 @@ iOS 側でも同等の対策が必要:
 
 サニタイズは pull / push の毎回冒頭で走るが、zombie が無ければ no-op (= ほぼ無料)。**新しい DELETE 経路を追加するときは、サニタイズに頼らず子連鎖を明示削除すること** (= サニタイズはバグの silent な隠蔽になり得るため、desktop 落とし穴 #12 の警告と同じ)。
 
+## remote hard-delete の reconcile (実装済)
+
+[`SyncEngine.reconcileRemoteDeletions`](../Mandalart/Services/SyncEngine.swift) は **`pullAll` の upsert 後** に、**cloud から物理 hard delete された (= SELECT 結果に現れない) mandalart / grid をローカルからも hard delete** する。
+
+**背景**: pull は upsert 専用で「cloud に在る行を取り込む」だけなので、対向 desktop の [`permanentDeleteMandalart` / `permanentDeleteGrid`](../../desktop/src/lib/api/) (cloud から物理 DELETE) や iOS 自身の `permanentDelete` cascade が、相手デバイスに伝播しなかった (例: desktop でマンダラート完全削除 → iOS のダッシュボードに残り続ける)。`sanitizeZombies` は「親が消えた子」しか掃除せず、**mandalart 自体が cloud から消えても検知しない**ため別経路が要る。
+
+判定ロジックは純粋関数 [`RemoteDeletionReconciler.idsToDelete`](../Mandalart/Services/RemoteDeletionReconciler.swift) に切り出し、誤削除を防ぐ 2 つのガードを持つ (desktop `reconcileDeletions.ts` と同値仕様 / 両 OS でユニットテスト):
+
+1. **`syncedAt != nil` のみ対象** — 過去に push 済の行が cloud に居なければ「他デバイスで削除された」と確定。`syncedAt == nil` (= ローカル新規で未 push の local-only 行) は cloud に居なくても**絶対に消さない**。
+2. **truncation ガード** — cloud fetch はページネーション無しで PostgREST max-rows (=1000) 件ちょうど返ると取りこぼし疑いがあるため、その種別 (mandalart / grid 別) の reconcile を skip。消し損ねは次回 pull で回収できるが誤削除は不可逆、という非対称を優先。
+
+cell 単体の物理削除経路は無い (必ず grid/mandalart の cascade) ため reconcile 対象は **mandalart + grid のみ**。mandalart を消したら配下 grid/cell を、grid を消したら配下 cell を即時 cascade delete する (取りこぼしは次回 pull 冒頭の `sanitizeZombies` が回収)。
+
 ## (grid_id, position) 重複の dedup / reconcile (実装済)
 
 cloud cells は `UNIQUE(grid_id, position)` を持つ。desktop は local SQLite にも同制約があるため重複が物理的に作れないが、**SwiftData は複合 unique を宣言できない**ため iOS はコードで担保する。3 段構え:

@@ -127,6 +127,70 @@ final class SyncEngine {
         }
     }
 
+    /// PostgREST のデフォルト max-rows。cloud fetch がこの件数ちょうどだと truncation
+    /// (= cloud 行を取りこぼしている) の疑いがあるため、その種別の reconcile を skip する。
+    private let postgrestRowLimit = 1000
+
+    /// cloud に存在しない (= 他デバイスで hard delete された) ローカルの mandalart / grid を
+    /// 配下ごと hard delete する。pull は upsert 専用で「cloud から消えた行」を検知できないため、
+    /// 対向 desktop の `permanentDeleteMandalart` / `permanentDeleteGrid` (cloud DELETE) は
+    /// ここで初めて iOS に伝播する。
+    ///
+    /// `syncedAt != nil` (= 過去に push 済) の行だけを対象にし、未 push の local-only 行
+    /// (`syncedAt == nil`) は絶対に消さない。cell 単体の物理削除経路は無い (必ず grid/mandalart
+    /// の cascade) ので reconcile 対象は mandalart + grid のみ。配下 cell は cascade で消す。
+    private func reconcileRemoteDeletions(
+        cloudMandalartIds: Set<String>,
+        cloudGridIds: Set<String>,
+        mandalartTruncated: Bool,
+        gridTruncated: Bool,
+        in context: ModelContext
+    ) {
+        var changed = false
+
+        // 1. mandalart reconcile (+ 配下 grid/cell を即時 cascade)
+        if !mandalartTruncated, let mandalarts = try? context.fetch(FetchDescriptor<Mandalart>()) {
+            let toDelete = RemoteDeletionReconciler.idsToDelete(
+                local: mandalarts.map { .init(id: $0.id, isSynced: $0.syncedAt != nil) },
+                cloudIds: cloudMandalartIds,
+                truncated: false
+            )
+            if !toDelete.isEmpty {
+                for m in mandalarts where toDelete.contains(m.id) { context.delete(m) }
+                if let grids = try? context.fetch(FetchDescriptor<Grid>()) {
+                    let orphanGridIds = Set(
+                        grids.filter { toDelete.contains($0.mandalartId) }.map { $0.id }
+                    )
+                    for g in grids where toDelete.contains(g.mandalartId) { context.delete(g) }
+                    if let cells = try? context.fetch(FetchDescriptor<Cell>()) {
+                        for c in cells where orphanGridIds.contains(c.gridId) { context.delete(c) }
+                    }
+                }
+                changed = true
+                print("[sync] reconciled remote-deleted mandalarts: \(toDelete.count)")
+            }
+        }
+
+        // 2. grid reconcile (mandalart 健在で並列グリッド等だけ permanentDeleteGrid されたケース)
+        if !gridTruncated, let grids = try? context.fetch(FetchDescriptor<Grid>()) {
+            let toDelete = RemoteDeletionReconciler.idsToDelete(
+                local: grids.map { .init(id: $0.id, isSynced: $0.syncedAt != nil) },
+                cloudIds: cloudGridIds,
+                truncated: false
+            )
+            if !toDelete.isEmpty {
+                for g in grids where toDelete.contains(g.id) { context.delete(g) }
+                if let cells = try? context.fetch(FetchDescriptor<Cell>()) {
+                    for c in cells where toDelete.contains(c.gridId) { context.delete(c) }
+                }
+                changed = true
+                print("[sync] reconciled remote-deleted grids: \(toDelete.count)")
+            }
+        }
+
+        if changed { try? context.save() }
+    }
+
     // MARK: - Pull
 
     @discardableResult
@@ -165,6 +229,16 @@ final class SyncEngine {
         for c in cells { upsertCell(c, in: context) }
 
         try context.save()
+
+        // 他デバイスで hard delete された mandalart / grid をローカルからも消す
+        // (upsert では cloud から消えた行を検知できないため、ここで reconcile する)。
+        reconcileRemoteDeletions(
+            cloudMandalartIds: Set(mandalarts.map { $0.id }),
+            cloudGridIds: Set(grids.map { $0.id }),
+            mandalartTruncated: mandalarts.count >= postgrestRowLimit,
+            gridTruncated: grids.count >= postgrestRowLimit,
+            in: context
+        )
 
         // 他端末 (folder API 未対応の旧 iOS 等) から folder_id=null で push された
         // マンダラートを Inbox に振り分ける (desktop 側 adoptOrphanMandalartsToInbox 相当)。

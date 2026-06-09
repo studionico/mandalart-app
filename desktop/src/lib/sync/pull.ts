@@ -1,6 +1,13 @@
 import { query, execute } from '@/lib/db'
 import { supabase } from '@/lib/supabase/client'
 import { withSyncLock } from './lock'
+import { idsToDelete } from './reconcileDeletions'
+
+/**
+ * PostgREST のデフォルト max-rows。cloud fetch がこの件数ちょうどだと truncation
+ * (= cloud 行を取りこぼしている) の疑いがあるため、その種別の reconcile を skip する。
+ */
+const POSTGREST_ROW_LIMIT = 1000
 
 /**
  * per-row INSERT。1 行失敗しても **throw せず log して続行** する (落とし穴 #24 Realtime 復帰)。
@@ -176,6 +183,72 @@ export async function pullAll(): Promise<{ mandalarts: number; grids: number; ce
     }
   }
 
+  // 4. reconcile: cloud から物理 hard delete された mandalart / grid をローカルからも消す。
+  //    upsert は「cloud にあって local に無い行」を取り込むだけで「cloud から消えた行」を
+  //    検知できないため、対向デバイスの permanentDelete* (cloud DELETE) がここで初めて伝播する。
+  //    synced_at IS NOT NULL (= 過去に push 済) の行だけを対象にし、未 push の local-only 行
+  //    (synced_at IS NULL) は絶対に消さない。cell 単体の物理削除経路は無い (必ず grid/mandalart
+  //    の cascade) ので reconcile 対象は mandalart + grid のみ。配下 cell は cascade で消す。
+  await reconcileRemoteDeletions(
+    new Set(cloudMandalarts.map((cm) => cm.id)),
+    new Set(cloudGrids.map((cg) => cg.id)),
+    cloudMandalarts.length >= POSTGREST_ROW_LIMIT,
+    cloudGrids.length >= POSTGREST_ROW_LIMIT,
+  )
+
   return { mandalarts: mCount, grids: gCount, cells: cCount }
   })
+}
+
+/**
+ * cloud に存在しない (= 他デバイスで hard delete された) ローカルの mandalart / grid を
+ * 配下ごと hard delete する。`pullAll` の withSyncLock 内から呼ばれる。
+ */
+async function reconcileRemoteDeletions(
+  cloudMandalartIds: Set<string>,
+  cloudGridIds: Set<string>,
+  mandalartTruncated: boolean,
+  gridTruncated: boolean,
+): Promise<void> {
+  // 1. mandalart reconcile (+ 配下 grid/cell を cascade)
+  if (!mandalartTruncated) {
+    const localMandalarts = await query<{ id: string; synced_at: string | null }>(
+      'SELECT id, synced_at FROM mandalarts',
+    )
+    const toDelete = idsToDelete(
+      localMandalarts.map((m) => ({ id: m.id, synced: m.synced_at != null })),
+      cloudMandalartIds,
+      false,
+    )
+    for (const id of toDelete) {
+      await execute(
+        'DELETE FROM cells WHERE grid_id IN (SELECT id FROM grids WHERE mandalart_id = ?)',
+        [id],
+      )
+      await execute('DELETE FROM grids WHERE mandalart_id = ?', [id])
+      await execute('DELETE FROM mandalarts WHERE id = ?', [id])
+    }
+    if (toDelete.size > 0) {
+      console.log('[pull] reconciled remote-deleted mandalarts:', toDelete.size)
+    }
+  }
+
+  // 2. grid reconcile (mandalart 健在で並列グリッド等だけ permanentDeleteGrid されたケース)
+  if (!gridTruncated) {
+    const localGrids = await query<{ id: string; synced_at: string | null }>(
+      'SELECT id, synced_at FROM grids',
+    )
+    const toDelete = idsToDelete(
+      localGrids.map((g) => ({ id: g.id, synced: g.synced_at != null })),
+      cloudGridIds,
+      false,
+    )
+    for (const id of toDelete) {
+      await execute('DELETE FROM cells WHERE grid_id = ?', [id])
+      await execute('DELETE FROM grids WHERE id = ?', [id])
+    }
+    if (toDelete.size > 0) {
+      console.log('[pull] reconciled remote-deleted grids:', toDelete.size)
+    }
+  }
 }

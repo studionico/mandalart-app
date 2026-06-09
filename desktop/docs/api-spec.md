@@ -526,7 +526,24 @@ pushAll(userId: string): Promise<{ mandalarts: number; grids: number; cells: num
 // Supabase から mandalarts / grids / cells を全行 SELECT し、
 // updated_at 比較で local に反映 (last-write-wins)。本体は withSyncLock で直列化される
 // per-row 耐性化: 1 行の INSERT/UPDATE 失敗は console.error で log して続行 (pull 全体は止めない)
+// upsert 後に reconcile: cloud から物理 hard delete された (= SELECT に現れない) mandalart/grid を
+// ローカルからも hard delete する (対向デバイスの permanentDelete* を伝播)。synced_at IS NOT NULL の
+// 行だけ対象 (local-only 未 push 行は消さない) + cloud 件数が max-rows=1000 なら truncation 疑いで skip
+// (誤削除ガードの純粋ロジックは reconcileDeletions.ts、iOS RemoteDeletionReconciler と同値)
 pullAll(): Promise<{ mandalarts: number; grids: number; cells: number }>
+```
+
+## lib/sync/reconcileDeletions.ts
+
+```typescript
+// pull reconcile の削除判定 (純粋関数・iOS RemoteDeletionReconciler.swift と同値仕様)。
+// synced=true かつ cloud 不在の id を「他デバイスで hard delete された」として返す。
+// synced=false (= 未 push の local-only 行) は cloud 不在でも返さない (誤削除防止)。
+// truncated=true (= cloud fetch が max-rows=1000 で切れている疑い) なら空集合を返す。
+// 実 DELETE は pull.ts の reconcileRemoteDeletions が cascade 込みで行う (本関数は判定のみ)。
+idsToDelete(local: { id: string; synced: boolean }[], cloudIds: Set<string>, truncated: boolean): Set<string>
+
+export type LocalRow = { id: string; synced: boolean }
 ```
 
 ## lib/sync/index.ts
