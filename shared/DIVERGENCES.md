@@ -19,17 +19,17 @@ desktop (Tauri/TS) と iOS (Swift) は二重実装で、乖離を systematic に
 
 ## 区分 A: 停止中 / 復帰待ち
 
-Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止と、その復帰に必要な未対応項目。
-一次ソース = root [`CLAUDE.md`](../CLAUDE.md) 冒頭 + desktop [`CLAUDE.md`](../desktop/CLAUDE.md) 落とし穴 #24 + plan `~/.claude/plans/ios-swift-glistening-thacker.md`。
+Supabase Realtime Messages 過剰使用警告 (2026-05-04) による緊急停止と、その復帰。**2026-06-08 にコード側の復帰実装を完了**し、現在は Supabase 設定適用 + Dashboard 監視を挟む段階ロールアウト中。
+一次ソース = root [`CLAUDE.md`](../CLAUDE.md) 冒頭 + desktop [`CLAUDE.md`](../desktop/CLAUDE.md) 落とし穴 #24 + plan `~/.claude/plans/subscribe-realtime-tidy-meerkat.md`。
 
 | # | 項目 | desktop | iOS | status |
 |---|---|---|---|---|
-| A1 | Realtime 自動同期経路 | 全 subscribe/pull 経路をコメントアウト | RealtimeService / 15s polling / scenePhase pull-push を停止 | ⏸ 両OS停止中。サインイン1回 + 手動「今すぐ同期」のみ |
-| A2 | echo-skip (cloud realtime) | 未完成 | 未完成 | ❌ 復帰チェックリスト #3 |
-| A3 | subscribe 経路統合 | `useSync` と `useRealtime` が別々に購読保持 (二重) | (単一経路) | ❌ desktop で #4 未統合 |
-| A4 | iOS 15s polling → dirty flag + 60s debounce | (該当なし) | polling 廃止済 / mutation 駆動 dirty flag への置換は未実装 | ❌ 復帰チェックリスト #5 |
+| A1 | Realtime 自動同期経路 | `useRealtimeSync` で購読復帰 / `useVisibilityResync` pullAll 復帰 | `RealtimeService.subscribe` 復帰 / 15s polling 廃止 / scenePhase `.background` flush | 🔄 コード復帰済。段階ロールアウト (Dashboard 監視) 運用中 |
+| A2 | echo-skip (cloud realtime) | `realtime.ts` の content 比較で実装済 | 「任意 change → 1s debounce pullAll」で冪等吸収 (pull は broadcast 非生成) | ✅ 実装済 (トリガ無効化が前提) |
+| A3 | subscribe 経路統合 | App レベル `useRealtimeSync` 1 本に統合。`useSync`/`useRealtime` は `app:sync-pulled` reload 経路のみ | (単一経路) | ✅ 統合済 |
+| A4 | iOS 15s polling → dirty flag + 60s debounce | (該当なし) | `SyncDirtyTracker` (didSave 観測 + 60s sliding debounce) に置換 | ✅ 実装済 |
 
-> 復帰には最低でも A3 (subscribe 統合) と A4 (dirty flag) の追加実装が必要。
+> コード復帰は完了。残りは運用: ① Supabase の `BEFORE UPDATE` トリガ無効化 (手動 SQL) ② 段階 0→4 を Dashboard 監視を挟んでロールアウト。詳細は plan `~/.claude/plans/subscribe-realtime-tidy-meerkat.md`。
 
 ---
 

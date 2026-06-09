@@ -278,7 +278,7 @@ $$;
 alter function public.update_updated_at() set search_path = pg_catalog, public;
 ```
 
-> 注: `update_updated_at` は落とし穴 #24 (Realtime echo) で `BEFORE UPDATE` トリガとして名指しされており、Realtime 架替え時に無効化 / 書換が入る可能性あり。それまでの繋ぎとして本 ALTER を当てておく方針。
+> 注: `update_updated_at` は落とし穴 #24 (Realtime echo) の根本原因。**Realtime subscribe 復帰時はこの `BEFORE UPDATE` トリガを無効化する** (ステップ 5「Realtime 復帰時: `BEFORE UPDATE` トリガの無効化」参照)。トリガを残す限り echo が settle しない。関数自体を残す場合の `search_path` 修正は上記 ALTER。
 
 ---
 
@@ -333,6 +333,28 @@ SELECT tablename FROM pg_publication_tables WHERE pubname = 'supabase_realtime';
 `mandalarts` / `grids` / `cells` が含まれていれば OK。
 
 > 古い web プロトタイプで `005_triggers_and_functions.sql` の `REPLICA IDENTITY FULL` 設定済みなら、DELETE も含めて実運用できます。
+
+### Realtime 復帰時: `BEFORE UPDATE` トリガの無効化 (必須・落とし穴 #24)
+
+Realtime subscribe を復帰させる前に、`updated_at = NOW()` を書き換える `BEFORE UPDATE` トリガを **無効化** すること。これが残っていると、自分の push でも cloud 側 `updated_at` が進み、同一行が settle せず再 push され続けて Realtime Messages を量産する (= 2026-05-04 の 5 倍超過の温床)。両クライアントは既に `updated_at` を生成・送信しているので、トリガを外して `updated_at` をクライアント所有にしても last-write-wins は壊れない。
+
+1. まず実機でトリガ名を確認 (docs では folders 分のみ確証):
+
+```sql
+SELECT tgname, tgrelid::regclass FROM pg_trigger WHERE NOT tgisinternal;
+```
+
+2. 4 テーブルのトリガを DROP (名前は手順 1 の結果に合わせる):
+
+```sql
+DROP TRIGGER IF EXISTS set_updated_at_folders    ON folders;
+DROP TRIGGER IF EXISTS set_updated_at_mandalarts ON mandalarts;
+DROP TRIGGER IF EXISTS set_updated_at_grids      ON grids;
+DROP TRIGGER IF EXISTS set_updated_at_cells      ON cells;
+-- update_updated_at() 関数は他参照が無ければ DROP FUNCTION public.update_updated_at(); も可
+```
+
+3. これは段階復帰の **段階 0** (購読を戻す前に適用)。適用しても購読停止中は Messages は増えないので安全に先行できる。
 
 ---
 

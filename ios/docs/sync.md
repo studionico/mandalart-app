@@ -110,20 +110,31 @@ iOS 側でも同等の対策が必要:
 
 詳細は [`../../desktop/CLAUDE.md`](../../desktop/CLAUDE.md) の落とし穴節 #2 / #5 / #10 / #12 / #17 を参照。
 
-## realtime 購読 + 自動同期 (実装済)
+## realtime 購読 + 自動同期 (実装済 / Realtime 段階復帰対応)
 
-### scene phase ベース自動同期 ([`MandalartApp`](../Mandalart/App/MandalartApp.swift))
+> 2026-05-04 の Realtime Messages 過剰使用緊急停止 → 2026-06-08 復帰実装。旧 **15 秒 auto-push polling は永久廃止** し、mutation 駆動の push に置換した (落とし穴 #24)。経緯は root [`CLAUDE.md`](../../CLAUDE.md) 冒頭参照。
 
-- サインイン直後 (`.task(id: auth.isSignedIn)`): 初回フル同期 (pull → push)
-- フォアグラウンド復帰 (`scenePhase == .active`): pullAll
-- バックグラウンド遷移 (`scenePhase == .background`): pushPending
-- realtime 取りこぼしの保険 (= desktop 側 visibility resync 相当)
+> ⚠️ **realtime postgres_changes は現在配信不達 (2026-06-09)**: プロジェクトが Supabase の **非対称 JWT 署名キー (ES256)** に移行した結果、Realtime の postgres_changes 認可 (RLS 評価のための JWT 検証) が機能せず、subscribe は成功する (status=subscribed / heartbeat OK) のに変更イベントが 1 件も配信されない (publication 4 テーブル登録・`realtimeV2.setAuth()`・プロジェクト再起動でも変わらず)。アプリ側からは安全に直せないため、**desktop→iOS の実反映は下記「前面復帰 pull」が主経路**。realtime 購読自体は残置 (heartbeat のみで quota ほぼゼロ、将来サーバ側修正で自動復活)。詳細は [[reference_supabase_swift_realtime_subscribe]] 相当の調査メモ / 落とし穴 #24。
+
+### サインイン連動 ([`MandalartApp`](../Mandalart/App/MandalartApp.swift))
+
+- サインイン直後 (`.task(id: auth.isSignedIn)`): 初回フル同期 (pull → push) → `RealtimeService.subscribe` → `SyncDirtyTracker.start`
+- サインアウト時: `RealtimeService.unsubscribe` + `SyncDirtyTracker.stop`
+- バックグラウンド遷移 (`scenePhase == .background`): `SyncDirtyTracker.flushNow` で残 dirty を即 push
+- **前面復帰 (`scenePhase == .active`): `foregroundResync` が `pullAll` を実行** (desktop [`useVisibilityResync`](../../desktop/src/hooks/useVisibilityResync.ts) 等価)。realtime 不達のため desktop→iOS 反映の主経路。cold launch の fullSync 直後 / 連続復帰は 5 秒 debounce で間引く。pull は REST(GET) なので Realtime Messages quota を消費しない。**制約**: 前面に出したまま見続けている間は反映されない (それには polling か realtime が要る。常時反映は手動同期で代替)
 
 ### realtime 購読 ([`RealtimeService`](../Mandalart/Services/RealtimeService.swift))
 
-- サインイン時に `client.realtime.channel("mandalart-app").onPostgresChange(AnyAction.self, schema: "public", table: T)` を 4 テーブル (folders / mandalarts / grids / cells) で購読
-- **任意の change で 1 秒 debounce の `pullAll` を発火** する単純化方式 (incremental upsert ではない)。理由: 子行の cascade DELETE が realtime では届かない (落とし穴 #5)、incremental update で取りこぼしを再現するのは複雑、`last-write-wins` で冪等な pullAll なら自分自身の echo も無害
+- サインイン時に `client.realtimeV2.setAuth()` で auth トークンを反映してから `channel("mandalart-app").onPostgresChange(...)` を 4 テーブル (folders / mandalarts / grids / cells) で購読し、`subscribeWithError()` で join する (deprecated `subscribe()` は join 失敗を握り潰すため使わない)
+- **任意の change で 1 秒 debounce の `pullAll` を発火** する単純化方式 (incremental upsert ではない)。理由: 子行の cascade DELETE が realtime では届かない (落とし穴 #5)、incremental update で取りこぼしを再現するのは複雑、`last-write-wins` で冪等な pullAll なら自分自身の echo も無害。pull は GET + 非 dirty write (`synced_at == updated_at`) なので **broadcast を生まず echo cascade を起こさない**。※ 上記のとおり現在 postgres_changes は配信不達なので、この経路は事実上 dead (将来復活に備えた残置)
 - サインアウト時に `unsubscribe` で channel 切断
+
+### mutation 駆動 push ([`SyncDirtyTracker`](../Mandalart/Services/SyncDirtyTracker.swift))
+
+- `ModelContext.didSave` を NotificationCenter で 1 箇所観測し、編集が起きたら `TimingConstants.dirtyPushDebounceSec` (60 秒) の **sliding debounce** で `pushPending` を 1 回実行 (旧 15 秒 polling の置換)
+- どの行が dirty かは `needsPush` (`syncedAt < updatedAt`) が判定。トラッカーは push のタイミングだけ担当
+- loop 安全性: pull が書いた行は非 pending で空 push になり、空 push は `pushPending` の `context.hasChanges` ガードで save しない (= didSave を出さない) ため再 arm の連鎖は収束する
+- **前提**: cloud の `BEFORE UPDATE` トリガを無効化していること (有効だと自 push が `updated_at` を進め settle しない、落とし穴 #24 / [`cloud-sync-setup.md`](../../desktop/docs/cloud-sync-setup.md))
 
 ## permanent delete の cloud 連動 (実装済)
 

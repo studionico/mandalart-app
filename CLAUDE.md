@@ -7,26 +7,28 @@
 - iOS 配下の作業 → [`ios/CLAUDE.md`](ios/CLAUDE.md)
 - 両方触るとき → 両方を読む
 
-## ⚠️ Supabase Realtime 緊急停止中 (2026-05-04 〜)
+## ⚠️ Supabase Realtime 段階復帰中 (2026-05-04 緊急停止 → 2026-06-08 復帰着手)
 
-Supabase 運営から **Realtime Messages 過剰使用警告** (10.4M / 2.2M 制限、約 5 倍超過) を受け、両プラットフォームの自動同期経路を緊急停止中。
+Supabase 運営から **Realtime Messages 過剰使用警告** (10.4M / 2.2M 制限、約 5 倍超過) を受け緊急停止していた自動同期経路を、恒久対策込みで **段階復帰中**。コード側の復帰実装は完了し、残るは Supabase 設定適用 + Dashboard 監視を挟む運用ロールアウト。
 
-**停止中の経路**:
-- iOS: `RealtimeService.subscribe` / 15 秒 auto-push polling / `scenePhase` 遷移時の pull/push (= [`MandalartApp.swift`](ios/Mandalart/App/MandalartApp.swift))
-- desktop: [`useSync`](desktop/src/hooks/useSync.ts) と [`useRealtime`](desktop/src/hooks/useRealtime.ts) の `subscribeRemoteChanges` / [`useVisibilityResync`](desktop/src/hooks/useVisibilityResync.ts) の `pullAll`
+**復帰実装の要点** (2026-06-08 実装済・コード実体で確認済):
+1. **subscribe を 1 本に統合** — desktop は App レベルの [`useRealtimeSync`](desktop/src/hooks/useRealtimeSync.ts) 1 箇所のみが購読。[`useSync`](desktop/src/hooks/useSync.ts) / [`useRealtime`](desktop/src/hooks/useRealtime.ts) は購読を持たず `app:sync-pulled` イベントの reload 経路に徹する ✅
+2. **echo skip** — desktop は [`realtime.ts`](desktop/src/lib/realtime.ts) の content 比較で実装済。iOS は「任意 change → 1 秒 debounce `pullAll`」方式で echo を冪等吸収 (pull は GET + 非 dirty write で broadcast を生まない) ✅
+3. **iOS の 15 秒 polling を永久廃止** — mutation 駆動の [`SyncDirtyTracker`](ios/Mandalart/Services/SyncDirtyTracker.swift) (`ModelContext.didSave` 観測 + `dirtyPushDebounceSec`=60 秒 sliding debounce) に置換。`scenePhase .background` で即 flush ✅
+4. **BEFORE UPDATE トリガ無効化** — `updated_at` をクライアント所有にし echo を即 settle させる。**Supabase 側で手動 SQL 適用が必要** ([`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md) ステップ 5「Realtime 復帰時: `BEFORE UPDATE` トリガの無効化」)
 
-**残している経路**: サインイン直後 1 回の syncAll/fullSync + 設定画面の手動「今すぐ同期」ボタン
+**段階ロールアウト** (各段階の間に最低 24h、Dashboard → Reports → Realtime Messages グラフの水平維持を確認。最重要監視: 「編集を止めたら Messages が平らになるか」= runaway の有無):
+- 段階 0: トリガ無効化 SQL を適用 (購読停止中なので Messages は増えない)
+- 段階 1: desktop 購読 1 本 (`useRealtimeSync` マウント済)
+- 段階 2: desktop visibility pullAll 復帰 (`useVisibilityResync` 復帰済)
+- 段階 3: iOS subscribe 復帰
+- 段階 4: iOS dirty-debounce push (`SyncDirtyTracker`)
 
-**復帰前のチェックリスト** (現状は 2026-06-07 時点。コード実体で確認済):
-1. Supabase Dashboard → Project → Reports → Realtime Messages の累積グラフが水平に張り付くこと — 現状(2026-06-07): 運用タスク・未実施
-2. Supabase 側の `BEFORE UPDATE` トリガによる `updated_at = NOW()` 書き換え動作を確認 (echo を防ぐには無効化が必須かもしれない) — 現状(2026-06-07): トリガ存在は確認済 ([`cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md))、無効化要否の判断は復帰時
-3. echo skip ロジックを iOS / desktop 両方で完全実装 — 現状(2026-06-08): **cloud realtime 経路は未完成** (旧 vault 経路の write ledger は Markdown vault 廃止に伴い消滅)
-4. subscribe 経路を 1 本に統合 (`useSync` と `useRealtime` の重複排除) — 現状(2026-06-07): ❌ 未着手。両者とも別々に `subscribeRemoteChanges` をコメントアウト保持したまま並存
-5. iOS の 15 秒 polling は永久に廃止し、mutation 駆動の dirty flag + 60 秒以上 debounce に置換 — 現状(2026-06-07): polling 廃止済 (コメントアウト) ✅ / **dirty flag + 60 秒 debounce への置換は未実装** ❌
+> 前提ゲート: 着手前に緊急停止以降 Messages グラフが既に水平に張り付いていることを Dashboard で確認すること。異常 (編集停止後も上昇継続) を見たら直前段階に revert。
 
-> 復帰には最低でも #4 (subscribe 統合) と #5 (dirty flag 実装) の追加実装が残っている。
+> ⚠️ **realtime postgres_changes は現在配信不達 (2026-06-09 判明)**: プロジェクトが Supabase の**非対称 JWT 署名キー (ES256)** に移行済で、Realtime の postgres_changes 認可 (JWT 検証) が機能せず、subscribe 成功 (status=subscribed/heartbeat OK) でも変更イベントがゼロ配信 (publication 4 テーブル登録・`setAuth`・プロジェクト再起動でも変わらず)。PostgREST(REST pull/push) は ES256 を検証できるので **手動同期・前面復帰 pull は正常**。よって **desktop→iOS の実反映は「前面復帰 pull」が主経路** — iOS は `scenePhase==.active` で `pullAll` ([`MandalartApp.foregroundResync`](ios/Mandalart/App/MandalartApp.swift))、desktop は [`useVisibilityResync`](desktop/src/hooks/useVisibilityResync.ts)。realtime 購読は heartbeat のみで quota ほぼゼロのため残置 (将来サーバ側修正で自動復活)。真の realtime 復活は Supabase 側対応 (サポート issue / 署名キー rotate back) が必要でアプリ側スコープ外。
 
-詳細経緯と段階復帰計画: [`/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md`](/Users/maro02/.claude/plans/ios-swift-glistening-thacker.md)
+詳細経緯と計画: [`/Users/maro02/.claude/plans/subscribe-realtime-tidy-meerkat.md`](/Users/maro02/.claude/plans/subscribe-realtime-tidy-meerkat.md)
 desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
 
 ## プロジェクト概要
