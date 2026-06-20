@@ -413,8 +413,11 @@ Shift+Tab は逆順
 ## Undo / Redo
 
 - `⌘Z` / `⌘⇧Z` / `⌘Y` (Mac)、`Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` (Windows)
-- 実装済み対象: テキスト編集 (色変更含む) / D&D SWAP_SUBTREE
+- 実装済み対象: テキスト編集 (色変更含む) / セルへの新規入力 / D&D SWAP_SUBTREE
   - ストックからの貼り付け (`handleStockPaste`) は Undo 対象外
+  - 空スロットへの新規入力も Undo 対象。⌘Z は直前に打ったセルを 1 つずつ線形に戻す (中心セルは後続入力をすべて Undo した後にのみ空になる)
+- **Undo のスコープは「現在表示中グリッド内」**。drill / drill-up / breadcrumb / parallel switch / マンダラート切替で Undo スタックは全クリアされる (別グリッドのセルを silent に DB 書換えするのを防ぐため)
+- セル編集テキスト入力中の ⌘Z は OS ネイティブのテキスト undo に委ね、app レベル Undo は発火しない (input / textarea / contentEditable フォーカス中)
 - 未実装 (将来対応): D&D の SWAP_CONTENT / COPY_SUBTREE / チェックのトグル
 - D&D の COPY_SUBTREE を実装する際は「target の事前状態 + 新規作成された grid ID」を記録して undo でそれらを削除・復元する想定
 

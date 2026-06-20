@@ -136,8 +136,17 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     })
   }, [mandalartId, currentGridId])
 
-  const { push: pushUndo } = useUndo()
+  const { push: pushUndo, clear: clearUndo } = useUndo()
   const { isOffline } = useOffline()
+
+  // マンダラート/グリッド切替・エディタ離脱で undo 履歴を捨てる。undo は「現在表示中グリッド内」
+  // の操作だけに限定する。updateCellLocal は表示中グリッドの state しか反映しないため、別グリッド/
+  // 別マンダラートの残存 op を ⌘Z すると UI に出ないまま DB だけ silent に書換わる。currentGridId は
+  // drill / drill-up / breadcrumb / parallel switch すべての遷移をカバーする (L129-137 参照)。
+  useEffect(() => {
+    clearUndo()
+    return () => clearUndo()
+  }, [mandalartId, currentGridId, clearUndo])
 
   const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
   const { subGrids, reload: reloadSubGrids, setSubGrids } = useSubGrids(gridData?.cells ?? [])
@@ -778,6 +787,24 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
     // 叩く必要はない (重複呼出の削減)。
     reload()
   }, [reload])
+
+  // セルの content 変更 (新規入力 / 既存編集) を undo スタックに記録する共通ヘルパー。
+  // 新規入力 (空スロットへの初入力) も before=空コンテンツで記録することで、⌘Z が直前に打った
+  // セルを 1 つずつ線形に戻す。undo/redo 後に reloadAll() して done 伝搬・merged center 表示を追従。
+  const pushCellUndo = useCallback(
+    (
+      cellId: string,
+      before: { text: string; image_path: string | null; color: string | null },
+      after: { text: string; image_path: string | null; color: string | null },
+    ) => {
+      pushUndo({
+        description: 'セル入力',
+        undo: async () => { await updateCellLocal(cellId, before); reloadAll() },
+        redo: async () => { await updateCellLocal(cellId, after); reloadAll() },
+      })
+    },
+    [pushUndo, updateCellLocal, reloadAll],
+  )
 
   const handleStockPasteDrop = useCallback(async (stockItemId: string, targetCellId: string) => {
     if (isLocked) return  // ロック中は stock → cell 貼付けを block (migration 011)
@@ -1516,6 +1543,11 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
         color: null,
       })
       refreshCell(newCell)
+      // 新規入力も undo 記録 (before=空コンテンツ)。⌘Z で直前に打ったセルを 1 つずつ線形に戻す。
+      pushCellUndo(newCell.id,
+        { text: '', image_path: null, color: null },
+        { text, image_path: null, color: null },
+      )
       return
     }
     if (text === cell.text) return
@@ -1572,6 +1604,8 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       refreshCell(newCell)
       setPendingEdit(null)
       setInlineEditingCellId(newCell.id)
+      // 新規入力も undo 記録 (before=空コンテンツ)。inline 経路と挙動を揃える。
+      pushCellUndo(newCell.id, { text: '', image_path: null, color: null }, params)
       return
     }
     const cell = gridData?.cells.find((c) => c.id === cellId)
@@ -1611,11 +1645,7 @@ export default function EditorLayout({ mandalartId, userId }: Props) {
       reloadAll()
     }
 
-    pushUndo({
-      description: 'セル編集',
-      undo: async () => { await updateCellLocal(cellId, previous) },
-      redo: async () => { await updateCellLocal(cellId, params) },
-    })
+    pushCellUndo(cellId, previous, params)
   }
 
   /**
