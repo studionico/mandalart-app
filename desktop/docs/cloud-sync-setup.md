@@ -91,6 +91,22 @@ CREATE POLICY "自分のファイルのみ削除可"
 - 削除は v1 では Storage 側を消さない (`image_path` 共有あり)。orphan 整理は将来課題。
 - Storage は **Realtime Messages quota とは無関係** (緊急停止中の同期問題を悪化させない)。
 
+### 必須スキーマ変更: `synced_at` カラム (web 版共存に必須)
+
+web 版 (`web/src/`) は全 Supabase write で `synced_at` を送信します (desktop の pull が「未同期」と誤判定して再 push するレースを防ぐため)。このカラムが Supabase 側にないと PGRST204 "Could not find the 'synced_at' column" が発生します。
+
+```sql
+ALTER TABLE mandalarts  ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
+ALTER TABLE grids        ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
+ALTER TABLE cells        ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
+ALTER TABLE folders      ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
+ALTER TABLE stock_items  ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
+```
+
+desktop の push.ts は `synced_at` を Supabase payload に含めないため、desktop 単体では問題は起きません。web 版を有効化するときに初めて必要になります。
+
+---
+
 ### 必須スキーマ変更: ソフトデリート用の `deleted_at` カラム
 
 削除のオフライン対応と複数デバイス間伝播のため、3 テーブルすべてに `deleted_at` カラムを追加してください。UI と API 層は `WHERE deleted_at IS NULL` で論理削除された行を隠し、同期は updated_at last-write-wins でクラウドに反映します。
