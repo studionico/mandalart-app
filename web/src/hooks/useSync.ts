@@ -6,7 +6,10 @@ import { useAuthStore } from '@/store/authStore'
 export type SyncStatus = 'idle' | 'syncing' | 'error' | 'offline'
 
 export function useSync() {
-  const user = useAuthStore((s) => s.user)
+  // user オブジェクト全体ではなく ID 文字列を購読する。
+  // Supabase が JWT をリフレッシュすると onAuthStateChange が発火して user の参照が変わるが、
+  // ID は同一なので依存配列が変化せず sync() が余分に再実行されない。
+  const userId = useAuthStore((s) => s.user?.id ?? null)
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -15,19 +18,19 @@ export function useSync() {
   const inflight = useRef(false)
 
   const sync = useCallback(async () => {
-    if (!user) return
+    if (!userId) return
     if (inflight.current) return
     inflight.current = true
     setStatus('syncing')
     setError(null)
     try {
-      const result = await syncAll(user.id)
+      const result = await syncAll(userId)
       setStats(result)
       setLastSync(new Date())
       setStatus('idle')
       setReloadKey((k) => k + 1)
       // ローカルにあるが Storage 未アップロードのセル画像を回収（best-effort、sync 状態に影響しない）
-      void backfillUploadLocalImages(user.id)
+      void backfillUploadLocalImages(userId)
     } catch (e) {
       // Supabase の error は plain object でも来るので、複数経路で文字列化
       console.error('[sync] error:', e)
@@ -42,12 +45,12 @@ export function useSync() {
     } finally {
       inflight.current = false
     }
-  }, [user])
+  }, [userId])
 
   // 初回サインイン or 起動時にフル同期
   useEffect(() => {
-    if (user) sync()
-  }, [user, sync])
+    if (userId) sync()
+  }, [userId, sync])
 
   // Realtime の購読は持たない: 購読は App レベルの useRealtimeSync に 1 本化されている
   // (落とし穴 #24)。useSync は購読 hook / useVisibilityResync が dispatch する `app:sync-pulled`
@@ -55,11 +58,11 @@ export function useSync() {
   // realtime 取りこぼしの保険同期で SQLite に追加された行を UI に反映させるため、
   // reloadKey を bump して dashboard 等の load() を再実行する (落とし穴 #22)。
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
     const onSyncPulled = () => setReloadKey((k) => k + 1)
     window.addEventListener('app:sync-pulled', onSyncPulled)
     return () => window.removeEventListener('app:sync-pulled', onSyncPulled)
-  }, [user])
+  }, [userId])
 
   return { status, lastSync, error, stats, sync, reloadKey }
 }

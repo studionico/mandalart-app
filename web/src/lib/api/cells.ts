@@ -83,7 +83,7 @@ export async function updateCell(
 
   if (wasEmpty && !isCellEmpty(cell)) {
     if (Number(cell.done) === 1) {
-      await supabase.from('cells').update({ done: false, updated_at: ts }).eq('id', cell.id)
+      await supabase.from('cells').update({ done: false, updated_at: ts, synced_at: ts }).eq('id', cell.id)
       cell.done = false
     }
     await propagateUndoneUp(cell.id, ts)
@@ -259,7 +259,7 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
     if (error) throw error
   }
 
-  await supabase.from('cells').update({ text: src.text, image_path: src.image_path, color: src.color, updated_at: ts }).eq('id', targetCellId)
+  await supabase.from('cells').update({ text: src.text, image_path: src.image_path, color: src.color, updated_at: ts, synced_at: ts }).eq('id', targetCellId)
 }
 
 export async function shredCellSubtree(cellId: string): Promise<void> {
