@@ -5,6 +5,7 @@
 
 - desktop 配下の作業 → [`desktop/CLAUDE.md`](desktop/CLAUDE.md)
 - iOS 配下の作業 → [`ios/CLAUDE.md`](ios/CLAUDE.md)
+- web 配下の作業 → [`desktop/CLAUDE.md`](desktop/CLAUDE.md) を参照 (UI コンポーネント / API 仕様は desktop と共通。Tauri 固有箇所は web/src 側で置換済み)
 - 両方触るとき → 両方を読む
 
 ## ⚠️ Supabase Realtime 段階復帰中 (2026-05-04 緊急停止 → 2026-06-08 復帰着手)
@@ -33,16 +34,17 @@ desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
 
 ## プロジェクト概要
 
-マンダラート — 3×3 グリッドで思考を階層的に展開するアプリ。**2 つの並列実装** が存在する:
+マンダラート — 3×3 グリッドで思考を階層的に展開するアプリ。**3 つの並列実装** が存在する:
 
 | プラットフォーム | スタック | 配置 | 状態 |
 |---|---|---|---|
 | **desktop** | Tauri v2 + Vite + React 19 + TypeScript + SQLite | [`desktop/`](desktop/) | リリース運用中 |
 | **iOS** | Swift + SwiftUI + SwiftData | [`ios/`](ios/) | Phase 0-3 完了 / Landscape 限定の技術検証段階 |
+| **web** | Vite + React 19 + TypeScript (online-only / Supabase 直接) | [`web/`](web/) | 2026-06-26 実装完了 / Vercel 静的ホスト向け |
 
 両者は **同一 Supabase project (Postgres)** を共有してクロスデバイス同期する。スキーマ仕様は desktop 側 ([`desktop/docs/data-model.md`](desktop/docs/data-model.md), [`desktop/docs/cloud-sync-setup.md`](desktop/docs/cloud-sync-setup.md)) を canonical 扱い、iOS 側 ([`ios/Mandalart/Models/`](ios/Mandalart/Models/)) は等価な @Model で定義する ([`ios/docs/data-model.md`](ios/docs/data-model.md))。
 
-[`_old_web/`](_old_web/) は旧 Next.js 試作でメンテ停止。
+[`web/`](web/) はブラウザ版 (Tauri 非依存 / online-only)。[`_old_web/`](_old_web/) は旧 Next.js 試作でメンテ停止 (別物)。
 
 ## 共通の git / コミットポリシー
 
@@ -83,6 +85,7 @@ desktop 側落とし穴: [`desktop/CLAUDE.md`](desktop/CLAUDE.md) #24
 - [`desktop/docs/`](desktop/docs/): 機能要件 / data-model / API / アニメ / Supabase setup / リリース手順 等の詳細仕様 (canonical)
 - [`ios/CLAUDE.md`](ios/CLAUDE.md): iOS 固有のビルド手順・Swift 規約・iOS 落とし穴インデックス
 - [`ios/docs/`](ios/docs/): xcodegen workflow / Swift モデル ↔ Supabase スキーマ対応 / SyncEngine 詳細 / iOS 固有 pitfalls 等
+- [`web/`](web/): ブラウザ版。`desktop/src/` から Tauri 依存を除去した実装。`@tauri-apps/*` / `lib/db/` / `lib/sync/` は削除済み。`web/.env` に `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` を設定して `cd web && npm run dev`。デプロイ先: Vercel (`web/vercel.json` 参照)
 - [`shared/DIVERGENCES.md`](shared/DIVERGENCES.md): **desktop ↔ iOS の既知の乖離レジストリ** (停止中 / 意図的非対称=unify 禁止 / 解消済 / 要確認)。クロスプラットフォーム作業で「この表に無い挙動差 = 偶発の乖離 (バグ) を疑う」起点。乖離を見つけ/解消したら更新する
 
 shared な仕様 (data-model 詳細 / 機能要件 / Supabase setup) は **desktop/docs/ を canonical** とし、iOS docs は差分のみ書いて重複を避ける。

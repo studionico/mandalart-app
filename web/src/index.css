@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+/* Tailwind v4: クラスベースのダークモードを有効化 (<html class="dark">) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* エディタ 3×3 / 9×9 のアウターグリッドの gap。Tailwind `gap-2` と一致する。
+     orbit-from-* keyframes の「1 セル分の移動量」計算で参照するので、ここと
+     constants/layout.ts の OUTER_GRID_GAP_PX を揃えて変更すること。 */
+  --outer-grid-gap: 8px;
+}
+
+/* デフォルトフォントウェイトを 300 (Light) に */
+html {
+  font-weight: 300;
+}
+
+/* 全 <img> の native drag を抑止。
+   セル / カード / ストック画像が `<img>` 内で個別に drag start すると親要素 (Cell ラッパー /
+   MandalartCard / StockEntry) の `draggable=true` D&D を奪う。`<img draggable={false}>`
+   を毎回個別に書く代わりに、ここで一括抑止して将来の <img> 追加にも自動適用する。
+   `user-select: none` も併せて当てておく (テキスト選択経由の drag start 抑止)。 */
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* 並列グリッド切替時のスライドアニメーション */
+/* 2 枚のグリッドを横並び (幅 200%) にして translateX で動かす。
+   forward: 現在地 → 右隣、backward: 右隣 → 現在地 */
+@keyframes parallel-slide-forward {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes parallel-slide-backward {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* ドリル時のセル軌道アニメーション (3×3 表示のみ)
+   - 非移動セル: opacity 0 → 1 で staggered fade-in
+   - 移動セル: 8 方向 (nw/n/ne/w/e/sw/s/se) の開始位置ごとに keyframes を用意し
+     natural 位置へ translate。CSS 変数を keyframes 内で transform に使うのは
+     WebKit で補間が効かないケースがあるため、translate 引数は `calc(... - var(--outer-grid-gap))`
+     のようにスカラー内の算出のみに限定する (transform 全体を var() に置き換えない)。
+   animation-fill-mode: both を付けることで delay 中は from 状態、終了後は to 状態を維持する
+   1 セル分の移動量は「100% + --outer-grid-gap」。--outer-grid-gap は Tailwind gap-2 に一致。 */
+@keyframes orbit-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Welcome モーダルのコンセプトスライド (フルスクリーン演出) 用 keyframes。
+   Phase 1-2 (3×3) → Phase 3a (3×3 shrink) → Phase 3b (周辺 block 展開) → Phase 4 (catchphrase)
+   の演出を ConceptSlide.tsx で組み立てる。各 cell / block / line の fade-in は既存
+   orbit-fade-in を再利用。 */
+
+/* Phase 3a: 3×3 grid を中央へ scale 1 → 1/3 に縮小。transform-origin は呼出側で center に設定。
+   内部の cells と Phase 2 lines (svg) も同時に scale するので、shrink 後は中央 1/9 領域に
+   小さい 3×3 が収まる = 9×9 layout の中央ブロックと一致する。 */
+@keyframes concept-3x3-shrink-to-center {
+  from { transform: scale(1); }
+  to   { transform: scale(0.3333); }
+}
+
+/* Phase 4 で全体 (中央 3×3 + 周辺 8 block + lines) を縮小しつつ fade-out する。
+   catchphrase の登場と並行。outer container に当てるので内側の transform と
+   合成される (= 中央 3×3 はさらに縮む / 周辺 block は 1 → 0.6)。 */
+@keyframes concept-grid-shrink-fadeout {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.6); }
+}
+
+/* Phase 4 で catchphrase を fade-in する。前半 1 秒は opacity 0 に張り付き、
+   後半 1 秒で 1 に到達する curve (= 9×9 が消えてから現れる印象) */
+@keyframes concept-catchphrase-fadein {
+  0%   { opacity: 0; }
+  50%  { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes orbit-from-nw {
+  from { transform: translate(calc(-100% - var(--outer-grid-gap)), calc(-100% - var(--outer-grid-gap))); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-n {
+  from { transform: translate(0, calc(-100% - var(--outer-grid-gap))); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-ne {
+  from { transform: translate(calc(100% + var(--outer-grid-gap)), calc(-100% - var(--outer-grid-gap))); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-w {
+  from { transform: translate(calc(-100% - var(--outer-grid-gap)), 0); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-e {
+  from { transform: translate(calc(100% + var(--outer-grid-gap)), 0); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-sw {
+  from { transform: translate(calc(-100% - var(--outer-grid-gap)), calc(100% + var(--outer-grid-gap))); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-s {
+  from { transform: translate(0, calc(100% + var(--outer-grid-gap))); }
+  to   { transform: translate(0, 0); }
+}
+@keyframes orbit-from-se {
+  from { transform: translate(calc(100% + var(--outer-grid-gap)), calc(100% + var(--outer-grid-gap))); }
+  to   { transform: translate(0, 0); }
+}
+
+/* 表示モード切替アニメーション (3×3 ↔ 9×9)
+   - 3×3 → 9×9: 現在の 3×3 全体を中央原点で 1/3 に縮小 (= 9×9 の中央ブロック位置に収束)
+     同時に周辺 8 ブロックを時計回り stagger で fade-in させる
+   - 9×9 → 3×3: 中央ブロックの 9 セルを個別 transition で 9×9 位置 → 3×3 位置へ展開
+     (per-cell の translate 量が異なるため CSS 変数方式を避け、React state flip +
+      double requestAnimationFrame + inline transform で動かす)
+     周辺 8 ブロックは fade-out */
+@keyframes view-shrink-to-center {
+  from { transform: scale(1); }
+  to   { transform: scale(0.333333); }
+}
+@keyframes view-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}

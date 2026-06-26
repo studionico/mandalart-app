@@ -1,0 +1,3256 @@
+
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useEditorStore, type BreadcrumbItem } from '@/store/editorStore'
+import { useConvergeStore } from '@/store/convergeStore'
+import { useGrid } from '@/hooks/useGrid'
+import { useSubGrids, type SubGridData } from '@/hooks/useSubGrids'
+import { useRealtime } from '@/hooks/useRealtime'
+import { useOffline } from '@/hooks/useOffline'
+import { useUndo } from '@/hooks/useUndo'
+import { useDragAndDrop, type DndUndoable } from '@/hooks/useDragAndDrop'
+import GridView3x3 from './GridView3x3'
+import GridView9x9 from './GridView9x9'
+import CellComponent from './Cell'
+import Breadcrumb from './Breadcrumb'
+import SidePanel from './SidePanel'
+import ImportDialog from './ImportDialog'
+import ReplaceConfirmDialog from './ReplaceConfirmDialog'
+import ShredConfirmDialog from './ShredConfirmDialog'
+import ClearPeripheralsConfirmDialog from './ClearPeripheralsConfirmDialog'
+import ExportFormatPicker, { type ExportFormat } from './ExportFormatPicker'
+import type { ActionDropType } from '@/hooks/useDragAndDrop'
+import ThemeToggle from '@/components/ThemeToggle'
+import Toast from '@/components/ui/Toast'
+import Button from '@/components/ui/Button'
+import { WarningIcon } from '@/components/ui/icons'
+import { getRootGrids, getChildGrids, getGrid, createGrid, permanentDeleteGrid, getGridAncestry } from '@/lib/api/grids'
+import { toggleCellDone, upsertCellAt, shredCellSubtree, clearGridPeripherals } from '@/lib/api/cells'
+import { getMandalart, permanentDeleteMandalart, updateMandalartShowCheckbox, updateMandalartLastGridId } from '@/lib/api/mandalarts'
+import { addToStock, pasteFromStock, pasteFromStockReplacing, moveCellToStock } from '@/lib/api/stock'
+import { uploadCellImage } from '@/lib/api/storage'
+import { exportAsPNG, exportAsPDF, downloadJSON, downloadText } from '@/lib/utils/export'
+import { exportToJSON, exportToMarkdown, exportToIndentText } from '@/lib/api/transfer'
+import { isCellEmpty, hasPeripheralContent, getCenterCell, getPeripheralCells, isGridContentEmpty, canPasteIntoPeripheral } from '@/lib/utils/grid'
+import { captureCardLikeSource } from '@/lib/utils/captureCardLikeSource'
+import { nextTabPosition } from '@/constants/tabOrder'
+import {
+  CENTER_POSITION,
+  GRID_CELL_COUNT,
+  GRID_SIDE,
+  ORBIT_ORDER_CENTER_THEN_PERIPHERAL,
+  ORBIT_ORDER_PERIPHERAL,
+  ORBIT_ORDER_PERIPHERAL_THEN_CENTER,
+  isCenterPosition,
+} from '@/constants/grid'
+import {
+  ANIM_FADE_MS,
+  ANIM_STAGGER_MS,
+  SLIDE_DURATION_MS as SLIDE_MS,
+  VIEW_SWITCH_TO_9_DELAY_MS as VIEW_SWITCH_TO_9_DELAY,
+  CONVERGE_DURATION_MS,
+} from '@/constants/timing'
+import {
+  GRID_SIZE_CHANGE_THRESHOLD_PX,
+  OUTER_GRID_GAP_PX,
+  SIDE_BUTTON_RESERVE_PX,
+} from '@/constants/layout'
+import type { Cell, Grid, StockItem } from '@/types'
+import { supabase } from '@/lib/supabase/client'
+
+type Props = {
+  mandalartId: string
+  userId: string
+}
+
+// 9×9 モードでは cell への入力を一切禁止する (ナビゲーションのみ)。
+// 編集が必要な場合は 3×3 モードに切り替えてから行う。
+const NOOP_EDIT = () => {}
+const NOOP_EDIT_ASYNC = async () => {}
+const PREVENT_CONTEXT_MENU = (e: React.MouseEvent) => e.preventDefault()
+
+export default function EditorLayout({ mandalartId, userId }: Props) {
+  const navigate = useNavigate()
+  const {
+    currentGridId, viewMode, breadcrumb, fontScale, fontLevel,
+    setMandalartId, setCurrentMandalart, setCurrentGrid, setViewMode,
+    pushBreadcrumb, popBreadcrumbTo, setBreadcrumb, updateBreadcrumbItem,
+    bumpFontLevel, resetFontLevel,
+  } = useEditorStore()
+  // ロック状態は store の currentMandalart 経由で購読 (migration 011 以降)。realtime で別端末/別タブの
+  // ロック切替が即時反映される。詳細は editorStore.ts の `currentMandalart` コメント参照。
+  // NOTE: SQLite から `locked` が number 0 で返る経路があるので **必ず `!!` で boolean 化**。
+  // `?? false` だと null/undefined にしか反応せず number 0 は素通り → `{isLocked && ...}` で
+  // "0" が描画される罠 (落とし穴 #16) を踏む。
+  const isLocked = useEditorStore((s) => !!s.currentMandalart?.locked)
+
+  // 兄弟セルナビ (隣のテーマ) の表示可否。サブグリッド編集中 (breadcrumb 2 段以上) かつ 3×3 のみ。
+  // 表示中はグリッド両脇スロットの「並列ナビ枠」を常に確保し、並列ナビの有無で兄弟ボタンの
+  // 縦位置がぶれないようにする (= iOS と同じ枠予約方針)。
+  const showSiblingNav = breadcrumb.length >= 2 && viewMode === '3x3'
+
+  // セル左上 done チェックボックス UI の表示 ON/OFF。マンダラート単位で記憶 (migration 007)。
+  // mandalartId 変更時に DB から復元、トグル時は楽観的更新 + DB 永続化。
+  const [showCheckbox, setShowCheckbox] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const m = await getMandalart(mandalartId)
+        if (cancelled) return
+        setShowCheckbox(!!m?.show_checkbox)
+        // 同じ fetch 結果を editorStore.currentMandalart にセットして isLocked 等の購読源にする (migration 011)。
+        setCurrentMandalart(m)
+      } catch {
+        if (!cancelled) {
+          setShowCheckbox(false)
+          setCurrentMandalart(null)
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [mandalartId, setCurrentMandalart])
+
+  // unmount 時に store をクリアして次回エディタ起動までゴミを残さない (Cell の isReadOnly 等が誤購読しないように)。
+  useEffect(() => {
+    return () => { setCurrentMandalart(null) }
+  }, [setCurrentMandalart])
+
+  const handleToggleShowCheckbox = useCallback(async () => {
+    const next = !showCheckbox
+    setShowCheckbox(next)  // 楽観的更新
+    try {
+      await updateMandalartShowCheckbox(mandalartId, next)
+    } catch (e) {
+      setShowCheckbox(!next)  // 失敗時ロールバック
+      setToast({ message: `チェックボックス設定の保存に失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [showCheckbox, mandalartId])
+
+  // currentGridId 変化を `mandalarts.last_grid_id` に永続化 (migration 008 以降)。
+  // drill / drill-up / breadcrumb クリック / parallel switch すべての遷移を 1 箇所でカバーする。
+  // 失敗は console.warn のみで UI 動作は止めない。push/pull 同期で他デバイスにも伝播する。
+  useEffect(() => {
+    if (!mandalartId || !currentGridId) return
+    updateMandalartLastGridId(mandalartId, currentGridId).catch((e) => {
+      console.warn('updateMandalartLastGridId failed:', e)
+    })
+  }, [mandalartId, currentGridId])
+
+  const { push: pushUndo, clear: clearUndo } = useUndo()
+  const { isOffline } = useOffline()
+
+  // マンダラート/グリッド切替・エディタ離脱で undo 履歴を捨てる。undo は「現在表示中グリッド内」
+  // の操作だけに限定する。updateCellLocal は表示中グリッドの state しか反映しないため、別グリッド/
+  // 別マンダラートの残存 op を ⌘Z すると UI に出ないまま DB だけ silent に書換わる。currentGridId は
+  // drill / drill-up / breadcrumb / parallel switch すべての遷移をカバーする (L129-137 参照)。
+  useEffect(() => {
+    clearUndo()
+    return () => clearUndo()
+  }, [mandalartId, currentGridId, clearUndo])
+
+  const { data: gridData, reload, updateCell: updateCellLocal, refreshCell } = useGrid(currentGridId)
+  const { subGrids, reload: reloadSubGrids, setSubGrids } = useSubGrids(gridData?.cells ?? [])
+  const gridRef = useRef<HTMLDivElement>(null)
+  const gridAreaRef = useRef<HTMLDivElement>(null)
+  const [gridSize, setGridSize] = useState(0)
+
+  useEffect(() => {
+    const el = gridAreaRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect
+      // 左右の並列ナビボタン分を横幅から差し引く
+      const usableWidth = Math.max(0, width - SIDE_BUTTON_RESERVE_PX)
+      const next = Math.floor(Math.min(usableWidth, height))
+      // 数 px 単位の微小な変化は無視する。drill 遷移時に header の scrollbar 出し入れなどで
+      // ちらつく原因になるため。
+      setGridSize((prev) => (Math.abs(prev - next) < GRID_SIZE_CHANGE_THRESHOLD_PX ? prev : next))
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // 並列グリッド
+  const [parallelGrids, setParallelGrids] = useState<Grid[]>([])
+  const [parallelIndex, setParallelIndex] = useState(0)
+
+  // 並列グリッド切替時のスライドアニメーション用 state
+  // slide が truthy な間は 2 枚のグリッド (from/to) を横並びに描画し、
+  // CSS keyframes で translateX を動かす。
+  type SlideState = {
+    fromCells: Cell[]
+    toCells: Cell[]
+    direction: 'forward' | 'backward'
+  }
+  const [slide, setSlide] = useState<SlideState | null>(null)
+  const SLIDE_DURATION_MS = SLIDE_MS
+
+  // ドリル (3×3 のみ) のセル軌道アニメーション用 state
+  // - targetCells: 遷移後のグリッドの 9 セル
+  // - targetGridId: 切替後の currentGridId になる grid の id。
+  //                 gridData がこの id に追いつくまで orbit を表示し続けることで
+  //                 古い gridData が一瞬表示される「点滅」を防ぐ
+  // - childCountsByCellId: orbit 中の各セルに付ける border (サブグリッドあり = 2px 黒) の
+  //                        判定用。通常時の childCounts は gridData ベースで遅れて更新される
+  //                        ため、orbit 開始時に target 専用に事前フェッチして持たせる
+  // - movingCellId: 「動くセル」の id (ドリル元 or ドリル先で位置が変わるセル)
+  // - movingFromPosition: 動くセルの開始位置 (target 内でのレイアウト基準)
+  // - direction: 'drill-down' なら 4 番を除く [7,6,3,0,1,2,5,8] を stagger
+  //              'drill-up'   なら [7,6,3,0,1,2,5,8,4] を stagger (中心は最後)
+  //              'initial'    なら [4,7,6,3,0,1,2,5,8] を stagger (中心から時計回り)
+  type OrbitState = {
+    targetCells: Cell[]
+    targetGridId: string
+    childCountsByCellId: Map<string, number>
+    movingCellId: string | null
+    movingFromPosition: number
+    direction: 'drill-down' | 'drill-up' | 'initial'
+    /** orbit 全体の開始を遅らせる時間 (ms)。direction='initial' で「ダッシュボード → エディタ拡大
+     * (convergeStore direction='open')」経由で入った場合のみ CONVERGE_DURATION_MS が入る。
+     * delay 中は `animation-fill-mode: both` の効果でセルは opacity 0 で固定され、
+     * convergence overlay が中心セルへ morph している間は周辺セルが見えない。 */
+    initialDelayMs?: number
+  }
+  const [orbit, setOrbit] = useState<OrbitState | null>(null)
+  // drill-down と drill-up を同じ感覚になるよう stagger / fade を揃える。
+  // drill-down: 7 * stagger + fade (≒ 1s)
+  // drill-up:   8 * stagger + fade (≒ 1.1s、ステップが 1 つ多いぶん若干長い)
+  // initial:    8 * stagger + fade (中心含む 9 セル)
+  // 値は constants/timing.ts で一元管理し、Orbit / View Switch でビートを揃えている。
+  const ORBIT_STAGGER_DOWN_MS = ANIM_STAGGER_MS
+  const ORBIT_STAGGER_UP_MS = ANIM_STAGGER_MS
+  const ORBIT_STAGGER_INIT_MS = ANIM_STAGGER_MS
+  const ORBIT_FADE_DOWN_MS = ANIM_FADE_MS
+  const ORBIT_FADE_UP_MS = ANIM_FADE_MS
+  const ORBIT_FADE_INIT_MS = ANIM_FADE_MS
+
+  // 9×9 表示用の orbit state。こちらは「サブグリッド (3×3 ブロック)」単位で動かす。
+  // 3×3 orbit の仕組みをそのままブロック単位に持ち上げた構造。
+  // - targetRootCells: target 9×9 の中央ブロック (= target 現在グリッド) の 9 セル
+  // - targetSubGrids:  target 9×9 の各周辺ブロックに表示するサブグリッドデータ
+  //                    (cellId → SubGridData。useSubGrids と同じ構造)
+  // - movingToPosition: 移動ブロックの target 内での位置 (drill-down = 4、drill-up = 親内位置)
+  //                     null のとき (initial) は移動ブロックなし
+  // - movingFromPosition: 移動ブロックが視覚的に出発する位置
+  type Orbit9State = {
+    targetRootCells: Cell[]
+    targetSubGrids: Map<string, SubGridData>
+    targetGridId: string
+    childCountsByCellId: Map<string, number>
+    movingToPosition: number | null
+    movingFromPosition: number
+    direction: 'drill-down' | 'drill-up' | 'initial'
+  }
+  const [orbit9, setOrbit9] = useState<Orbit9State | null>(null)
+
+  // 表示モード切替アニメーション用 state (3×3 ↔ 9×9)
+  // - direction 'to-9x9': 現在の 3×3 を縮小して中央ブロックへ収束 + 周辺ブロックを時計回り fade-in
+  // - direction 'to-3x3': 中央ブロックの 9 セルを個別に 3×3 位置へ展開 + 周辺ブロックを fade-out
+  //
+  // 9→3 方向は per-cell で translate 量が異なるため、CSS 変数ベースの keyframes が使えない
+  // (animations.md 参照)。代わりに React state flip + double requestAnimationFrame +
+  // inline transform で動かす。viewSwitchPhase が 'start' → 'end' に切り替わった瞬間
+  // CSS transition が発火する。
+  type ViewSwitchState = {
+    direction: 'to-9x9' | 'to-3x3'
+    rootCells: Cell[]
+    subGrids: Map<string, SubGridData>
+    childCountsByCellId: Map<string, number>
+  }
+  const [viewSwitch, setViewSwitch] = useState<ViewSwitchState | null>(null)
+  const [viewSwitchPhase, setViewSwitchPhase] = useState<'start' | 'end'>('start')
+
+  /**
+   * グリッド本体を「ストックタイル」or「ホームアイコン」位置に向けて
+   * translate + scale + opacity 0 で吸い込ませる収束アニメ用 state。
+   * 収束先までの相対 px (translate 量) を持つ。
+   * runConvergeAnim() が target DOM を測って算出する。
+   * unmount で消えるか setConverging(null) で瞬時復帰 (transition: none)。
+   * gridRef (既存の PNG/PDF export 用 ref) を共用してソース位置を測る。
+   */
+  const [converging, setConverging] = useState<{ tx: number; ty: number } | null>(null)
+  // to-9x9: 0-400ms で中央 3×3 が scale(1)→scale(1/3)、200ms から周辺ブロックが時計回り stagger fade-in。
+  //         total = 200 + 7 * 85 + 400 = 1195ms
+  // to-3x3: 0-400ms 周辺ブロック fade-out、中央 9 セルが順次 [7,6,3,0,1,2,5,8,4] で 3×3 位置へ展開。
+  //         total = 8 * 85 + 400 = 1080ms
+  const VIEW_SWITCH_FADE_MS = ANIM_FADE_MS
+  const VIEW_SWITCH_STAGGER_MS = ANIM_STAGGER_MS
+  const VIEW_SWITCH_TO_9_DELAY_MS = VIEW_SWITCH_TO_9_DELAY
+  const VIEW_SWITCH_TO_9_TOTAL_MS =
+    VIEW_SWITCH_TO_9_DELAY_MS + 7 * VIEW_SWITCH_STAGGER_MS + VIEW_SWITCH_FADE_MS
+  const VIEW_SWITCH_TO_3_TOTAL_MS = 8 * VIEW_SWITCH_STAGGER_MS + VIEW_SWITCH_FADE_MS
+
+  // viewSwitch がセットされたら 2 フレーム待って phase を 'end' に切替 → CSS transition 発火
+  useEffect(() => {
+    if (!viewSwitch) {
+      setViewSwitchPhase('start')
+      return
+    }
+    let r1 = 0
+    let r2 = 0
+    r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => setViewSwitchPhase('end'))
+    })
+    return () => {
+      if (r1) cancelAnimationFrame(r1)
+      if (r2) cancelAnimationFrame(r2)
+    }
+  }, [viewSwitch])
+  /**
+   * target cells それぞれの「意味のある子グリッド数」を事前フェッチする。
+   *
+   * 「意味のある子グリッド」= 周辺セル (position != 4) に 1 つでも入力 (text または画像) が
+   * あるサブグリッド。ドリル直後にセンターだけ自動コピーされただけの状態はカウントしない。
+   * Cell 側の border 表示 (border-2 black = サブグリッドあり) で参照される。
+   *
+   * 以前は cells ごとに別々の SELECT を Promise.all で走らせていたが、セル数 (9〜81) に
+   * 比例してラウンドトリップが増え、"枠が遅れて出てくる" 描画遅延の主因になっていた。
+   * 1 発の IN (...) クエリに統合して全 cell 分をバッチ取得する。
+   */
+  async function fetchChildCountsFor(cells: Cell[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>()
+    if (cells.length === 0) return map
+    // 全 cell の id を初期値 0 でマップに入れておく (クエリで hit しないセルが欠落しないよう)
+    for (const c of cells) map.set(c.id, 0)
+
+    const cellIds = cells.map((c) => c.id)
+    // 各 cell を parent_cell_id に持つ子グリッドを一括取得してカウント
+    const { data: childGridData } = await supabase
+      .from('grids')
+      .select('parent_cell_id')
+      .in('parent_cell_id', cellIds)
+      .is('deleted_at', null)
+    for (const g of ((childGridData ?? []) as { parent_cell_id: string | null }[])) {
+      if (g.parent_cell_id) {
+        map.set(g.parent_cell_id, (map.get(g.parent_cell_id) ?? 0) + 1)
+      }
+    }
+    return map
+  }
+
+  /**
+   * 9×9 orbit 用: root cells それぞれの子グリッドを一括取得。
+   * ないセルは Map に含めない。
+   */
+  async function fetchSubGridsFor(rootCells: Cell[]): Promise<Map<string, SubGridData>> {
+    const map = new Map<string, SubGridData>()
+    await Promise.all(
+      rootCells.map(async (cell) => {
+        const children = await getChildGrids(cell.id)
+        if (children.length > 0) {
+          const first = await getGrid(children[0].id)
+          map.set(cell.id, {
+            grid: first,
+            cells: first.cells,
+            parentPosition: cell.position,
+          })
+        }
+      }),
+    )
+    return map
+  }
+
+  /**
+   * 移動セル用の keyframe 名を返す。from → to の相対位置から 8 方向のうちどれかを選ぶ。
+   * 同一位置 (fromPos === toPos) のときは null。
+   */
+  function orbitMoveAnimationName(fromPos: number, toPos: number): string | null {
+    if (fromPos === toPos) return null
+    const dCol = (fromPos % 3) - (toPos % 3)
+    const dRow = Math.floor(fromPos / 3) - Math.floor(toPos / 3)
+    if (dCol === -1 && dRow === -1) return 'orbit-from-nw'
+    if (dCol === 0 && dRow === -1) return 'orbit-from-n'
+    if (dCol === 1 && dRow === -1) return 'orbit-from-ne'
+    if (dCol === -1 && dRow === 0) return 'orbit-from-w'
+    if (dCol === 1 && dRow === 0) return 'orbit-from-e'
+    if (dCol === -1 && dRow === 1) return 'orbit-from-sw'
+    if (dCol === 0 && dRow === 1) return 'orbit-from-s'
+    if (dCol === 1 && dRow === 1) return 'orbit-from-se'
+    return null
+  }
+
+  /**
+   * グリッド本体を `target` (= `data-converge-target` 属性を持つ DOM) の中心へ向けて
+   * 縮みながらフェードアウトさせる収束アニメ。
+   * - target / グリッド ref のいずれかが取れない場合は no-op で graceful skip
+   * - other anim (orbit / orbit9 / viewSwitch / slide) 進行中も no-op で抜ける (二重発火防止)
+   * - 完了まで `await` で待つので、呼び出し側はアニメ後に actual DB 操作 / navigate を実行できる
+   */
+  const runConvergeAnim = useCallback(async (target: 'stock' | 'home'): Promise<void> => {
+    if (orbit || orbit9 || viewSwitch || slide) return
+    const targetEl = document.querySelector(`[data-converge-target="${target}"]`)
+    const sourceEl = gridRef.current
+    if (!targetEl || !sourceEl) return
+    const src = sourceEl.getBoundingClientRect()
+    const tgt = targetEl.getBoundingClientRect()
+    const tx = (tgt.left + tgt.width / 2) - (src.left + src.width / 2)
+    const ty = (tgt.top + tgt.height / 2) - (src.top + src.height / 2)
+    setConverging({ tx, ty })
+    await new Promise<void>((r) => setTimeout(r, CONVERGE_DURATION_MS))
+  }, [orbit, orbit9, viewSwitch, slide])
+
+  // orbit / orbit9 の safety net: 各 drill handler が明示的に setOrbit(null) を呼ぶ前提の
+  // もとで、例外やその他の理由で明示 clear が走らなかった場合の救済としてアニメ最大時間 +
+  // 500ms 経過したら強制 clear する。
+  //
+  // 'initial' (ダッシュボードから開いた直後) は init() 内の setTimeout で明示 clear するので
+  // ここでは対象外。
+  //
+  // 以前は「gridData が targetGridId に追いついたら即 clear」という fast path を持っていたが、
+  // 順序変更で setCurrentGrid が await の前に移った結果、animation 途中で gridData が追い
+  // ついて早すぎるタイミングで orbit が切れてしまうため削除した。
+  useEffect(() => {
+    if (!orbit || orbit.direction === 'initial') return
+    const maxMs =
+      (orbit.direction === 'drill-up'
+        ? ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS
+        : ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS) + 500
+    const t = setTimeout(() => setOrbit(null), maxMs)
+    return () => clearTimeout(t)
+  }, [orbit, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
+
+  useEffect(() => {
+    if (!orbit9 || orbit9.direction === 'initial') return
+    const maxMs =
+      (orbit9.direction === 'drill-up'
+        ? ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS
+        : ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS) + 500
+    const t = setTimeout(() => setOrbit9(null), maxMs)
+    return () => clearTimeout(t)
+  }, [orbit9, ORBIT_STAGGER_UP_MS, ORBIT_FADE_UP_MS, ORBIT_STAGGER_DOWN_MS, ORBIT_FADE_DOWN_MS])
+
+  // サブグリッドの存在マップ (cellId → childCount)
+  const [childCounts, setChildCounts] = useState<Map<string, number>>(new Map())
+
+
+  // インライン編集中のセル ID (textarea を表示するセル)
+  const [inlineEditingCellId, setInlineEditingCellId] = useState<string | null>(null)
+
+  /**
+   * 空 slot (DB に cell 行が無い) を編集中の状態。
+   * 新設計では空セルを物理的に作らないので、空 slot をクリックしたら以下のフローを取る:
+   * 1. pendingEdit に (gridId, position) を立て、inlineEditingCellId に合成 id `pending:gridId:position` を入れる
+   * 2. GridView 側はこの合成 id で synthetic cell を生成して inline edit UI を表示
+   * 3. commit 時 (Tab/Esc/blur/Cmd+Enter)、実際にテキストが入っていれば upsertCellAt で INSERT、空ならスキップ
+   * 4. INSERT 後、refreshCell で gridData に取り込む
+   */
+  type PendingEdit = { gridId: string; position: number }
+  const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null)
+  const pendingCellId = pendingEdit ? `pending:${pendingEdit.gridId}:${pendingEdit.position}` : null
+
+  function handleStartEmptySlotEdit(targetGridId: string, position: number) {
+    if (isLocked) return  // ロック中は新規編集を起動しない (migration 011)
+    setPendingEdit({ gridId: targetGridId, position })
+    setInlineEditingCellId(`pending:${targetGridId}:${position}`)
+  }
+
+  // コンテキストメニュー
+  // context menu は (a) 既存 cell と (b) 空 slot (DB row 不在) の 2 形態。どちらも
+  // 「ここにインポート」のみを提供する。'slot' クリック時は handleContextAction 内で
+  // upsertCellAt を呼んで実 row を遅延作成してから import 経路に合流する。
+  type ContextMenuState =
+    | { x: number; y: number; kind: 'cell'; cell: Cell }
+    | { x: number; y: number; kind: 'slot'; gridId: string; position: number }
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+
+  // トースト
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'error' | 'success'; action?: { label: string; onClick: () => void } } | null>(null)
+
+  // タイトルダイアログ
+
+  // エクスポートメニュー
+  const [exportMenu, setExportMenu] = useState(false)
+
+  // ストック再読み込みキー
+  const [stockReloadKey, setStockReloadKey] = useState(0)
+
+  // インポートダイアログ（コンテキストメニュー「インポート」から起動）
+  const [importTarget, setImportTarget] = useState<{ cellId: string; cellLabel: string } | null>(null)
+
+  useEffect(() => {
+    setMandalartId(mandalartId)
+  }, [mandalartId, setMandalartId])
+
+  // 非同期処理 (init / drill の setTimeout await) が unmount 後に state を触らないよう
+  // 検査する ref。unmount 時に current = false にして、await 直後のガードで早期 return する。
+  // ⌘Q (window close) 時にアニメ待ちの Promise が resolve しても、setState が空振りして
+  // 外部参照を解放するため、renderer のシャットダウンが滞らない。
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => { isMountedRef.current = false }
+  }, [])
+
+  // 初期ロード: ルートグリッドを取得してエディタを初期化
+  useEffect(() => {
+    let cancelled = false
+    async function init() {
+      try {
+        const roots = await getRootGrids(mandalartId)
+        if (cancelled) return
+        if (roots.length === 0) {
+          setToast({ message: 'グリッドが見つかりません', type: 'error' })
+          return
+        }
+        const root = roots[0]
+
+        // 復元用に mandalart.last_grid_id を読んで ancestry を組む。
+        // 組めれば「前回開いていた sub-grid に復帰」、組めなければ既定の root[0] にフォールバック。
+        // viewMode は Dashboard 経由で常に 3×3 にリセットされるが、9×9 で再 mount されたケースに備え
+        // 9×9 path でも target grid は ancestry 末尾で扱う。
+        const mandalartRow = await getMandalart(mandalartId).catch(() => null)
+        if (cancelled) return
+        let ancestry: Array<Grid & { cells: Cell[] }> | null = null
+        let parallelIdx = 0
+        if (mandalartRow?.last_grid_id) {
+          ancestry = await getGridAncestry(mandalartRow.last_grid_id)
+          if (cancelled) return
+          if (ancestry && ancestry.length > 0) {
+            const restoredRootId = ancestry[0].id
+            const idx = roots.findIndex((r) => r.id === restoredRootId)
+            if (idx >= 0) {
+              parallelIdx = idx
+            } else {
+              // 復元 root が現 mandalart の roots に含まれない (異常) → fallback
+              ancestry = null
+            }
+          }
+          if (!ancestry) {
+            // stale (grid が削除済み等) → DB の last_grid_id をクリア
+            updateMandalartLastGridId(mandalartId, null).catch((e) =>
+              console.warn('clear stale last_grid_id failed:', e),
+            )
+          }
+        }
+
+        // 表示対象 grid を決定: 復元できれば ancestry 末尾、それ以外は roots[0]
+        let targetGrid: Grid & { cells: Cell[] }
+        let breadcrumbItems: BreadcrumbItem[]
+        if (ancestry && ancestry.length > 0) {
+          targetGrid = ancestry[ancestry.length - 1]
+          // ancestry 各層について breadcrumb item を組む。
+          // - root 層 (i=0): label は root の center cell の text
+          // - drilled 層 (i>0): label / imagePath / highlightPosition は親 grid の peripheral cell から取る
+          breadcrumbItems = ancestry.map((g, i) => {
+            if (i === 0) {
+              const center = g.cells.find((c) => c.position === CENTER_POSITION)
+              return {
+                gridId: g.id,
+                cellId: null,
+                label: center?.text ?? '',
+                imagePath: center?.image_path ?? null,
+                cells: g.cells,
+                highlightPosition: null,
+              }
+            }
+            const parentGrid = ancestry![i - 1]
+            const parentCell = parentGrid.cells.find((c) => c.id === g.parent_cell_id)
+            return {
+              gridId: g.id,
+              cellId: g.parent_cell_id ?? null,
+              label: parentCell?.text ?? '',
+              imagePath: parentCell?.image_path ?? null,
+              cells: parentGrid.cells,
+              highlightPosition: parentCell?.position ?? null,
+            }
+          })
+        } else {
+          // デフォルト経路: root grid の 9 cells を Supabase から取得
+          const { data: rootCellsData } = await supabase
+            .from('cells')
+            .select('*')
+            .eq('grid_id', root.id)
+            .is('deleted_at', null)
+            .order('position')
+          if (cancelled) return
+          const rootCells = (rootCellsData ?? []) as Cell[]
+          if (cancelled) return
+          targetGrid = { ...root, cells: rootCells }
+          const center = rootCells.find((c) => c.position === CENTER_POSITION)
+          breadcrumbItems = [{
+            gridId: root.id,
+            cellId: null,
+            label: center?.text ?? '',
+            imagePath: center?.image_path ?? null,
+            cells: rootCells,
+            highlightPosition: null,
+          }]
+        }
+
+        // まず cells / childCounts / subGrids を全て prefetch してから setOrbit → setCurrentGrid の順で
+        // state を反映することで、"ベアグリッドが一瞬見える" フラッシュを回避する。
+        // orbit が先に active になっていれば、gridData 反映後の通常 render 経路はスキップされ、
+        // orbit 経路でセルが描画される (事前フェッチ済み childCountsByCellId を使うので border も正しい)。
+        const cells = targetGrid.cells
+        const childCountsByCellId = await fetchChildCountsFor(cells)
+        if (cancelled) return
+
+        setParallelGrids(roots)
+        setParallelIndex(parallelIdx)
+        setBreadcrumb(breadcrumbItems)
+
+        // 初回表示アニメーション: 中心 → 時計回りに周辺を順に fade-in。
+        // orbit を先にセットしてから setCurrentGrid (useGrid ロード開始) する。
+        // こうすると gridData 反映のタイミングに関わらず、orbit 経路が最初から描画される。
+        if (viewMode === '9x9') {
+          const targetSubGrids = await fetchSubGridsFor(cells)
+          if (cancelled) return
+          setOrbit9({
+            targetRootCells: cells,
+            targetSubGrids,
+            targetGridId: targetGrid.id,
+            childCountsByCellId,
+            movingToPosition: null,
+            movingFromPosition: 4,
+            direction: 'initial',
+          })
+          setCurrentGrid(targetGrid.id)
+          await new Promise((r) =>
+            setTimeout(r, ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          if (cancelled) return
+          setChildCounts(childCountsByCellId)
+          setSubGrids(targetSubGrids)
+          setOrbit9(null)
+        } else {
+          // ダッシュボード → エディタ拡大 (convergeStore direction='open') で入ってきた場合は、
+          // convergence overlay の morph (CONVERGE_DURATION_MS) が完了してから初回 orbit fade-in を
+          // 始める。こうすることで「のの字」描画の前に中心セルが overlay からの引渡しで先に現れる。
+          const fromDashboard = useConvergeStore.getState().direction === 'open'
+          const initialDelayMs = fromDashboard ? CONVERGE_DURATION_MS : 0
+          setOrbit({
+            targetCells: cells,
+            targetGridId: targetGrid.id,
+            childCountsByCellId,
+            movingCellId: null,
+            movingFromPosition: 4,
+            direction: 'initial',
+            initialDelayMs,
+          })
+          setCurrentGrid(targetGrid.id)
+          await new Promise((r) =>
+            setTimeout(r, initialDelayMs + ORBIT_STAGGER_INIT_MS * 8 + ORBIT_FADE_INIT_MS),
+          )
+          if (cancelled) return
+          setChildCounts(childCountsByCellId)
+          setOrbit(null)
+        }
+      } catch (e) {
+        if (cancelled) return
+        console.error('EditorLayout init error:', e)
+        setToast({ message: `読み込みエラー: ${(e as Error).message}`, type: 'error' })
+      }
+    }
+    init()
+    return () => { cancelled = true }
+  }, [mandalartId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 子グリッド数を更新 (= 「意味のあるサブグリッド」カウント)
+  // fetchChildCountsFor は周辺セルに入力のあるサブグリッドのみを数えるので、
+  // Cell 側の border (border-2 = サブグリッドあり) が実際の内容状態を反映する。
+  useEffect(() => {
+    if (!gridData) return
+    let cancelled = false
+    fetchChildCountsFor(gridData.cells)
+      .then((map) => {
+        if (!cancelled) setChildCounts(map)
+      })
+      .catch((e) => console.error('loadChildCounts failed:', e))
+    return () => { cancelled = true }
+  }, [gridData])
+
+  // 現在表示中のグリッドの中心セル (position=4) が編集されたら、
+  // パンくずリストの末尾エントリ (= 現在地) のラベル / 画像を即座に同期する。
+  // ルート・サブグリッド・並列グリッドいずれでも「現在地 = 末尾」の原則で扱うので、
+  // 並列切替時には handleParallelNav / handleAddParallel が末尾エントリの gridId も
+  // 切替先と一致するよう更新している。
+  useEffect(() => {
+    if (!gridData || breadcrumb.length === 0) return
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (gridData.id !== last.gridId) return
+    const centerCell = gridData.cells.find((c) => c.position === CENTER_POSITION)
+    if (!centerCell) return
+    const nextLabel = centerCell.text
+    const nextImagePath = centerCell.image_path
+    if (last.label !== nextLabel || (last.imagePath ?? null) !== (nextImagePath ?? null)) {
+      updateBreadcrumbItem(last.gridId, { label: nextLabel, imagePath: nextImagePath })
+    }
+  }, [gridData, breadcrumb, updateBreadcrumbItem])
+
+  // Realtime: 別デバイスでの変更が来たらローカルを再読み込み
+  useRealtime(useCallback(() => {
+    reload()
+    reloadSubGrids()
+  }, [reload, reloadSubGrids]))
+
+  // D&D のドロップ先解決に使う全セル（3x3ではルート、9x9ではルート+サブを平坦化）
+  const dndCells = useMemo<Cell[]>(() => {
+    if (!gridData) return []
+    if (viewMode === '9x9') {
+      const flat: Cell[] = [...gridData.cells]
+      subGrids.forEach((sub) => flat.push(...sub.cells))
+      return flat
+    }
+    return gridData.cells
+  }, [gridData, subGrids, viewMode])
+
+  // GridView3x3 へ渡すセル一覧。pending edit が立っていれば synthetic cell を 1 つ追加する
+  // (空 slot でユーザーが文字入力しているとき用。CellComponent が textarea を表示できるようにする)
+  const cellsForRender = useMemo<Cell[]>(() => {
+    if (!gridData) return []
+    if (!pendingEdit || pendingEdit.gridId !== gridData.id) return gridData.cells
+    // 既に同 position に real cell がある場合は synthetic を作らない (整合性)
+    if (gridData.cells.some((c) => c.position === pendingEdit.position)) return gridData.cells
+    const ts = ''  // synthetic cell は DB に保存されないので timestamp は空でよい
+    const synthetic: Cell = {
+      id: `pending:${pendingEdit.gridId}:${pendingEdit.position}`,
+      grid_id: pendingEdit.gridId,
+      position: pendingEdit.position,
+      text: '',
+      image_path: null,
+      color: null,
+      done: false,
+      created_at: ts,
+      updated_at: ts,
+    }
+    return [...gridData.cells, synthetic]
+  }, [gridData, pendingEdit])
+  void pendingCellId  // 参照保持 (synthetic cell.id 計算で使う想定、現状は cellsForRender で完結)
+
+  // Copy アクション: snapshot をストックに追加 (元セルは変化なし)。返り値の StockItem は
+  // direction='stock' の収束アニメで polling target を解決するために使う。
+  const handleCopyAction = useCallback(async (cellId: string) => {
+    const stockItem = await addToStock(cellId)
+    setStockReloadKey((k) => k + 1)
+    setToast({ message: 'ストックにコピーしました', type: 'success' })
+    return stockItem
+  }, [])
+
+  /**
+   * direction='stock' の収束アニメ source 値をエディタ内セル DOM から計測する。
+   * `handleNavigateHome` (中心セル → ダッシュボードカード) と同じ方法で text wrapper / span を
+   * 探索し、`getComputedStyle` で実描画の inset / font / border / radius を読み取る。
+   * 戻り値を `setConverge('stock', stockItem.id, rect, centerCell)` にそのまま渡せる形にした。
+   * cellEl が無い (drag 元セルが既に unmount されている等の corner case) ときは null。
+   */
+  const captureCellSource = useCallback((cellId: string) => {
+    const cellEl = document.querySelector(`[data-cell-id="${cellId}"]`) as HTMLElement | null
+    const cellData = gridData?.cells.find((c) => c.id === cellId)
+    if (!cellEl || !cellData) return null
+    const m_ = captureCardLikeSource(cellEl, {
+      // Cell.tsx の textInsetPx 計算 (CELL_TEXT_INSET_NORMAL_PX 18 - border 6) のフォールバック
+      topInsetPx: 12,
+      sideInsetPx: 12,
+      fontPx: 28 * fontScale,
+    })
+    return {
+      rect: m_.rect,
+      centerCell: {
+        text: cellData.text,
+        imagePath: cellData.image_path,
+        color: cellData.color,
+        fontPx: m_.fontPx,
+        topInsetPx: m_.topInsetPx,
+        sideInsetPx: m_.sideInsetPx,
+        borderPx: m_.borderPx,
+        radiusPx: m_.radiusPx,
+      },
+    }
+  }, [gridData, fontScale])
+
+  // 画像ファイルかどうかの簡易判定 (拡張子ベース、デスクトップから drop された File.name に対して使う)
+  function isImageFile(file: File): boolean {
+    return /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(file.name)
+  }
+
+  const reloadAll = useCallback(() => {
+    // gridData が更新されれば useSubGrids / childCounts の useEffect が
+    // rootCells 変化で自動的に再フェッチするので、ここで手動 reloadSubGrids を
+    // 叩く必要はない (重複呼出の削減)。
+    reload()
+  }, [reload])
+
+  // セルの content 変更 (新規入力 / 既存編集) を undo スタックに記録する共通ヘルパー。
+  // 新規入力 (空スロットへの初入力) も before=空コンテンツで記録することで、⌘Z が直前に打った
+  // セルを 1 つずつ線形に戻す。undo/redo 後に reloadAll() して done 伝搬・merged center 表示を追従。
+  const pushCellUndo = useCallback(
+    (
+      cellId: string,
+      before: { text: string; image_path: string | null; color: string | null },
+      after: { text: string; image_path: string | null; color: string | null },
+    ) => {
+      pushUndo({
+        description: 'セル入力',
+        undo: async () => { await updateCellLocal(cellId, before); reloadAll() },
+        redo: async () => { await updateCellLocal(cellId, after); reloadAll() },
+      })
+    },
+    [pushUndo, updateCellLocal, reloadAll],
+  )
+
+  const handleStockPasteDrop = useCallback(async (stockItemId: string, targetCellId: string) => {
+    if (isLocked) return  // ロック中は stock → cell 貼付けを block (migration 011)
+    try {
+      await pasteFromStock(stockItemId, targetCellId)
+      reloadAll()
+      setToast({ message: 'ストックからペーストしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [reloadAll, isLocked])
+
+  // ストック → 入力ありの周辺セル drop: 確認 dialog を開く
+  const [replaceConfirm, setReplaceConfirm] = useState<{ stockItemId: string; targetCellId: string; targetText: string } | null>(null)
+
+  // 中心セル右クリック「周辺セルのクリア」: 確認 dialog を開く
+  const [clearPeripheralsConfirm, setClearPeripheralsConfirm] = useState(false)
+
+  const handleStockReplaceDrop = useCallback((stockItemId: string, targetCellId: string) => {
+    if (isLocked) return  // ロック中は確認 dialog も開かない
+    const target = dndCells.find((c) => c.id === targetCellId)
+    setReplaceConfirm({
+      stockItemId,
+      targetCellId,
+      targetText: target?.text ?? '',
+    })
+  }, [dndCells, isLocked])
+
+  const handleReplaceConfirm = useCallback(async () => {
+    if (!replaceConfirm) return
+    try {
+      await pasteFromStockReplacing(replaceConfirm.stockItemId, replaceConfirm.targetCellId)
+      reloadAll()
+      setToast({ message: 'ストックの内容で上書きしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `上書き失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setReplaceConfirm(null)
+    }
+  }, [replaceConfirm, reloadAll])
+
+  // 4 アクションアイコン (DragActionPanel) ドロップ用 state / dialogs
+  const [shredConfirm, setShredConfirm] = useState<{
+    cellId: string
+    isCenter: boolean
+    isPrimaryRoot: boolean
+    isSelfCenteredInCurrentGrid: boolean
+    gridIdForSelfCenter: string | undefined
+    targetText: string
+    childrenCount: number
+  } | null>(null)
+  const [exportPicker, setExportPicker] = useState<{
+    cellId: string
+    targetText: string
+    isCenter: boolean
+    gridIdForCenter: string | undefined
+  } | null>(null)
+
+  // 中心セル drop 後に上の階層へ navigate (drilled は親 grid、root は dashboard)
+  const navigateUpAfterAction = useCallback(() => {
+    if (breadcrumb.length <= 1) {
+      navigate('/dashboard')
+      return
+    }
+    const parent = breadcrumb[breadcrumb.length - 2]
+    if (parent) popBreadcrumbTo(parent.gridId)
+  }, [breadcrumb, navigate, popBreadcrumbTo])
+
+  /**
+   * 並列グリッドが削除された後の遷移処理。
+   * - 削除された並列以外がまだ残っていれば「左隣 (sort_order が 1 つ前) のサブグリッド」を表示
+   *   先頭 (index=0) を削除した場合は左隣がないので、新しい先頭をそのまま表示
+   * - 並列が他に無い場合 (= 削除後 0 件) は上の階層 (drilled なら親 grid、root なら dashboard) へ
+   */
+  const navigateAfterParallelDeleted = useCallback((deletedGridId: string) => {
+    const oldIndex = parallelGrids.findIndex((g) => g.id === deletedGridId)
+    const remaining = parallelGrids.filter((g) => g.id !== deletedGridId)
+    if (remaining.length === 0) {
+      navigateUpAfterAction()
+      return
+    }
+    const newIndex = Math.max(0, oldIndex - 1)
+    const targetGrid = remaining[newIndex]
+    setParallelGrids(remaining)
+    setParallelIndex(newIndex)
+    setCurrentGrid(targetGrid.id)
+    // breadcrumb 末尾が削除された grid を指していたら、新 grid id に差し替える
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (last && last.gridId === deletedGridId) {
+      updateBreadcrumbItem(last.gridId, { gridId: targetGrid.id })
+    }
+  }, [parallelGrids, breadcrumb, navigateUpAfterAction, setCurrentGrid, updateBreadcrumbItem])
+
+  /** primary root の中心セルか判定 (mandalart.root_cell_id と一致するか)。
+   *  該当する場合 shred / move はマンダラート全体の削除を意味する。
+   *  並列ルート (独立 center) は別 cell id なので false。 */
+  const isPrimaryRootCell = useCallback(async (cellId: string): Promise<boolean> => {
+    try {
+      const m = await getMandalart(mandalartId)
+      return m?.root_cell_id === cellId
+    } catch {
+      return false
+    }
+  }, [mandalartId])
+
+  const handleActionDrop = useCallback(async (action: ActionDropType, cellId: string) => {
+    // ロック中は shred / move (mutation 系) を block。copy / export (読み取り) は通す (migration 011)。
+    // ただし上層の useDragAndDrop でも isLocked=true なら drop event 自体が来ないので、
+    // ここは defensive (テストや将来の経路追加に備える)。
+    if (isLocked && (action === 'shred' || action === 'move')) return
+    const cell = dndCells.find((c) => c.id === cellId)
+    const isCenter = cell?.position === CENTER_POSITION
+    const targetText = cell?.text ?? ''
+    // 並列グリッドの中心セル判定: cell が自グリッド (= 現在表示中) に属しかつ中心。
+    // root primary も同条件にマッチするが、それは別途 isPrimaryRoot で先に分岐するので問題ない。
+    const isSelfCenteredInCurrentGrid = !!(isCenter && cell && gridData && cell.grid_id === gridData.id)
+    switch (action) {
+      case 'shred': {
+        // 配下サブグリッド数を概算 (確認 dialog の文言ヒント)
+        const [children, isPrimaryRoot] = await Promise.all([
+          getChildGrids(cellId).catch(() => []),
+          isCenter ? isPrimaryRootCell(cellId) : Promise.resolve(false),
+        ])
+        setShredConfirm({
+          cellId,
+          isCenter: !!isCenter,
+          isPrimaryRoot,
+          isSelfCenteredInCurrentGrid,
+          gridIdForSelfCenter: gridData?.id,
+          targetText,
+          childrenCount: children.length,
+        })
+        return
+      }
+      case 'move': {
+        try {
+          const isPrimaryRoot = isCenter ? await isPrimaryRootCell(cellId) : false
+          if (isPrimaryRoot) {
+            // primary root center: snapshot をストックに残してマンダラート全体を完全削除。
+            // 視覚的に「ホーム (= dashboard) へ吸い込まれる」演出を入れてから navigate
+            await addToStock(cellId)
+            setStockReloadKey((k) => k + 1)
+            await permanentDeleteMandalart(mandalartId)
+            await runConvergeAnim('home')
+            setToast({ message: 'ストックへ移動し、マンダラートを削除しました', type: 'success' })
+            navigate('/dashboard')
+          } else if (isSelfCenteredInCurrentGrid && gridData) {
+            // 並列 (root or drilled): snapshot 保存後に並列 grid 自体を完全削除
+            // (shredCellSubtree では並列 grid 本体は消えないので明示的に permanentDeleteGrid)
+            const deletedGridId = gridData.id
+            // セル → ストックエントリ収束アニメの source 値 (cellEl が unmount される前に計測)
+            const source = captureCellSource(cellId)
+            const stockItem = await addToStock(cellId)
+            setStockReloadKey((k) => k + 1)
+            if (source) {
+              useConvergeStore.getState().setConverge(
+                'stock', stockItem.id, source.rect, source.centerCell,
+              )
+            }
+            await permanentDeleteGrid(deletedGridId)
+            setToast({ message: 'ストックへ移動し、並列グリッドを削除しました', type: 'success' })
+            navigateAfterParallelDeleted(deletedGridId)
+          } else {
+            // X=C primary drilled center または周辺セル: 通常の moveCellToStock
+            const source = captureCellSource(cellId)
+            const stockItem = await moveCellToStock(cellId)
+            setStockReloadKey((k) => k + 1)
+            if (source) {
+              useConvergeStore.getState().setConverge(
+                'stock', stockItem.id, source.rect, source.centerCell,
+              )
+            }
+            setToast({ message: 'ストックに移動しました', type: 'success' })
+            if (isCenter) navigateUpAfterAction()
+            else reloadAll()
+          }
+        } catch (e) {
+          setToast({ message: `移動失敗: ${(e as Error).message}`, type: 'error' })
+        }
+        return
+      }
+      case 'copy': {
+        // セル → ストックエントリ収束アニメ。元セルは変化しないが、convergence は target = 新規 entry
+        const source = captureCellSource(cellId)
+        const stockItem = await handleCopyAction(cellId)
+        if (source) {
+          useConvergeStore.getState().setConverge(
+            'stock', stockItem.id, source.rect, source.centerCell,
+          )
+        }
+        return
+      }
+      case 'export': {
+        setExportPicker({ cellId, targetText, isCenter: !!isCenter, gridIdForCenter: gridData?.id })
+        return
+      }
+    }
+  }, [dndCells, gridData, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, handleCopyAction, isPrimaryRootCell, mandalartId, navigate, runConvergeAnim, captureCellSource, isLocked])
+
+  const handleShredConfirm = useCallback(async () => {
+    if (!shredConfirm) return
+    const { cellId, isCenter, isPrimaryRoot, isSelfCenteredInCurrentGrid, gridIdForSelfCenter } = shredConfirm
+    try {
+      if (isPrimaryRoot) {
+        // primary root center 削除 → マンダラート全体を完全削除 (ゴミ箱に入れない)。
+        // ホーム (= dashboard) へ吸い込まれる演出を入れてから navigate
+        await permanentDeleteMandalart(mandalartId)
+        await runConvergeAnim('home')
+        setToast({ message: 'マンダラートを削除しました', type: 'success' })
+        navigate('/dashboard')
+      } else if (isSelfCenteredInCurrentGrid && gridIdForSelfCenter) {
+        // 並列 (root or drilled): 並列 grid 自体を完全削除し、左隣の並列に切替
+        await permanentDeleteGrid(gridIdForSelfCenter)
+        setToast({ message: '並列グリッドを削除しました', type: 'success' })
+        navigateAfterParallelDeleted(gridIdForSelfCenter)
+      } else {
+        await shredCellSubtree(cellId)
+        setToast({ message: '完全に削除しました', type: 'success' })
+        if (isCenter) navigateUpAfterAction()
+        else reloadAll()
+      }
+    } catch (e) {
+      setToast({ message: `削除失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setShredConfirm(null)
+    }
+  }, [shredConfirm, navigateUpAfterAction, navigateAfterParallelDeleted, reloadAll, mandalartId, navigate, runConvergeAnim])
+
+  const handleExportPick = useCallback(async (format: ExportFormat) => {
+    if (!exportPicker) return
+    const { cellId, targetText, isCenter, gridIdForCenter } = exportPicker
+    setExportPicker(null)
+    try {
+      // ファイル名のベース: cell.text を sanitize (Tauri / OS で問題になる文字を _ に置換)
+      const baseName = (targetText || 'cell').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) || 'cell'
+
+      // エクスポート対象 grid の決定:
+      //  - 中心セル: 現在表示中の grid 自体を書き出す (root primary なら mandalart 全体、
+      //    並列 root / 並列 drilled / X=C primary drilled でもユーザーが見ている grid が対象)
+      //  - 周辺セル: parent_cell_id = cellId の primary drilled grid を書き出す
+      let targetGridId: string | undefined
+      if (isCenter) {
+        targetGridId = gridIdForCenter
+      } else {
+        const childGrids = await getChildGrids(cellId)
+        targetGridId = childGrids[0]?.id
+      }
+      if (!targetGridId) {
+        setToast({ message: 'エクスポート対象のグリッドが見つかりません', type: 'info' })
+        return
+      }
+      let filename: string
+      if (format === 'json') {
+        const snap = await exportToJSON(targetGridId)
+        filename = await downloadJSON(snap, baseName)
+      } else if (format === 'markdown') {
+        const md = await exportToMarkdown(targetGridId)
+        filename = await downloadText(md, 'md', baseName)
+      } else {
+        const txt = await exportToIndentText(targetGridId)
+        filename = await downloadText(txt, 'txt', baseName)
+      }
+      setToast({ message: `保存しました: ${filename}`, type: 'success' })
+    } catch (e) {
+      setToast({ message: `エクスポート失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }, [exportPicker])
+
+  const handleDndCellsUpdated = useCallback((updated: Cell[]) => {
+    // D&D 成功直後に DB から取り直した各セルを React state に即時反映する。
+    // reloadAll (全体再フェッチ) でも UI が追従しないケースがあったため、target 周辺だけ
+    // refreshCell で確実に更新する補助経路。refreshCell は gridData.cells 中の該当行だけ
+    // 差し替えるので、subGrids / childCounts は従来どおり gridData 変更の useEffect で再計算される。
+    for (const c of updated) refreshCell(c)
+  }, [refreshCell])
+
+  const {
+    dragSourceId, dragOverId, hoveredAction, isDragging,
+    handleDragStart, handleStockItemDragStart, handleDragEnd,
+    cellOrSlotDropProps, getActionDropProps,
+  } = useDragAndDrop(
+    dndCells,
+    reloadAll,
+    handleStockPasteDrop,
+    useCallback((op: DndUndoable) => {
+      pushUndo({
+        description: op.description,
+        undo: async () => { await op.undo(); reloadAll() },
+        redo: async () => { await op.redo(); reloadAll() },
+      })
+    }, [pushUndo, reloadAll]),
+    handleDndCellsUpdated,
+    handleStockReplaceDrop,
+    handleActionDrop,
+    isLocked,  // ロック中は drag/drop 全 path を block (migration 011)
+  )
+
+  // ファイル drop 等で最新の dndCells を []-deps クロージャ越しに参照するための ref
+  const dndCellsRef = useRef<Cell[]>(dndCells)
+  dndCellsRef.current = dndCells
+
+  // デスクトップからのファイル drop (HTML5 dataTransfer.files、`dragDropEnabled: false` 前提)。
+  // 画像ファイルを受け付け、ドロップ位置のセルに保存 + image_path を更新する。
+  // 通常の cell-to-cell / stock-to-cell drag (mandalart 内 source) は dataTransfer.types に
+  // `application/x-mandalart-drag` が入っているので、それは無視して `Files` 入りのときだけ処理する。
+  useEffect(() => {
+    function isFileDrag(e: DragEvent): boolean {
+      const types = e.dataTransfer?.types
+      if (!types) return false
+      // `Files` MIME がある = ブラウザ外からの file drag (mandalart 内 source は含まない)
+      return Array.from(types).includes('Files')
+    }
+
+    function onWindowDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    }
+    async function onWindowDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      const imageFile = files.find(isImageFile)
+      if (!imageFile) return
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      const cellEl = el?.closest('[data-cell-id]') as HTMLElement | null
+      const cellId = cellEl?.dataset.cellId
+      if (!cellId) return
+      const cell = dndCellsRef.current.find((c) => c.id === cellId)
+      if (!cell) return
+      try {
+        const newPath = await uploadCellImage(userId, '', cellId, imageFile)
+        await updateCellLocal(cellId, { image_path: newPath })
+        reloadAll()
+        setToast({ message: '画像を追加しました', type: 'success' })
+      } catch (err) {
+        console.error('image drop failed:', err)
+        setToast({ message: `画像の追加に失敗: ${(err as Error).message}`, type: 'error' })
+      }
+    }
+    window.addEventListener('dragover', onWindowDragOver)
+    window.addEventListener('drop', onWindowDrop)
+    return () => {
+      window.removeEventListener('dragover', onWindowDragOver)
+      window.removeEventListener('drop', onWindowDrop)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ダブルクリック: ドリル / 親グリッドへ戻る / ホームへ
+  async function handleCellDrill(cell: Cell) {
+    // インライン編集中なら抜けてから処理
+    setInlineEditingCellId(null)
+
+    // 9×9 表示で周辺サブブロックの cell (= cell.grid_id が現在表示 grid と異なる) をクリック。
+    // この cell は親サブグリッド S の周辺セルで、ユーザーの意図は
+    // "clicked cell を中心とした更に深いサブグリッド D にフォーカスする" (= 2 段 drill-down)。
+    //
+    // breadcrumb は root → S → D の 2 段をまとめて push する。
+    //
+    // 例外: cell.id が現在 grid の center_cell_id に一致する場合は "自グリッドの中心" なので
+    // この分岐はスキップして下の drill-up / home 分岐へ流す。
+    if (gridData && cell.grid_id !== gridData.id && cell.id !== gridData.center_cell_id) {
+      const subGrid = await getGrid(cell.grid_id)
+      if (!subGrid) return
+      const parentCellId = subGrid.center_cell_id
+      const parentCell = gridData.cells.find((c) => c.id === parentCellId)
+      if (!parentCell) return
+
+      // 空 cell は drill できない (= 何もしない、インライン編集に任せる)
+      if (isCellEmpty(cell)) return
+
+      // 深いサブグリッド D を取得 or 作成
+      const deeperChildren = await getChildGrids(cell.id)
+      const deeperGrid =
+        deeperChildren.length > 0
+          ? await getGrid(deeperChildren[0].id)
+          : await getGrid(
+              (await createGrid({ mandalartId, parentCellId: cell.id, centerCellId: cell.id, sortOrder: 0 })).id,
+            )
+      const deeperSiblings =
+        deeperChildren.length > 0 ? deeperChildren : await getChildGrids(cell.id)
+      const deeperSiblingIdx = deeperSiblings.findIndex((g) => g.id === deeperGrid.id)
+
+      // アニメ: 9×9 なら sub-block の外側位置 (= parentCell.position) → 新中央 (4) へ orbit。
+      // cell.position は sub-block 内の内側位置 (0-8) であり 9×9 layout 位置ではないので使えない。
+      //
+      // 順序: setOrbit9 → state 更新 (setCurrentGrid / pushBreadcrumb 等) → await → 明示 clear。
+      // setCurrentGrid を await 前に出すことで、animation 中に gridData fetch が並行して走り
+      // memo / breadcrumb がアニメ開始と同時に target を指すようになる。
+      let pendingClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
+      if (viewMode === '9x9') {
+        const [targetSubGrids, childCountsByCellId] = await Promise.all([
+          fetchSubGridsFor(deeperGrid.cells),
+          fetchChildCountsFor(deeperGrid.cells),
+        ])
+        setOrbit9({
+          targetRootCells: deeperGrid.cells,
+          targetSubGrids,
+          targetGridId: deeperGrid.id,
+          childCountsByCellId,
+          movingToPosition: 4,
+          movingFromPosition: parentCell.position,
+          direction: 'drill-down',
+        })
+        pendingClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
+      }
+
+      setCurrentGrid(deeperGrid.id)
+      setParallelGrids(deeperSiblings.length > 0 ? deeperSiblings : [deeperGrid])
+      setParallelIndex(Math.max(0, deeperSiblingIdx))
+      // root → S → D の 2 段分を breadcrumb に push する
+      pushBreadcrumb({
+        gridId: subGrid.id,
+        cellId: parentCell.id,
+        label: parentCell.text,
+        imagePath: parentCell.image_path,
+        cells: gridData.cells,
+        highlightPosition: parentCell.position,
+      })
+      pushBreadcrumb({
+        gridId: deeperGrid.id,
+        cellId: cell.id,
+        label: cell.text,
+        imagePath: cell.image_path,
+        cells: subGrid.cells,
+        highlightPosition: cell.position,
+      })
+
+      if (pendingClear9) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingClear9.childCounts)
+        setSubGrids(pendingClear9.subGrids)
+        setOrbit9(null)
+      }
+      return
+    }
+
+    // 中央セル (= 現在 grid の center_cell_id が指す cell) の特別処理。
+    // 9×9 の周辺サブブロックの中央セルは UI 上 position=4 で描画されるが、
+    // X=C 統一モデルでは "親グリッドの周辺 cell" なので id 比較で除外する必要がある。
+    // (position 比較だけだと 9×9 の周辺サブグリッド中心クリックが誤判定される)
+    if (gridData && cell.id === gridData.center_cell_id) {
+      if (breadcrumb.length <= 1) {
+        // ルートグリッドの中心セル（入力あり）→ ホームへ
+        if (!isCellEmpty(cell)) {
+          handleNavigateHome()
+        }
+        // 空ならドリル先がないので何もしない（編集はインラインで行う）
+      } else {
+        // サブグリッドの中心セル → 親グリッドに戻る
+        const parent = breadcrumb[breadcrumb.length - 2]
+        const currentEntry = breadcrumb[breadcrumb.length - 1]
+        if (parent) {
+          // parent.cellId は「親グリッドをさらに掘るために使われたセル (= 祖父階層のセル)」
+          // なので、ここで欲しい「親グリッド内のドリル元セル」ではない。
+          // 現在地 breadcrumb エントリの cellId が「現在 grid を生んだ親 grid 内のセル」。
+          const drillFromCellId = currentEntry?.cellId ?? null
+          const siblings = parent.cellId
+            ? await getChildGrids(parent.cellId)
+            : await getRootGrids(mandalartId)
+          const siblingIdx = siblings.findIndex((g) => g.id === parent.gridId)
+          // 順序: setOrbit → state 更新 → await → 明示 clear
+          let pendingUpClear3: Map<string, number> | null = null
+          let pendingUpClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
+          if (viewMode === '3x3') {
+            // 移動セル = 親グリッド内の「ドリル元セル」(= 今の中心が対応しているセル)
+            const parentGridData = await getGrid(parent.gridId)
+            const movingCell = drillFromCellId
+              ? parentGridData.cells.find((c) => c.id === drillFromCellId)
+              : null
+            if (movingCell) {
+              const childCountsByCellId = await fetchChildCountsFor(parentGridData.cells)
+              setOrbit({
+                targetCells: parentGridData.cells,
+                targetGridId: parent.gridId,
+                childCountsByCellId,
+                movingCellId: movingCell.id,
+                movingFromPosition: 4, // 現在の中心から親内の対応位置へ移動
+                direction: 'drill-up',
+              })
+              pendingUpClear3 = childCountsByCellId
+            }
+          } else if (viewMode === '9x9') {
+            // 9×9 ブロック単位のドリルアップ: 現在の中央ブロック (= 現在 grid) が
+            // 親内のドリル元位置 (p) に向かって動く。target は親グリッド + その子グリッド群
+            const parentGridData = await getGrid(parent.gridId)
+            const movingParentCell = drillFromCellId
+              ? parentGridData.cells.find((c) => c.id === drillFromCellId)
+              : null
+            if (movingParentCell) {
+              const [targetSubGrids, childCountsByCellId] = await Promise.all([
+                fetchSubGridsFor(parentGridData.cells),
+                fetchChildCountsFor(parentGridData.cells),
+              ])
+              setOrbit9({
+                targetRootCells: parentGridData.cells,
+                targetSubGrids,
+                targetGridId: parent.gridId,
+                childCountsByCellId,
+                movingToPosition: movingParentCell.position, // 親内のドリル元位置へ
+                movingFromPosition: 4, // 現中央ブロックから出発
+                direction: 'drill-up',
+              })
+              pendingUpClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
+            }
+          }
+
+          // drill-up 経路: 離れる grid (= 現在の gridData) が空なら auto-cleanup する。
+          // これを入れないと「drill → 空のまま中心クリックで戻る」を繰り返すたびに
+          // 空 grid が DB に残り、積み上がる (breadcrumb / parallel-nav 経路では既に
+          // cleanupGridIfEmpty が呼ばれていたが、drill-up 経路が抜けていた)。
+          const oldGridId = gridData.id
+          setCurrentGrid(parent.gridId)
+          setParallelGrids(siblings.length > 0 ? siblings : [])
+          setParallelIndex(siblingIdx >= 0 ? siblingIdx : 0)
+          popBreadcrumbTo(parent.gridId)
+          await cleanupGridIfEmpty(oldGridId)
+
+          if (pendingUpClear3) {
+            await new Promise((r) =>
+              setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
+            )
+            if (!isMountedRef.current) return
+            setChildCounts(pendingUpClear3)
+            setOrbit(null)
+          } else if (pendingUpClear9) {
+            await new Promise((r) =>
+              setTimeout(r, ORBIT_STAGGER_UP_MS * 8 + ORBIT_FADE_UP_MS),
+            )
+            if (!isMountedRef.current) return
+            setChildCounts(pendingUpClear9.childCounts)
+            setSubGrids(pendingUpClear9.subGrids)
+            setOrbit9(null)
+          }
+        }
+      }
+      return
+    }
+
+    const children = await getChildGrids(cell.id)
+    if (children.length > 0) {
+      // 掘り下げ
+      const firstChild = await getGrid(children[0].id)
+      const currentCells = gridData?.cells ?? []
+
+      // 順序: setOrbit → state 更新 → await → 明示 clear
+      let pendingDownClear3: Map<string, number> | null = null
+      let pendingDownClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
+      if (viewMode === '3x3') {
+        const targetCenter = firstChild.cells.find((c) => c.position === CENTER_POSITION)
+        const childCountsByCellId = await fetchChildCountsFor(firstChild.cells)
+        setOrbit({
+          targetCells: firstChild.cells,
+          targetGridId: firstChild.id,
+          childCountsByCellId,
+          movingCellId: targetCenter?.id ?? null,
+          movingFromPosition: cell.position, // クリックした周辺セルの位置から中心へ
+          direction: 'drill-down',
+        })
+        pendingDownClear3 = childCountsByCellId
+      } else if (viewMode === '9x9') {
+        // 9×9 中央ブロック内のセル drill-down: 9×9 layout 上の outer 位置 → 新中央 (4) へ。
+        // cell.position は merged view の値で、X=C 合流セル (sub-block center) では 4 に
+        // 上書きされている。そのまま使うと from === to になり slide animation が不発。
+        // gridData.cells 内の DB 上 position が 9×9 layout での sub-block 外側位置なので
+        // そちらを参照する。
+        const outerPos =
+          gridData?.cells.find((c) => c.id === cell.id)?.position ?? cell.position
+        const [targetSubGrids, childCountsByCellId] = await Promise.all([
+          fetchSubGridsFor(firstChild.cells),
+          fetchChildCountsFor(firstChild.cells),
+        ])
+        setOrbit9({
+          targetRootCells: firstChild.cells,
+          targetSubGrids,
+          targetGridId: firstChild.id,
+          childCountsByCellId,
+          movingToPosition: 4,
+          movingFromPosition: outerPos,
+          direction: 'drill-down',
+        })
+        pendingDownClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
+      }
+
+      setCurrentGrid(firstChild.id)
+      // 並列グリッドも含めた全兄弟を state に載せないと、← → で切り替えたり
+      // "+" で末尾に追加したりしたときに既存の並列が見えなくなってしまう。
+      setParallelGrids(children)
+      setParallelIndex(0)
+      pushBreadcrumb({
+        gridId: firstChild.id,
+        cellId: cell.id,
+        label: cell.text,
+        imagePath: cell.image_path,
+        cells: currentCells,
+        highlightPosition: cell.position,
+      })
+
+      if (pendingDownClear3) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingDownClear3)
+        setOrbit(null)
+      } else if (pendingDownClear9) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingDownClear9.childCounts)
+        setSubGrids(pendingDownClear9.subGrids)
+        setOrbit9(null)
+      }
+    } else if (!isCellEmpty(cell)) {
+      // 入力ありだが子グリッドなし → 新しいサブグリッドを作成して掘り下げ。
+      // ロック中は新規 grid 作成を行わない (既存サブグリッドへの drill-down は上の children.length>0 経路で許可)。
+      if (isLocked) return
+      // 新モデル: center_cell_id = cell.id (親の周辺セルがそのまま子グリッドの中心になる)
+      // 中心の text/image/color/done は親セルそのものなので別途コピー不要
+      const newGrid = await createGrid({ mandalartId, parentCellId: cell.id, centerCellId: cell.id, sortOrder: 0 })
+
+      // newGrid.cells は 9 要素で提供される (中心は親 cell、周辺 8 は新規 empty)
+      const populatedCells = newGrid.cells
+
+      // 順序: setOrbit → state 更新 → await → 明示 clear
+      let pendingNewClear3: Map<string, number> | null = null
+      let pendingNewClear9: { childCounts: Map<string, number>; subGrids: Map<string, SubGridData> } | null = null
+      if (viewMode === '3x3') {
+        const targetCenter = populatedCells.find((c) => c.position === CENTER_POSITION)
+        // 新規作成したばかりのサブグリッドなので子グリッド 0 件で確定
+        const childCountsByCellId = new Map<string, number>(
+          populatedCells.map((c) => [c.id, 0]),
+        )
+        setOrbit({
+          targetCells: populatedCells,
+          targetGridId: newGrid.id,
+          childCountsByCellId,
+          movingCellId: targetCenter?.id ?? null,
+          movingFromPosition: cell.position,
+          direction: 'drill-down',
+        })
+        pendingNewClear3 = childCountsByCellId
+      } else if (viewMode === '9x9') {
+        // 9×9 で新規サブグリッドを掘り下げ。sub-grid が無い新規作成直後なので
+        // targetSubGrids / childCountsByCellId はすべて空で確定。
+        // movingFromPosition は 9×9 outer 位置 (gridData.cells の DB position) を使う。
+        // merged view の cell.position は 4 に上書きされ得るので直接使わない。
+        const outerPos =
+          gridData?.cells.find((c) => c.id === cell.id)?.position ?? cell.position
+        const childCountsByCellId = new Map<string, number>(
+          populatedCells.map((c) => [c.id, 0]),
+        )
+        const targetSubGrids = new Map<string, SubGridData>()
+        setOrbit9({
+          targetRootCells: populatedCells,
+          targetSubGrids,
+          targetGridId: newGrid.id,
+          childCountsByCellId,
+          movingToPosition: 4,
+          movingFromPosition: outerPos,
+          direction: 'drill-down',
+        })
+        pendingNewClear9 = { childCounts: childCountsByCellId, subGrids: targetSubGrids }
+      }
+
+      setCurrentGrid(newGrid.id)
+      setParallelGrids([newGrid])
+      setParallelIndex(0)
+
+      const currentCells = gridData?.cells ?? []
+      pushBreadcrumb({
+        gridId: newGrid.id,
+        cellId: cell.id,
+        label: cell.text,
+        imagePath: cell.image_path,
+        cells: currentCells,
+        highlightPosition: cell.position,
+      })
+
+      if (pendingNewClear3) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingNewClear3)
+        setOrbit(null)
+      } else if (pendingNewClear9) {
+        await new Promise((r) =>
+          setTimeout(r, ORBIT_STAGGER_DOWN_MS * 7 + ORBIT_FADE_DOWN_MS),
+        )
+        if (!isMountedRef.current) return
+        setChildCounts(pendingNewClear9.childCounts)
+        setSubGrids(pendingNewClear9.subGrids)
+        setOrbit9(null)
+      }
+    }
+    // 空セルでドリルしようとしても何もしない (編集はインラインで)
+  }
+
+  // インライン編集の開始 (シングルクリック)
+  function handleCellStartInlineEdit(cell: Cell) {
+    if (isLocked) return  // ロック中は編集を起動しない (migration 011)
+    setInlineEditingCellId(cell.id)
+  }
+
+  // インライン編集の確定 (blur / Esc / Tab / Cmd+Enter)
+  async function handleCellCommitInlineEdit(cell: Cell, text: string) {
+    if (isLocked) {
+      // ロック中: 万が一 inline edit が開いてしまっていても commit は通さない (defensive)
+      setInlineEditingCellId(null)
+      setPendingEdit(null)
+      return
+    }
+    setInlineEditingCellId(null)
+    // pending edit (空 slot からの新規) を判定
+    const isPending = cell.id.startsWith('pending:')
+    if (isPending) {
+      setPendingEdit(null)
+      // テキストが空なら何もせず終了 (無駄な空 cell を作らない)
+      if (text === '') return
+      // 中心セルが空のときは周辺の編集を許さない (validation)
+      if (cell.position !== CENTER_POSITION) {
+        const center = getCenterCell(gridData?.cells ?? [])
+        if (!center || isCellEmpty(center)) {
+          setToast({ message: '中心セルが空のときは周辺セルを編集できません', type: 'error' })
+          return
+        }
+      }
+      const newCell = await upsertCellAt(cell.grid_id, cell.position, {
+        text,
+        image_path: null,
+        color: null,
+      })
+      refreshCell(newCell)
+      // 新規入力も undo 記録 (before=空コンテンツ)。⌘Z で直前に打ったセルを 1 つずつ線形に戻す。
+      pushCellUndo(newCell.id,
+        { text: '', image_path: null, color: null },
+        { text, image_path: null, color: null },
+      )
+      return
+    }
+    if (text === cell.text) return
+    await handleSaveCell(cell.id, {
+      text,
+      image_path: cell.image_path,
+      color: cell.color,
+    })
+  }
+
+  // Tab キーでの次のセルへの移動
+  // currentText: 直前にコミットしたテキスト（DB 反映前の状態を見る必要があるため引数で受け取る）
+  function handleCellInlineNavigate(currentPosition: number, currentText: string, reverse: boolean) {
+    if (isLocked) return  // ロック中は Tab 移動も無効 (新規 slot edit を起こさない)
+    const cells = gridData?.cells ?? []
+    // gridData は更新前なので、今 commit したテキストで上書きしたバーチャル配列で判定する
+    // currentPosition の cell が無い (空 slot からの pending edit commit) ケースは push する
+    const hasCurrent = cells.some((c) => c.position === currentPosition)
+    const updatedCells = hasCurrent
+      ? cells.map((c) => (c.position === currentPosition ? { ...c, text: currentText } : c))
+      : [...cells, {
+          id: `_temp_${currentPosition}`, grid_id: gridData?.id ?? '', position: currentPosition,
+          text: currentText, image_path: null, color: null, done: false,
+          created_at: '', updated_at: '',
+        } as Cell]
+    const center = getCenterCell(updatedCells)
+    const centerEmpty = !center || isCellEmpty(center)
+    const nextPos = nextTabPosition(currentPosition, reverse)
+    // 中心が空のときは周辺セル無効なので留まる
+    if (centerEmpty && nextPos !== 4) {
+      const centerCell = updatedCells.find((c) => c.position === CENTER_POSITION)
+      if (centerCell && !centerCell.id.startsWith('_temp_')) {
+        setInlineEditingCellId(centerCell.id)
+      } else if (gridData) {
+        handleStartEmptySlotEdit(gridData.id, CENTER_POSITION)
+      }
+      return
+    }
+    const next = updatedCells.find((c) => c.position === nextPos)
+    if (next && !next.id.startsWith('_temp_')) {
+      setInlineEditingCellId(next.id)
+    } else if (gridData) {
+      // 次の slot に cell 行が無い (新設計の空 slot) → pending edit を開始
+      handleStartEmptySlotEdit(gridData.id, nextPos)
+    }
+  }
+
+  async function handleSaveCell(cellId: string, params: { text: string; image_path: string | null; color: string | null }) {
+    if (isLocked) return  // ロック中は cell 保存を block (拡大エディタ経由・色/画像も含む)
+    // pending edit (空 slot からの新規) で expand editor (色 / 画像) が呼ばれたケース。
+    // synthetic cell.id を持っているので gridData には居ない。upsertCellAt で先に INSERT する。
+    if (cellId.startsWith('pending:') && pendingEdit) {
+      const newCell = await upsertCellAt(pendingEdit.gridId, pendingEdit.position, params)
+      refreshCell(newCell)
+      setPendingEdit(null)
+      setInlineEditingCellId(newCell.id)
+      // 新規入力も undo 記録 (before=空コンテンツ)。inline 経路と挙動を揃える。
+      pushCellUndo(newCell.id, { text: '', image_path: null, color: null }, params)
+      return
+    }
+    const cell = gridData?.cells.find((c) => c.id === cellId)
+    if (!cell) return
+
+    // バリデーション: 周辺セルに入力があれば中心をクリアできない
+    if (cell.position === CENTER_POSITION && isCellEmpty({ text: params.text, image_path: params.image_path })) {
+      if (hasPeripheralContent(gridData?.cells ?? [])) {
+        setToast({ message: '周辺セルに入力がある場合、中心セルを空にできません', type: 'error' })
+        return
+      }
+    }
+
+    // バリデーション: サブグリッドに入力のある周辺セルは空にできない
+    // (周辺セル X に子グリッドがあり、そこに意味ある周辺入力がある場合、X は
+    // そのサブグリッドの「中心」と等価。X を空にすると配下のテーマが孤立する)
+    if (cell.position !== CENTER_POSITION && isCellEmpty({ text: params.text, image_path: params.image_path })) {
+      const meaningfulSubCount = childCounts.get(cell.id) ?? 0
+      if (meaningfulSubCount > 0) {
+        setToast({ message: 'サブグリッドに入力がある場合、このセルを空にできません', type: 'error' })
+        return
+      }
+    }
+
+    const previous = { text: cell.text, image_path: cell.image_path, color: cell.color }
+    // 空 → 非空 transition の場合、updateCell が propagateUndoneUp を走らせて
+    // 祖先の done=1 を解除する。useGrid.updateCellLocal は編集したセル 1 つだけ
+    // React state を更新するので、伝搬先 (同 grid の center + 祖先 grids) の
+    // done 変更が UI に反映されない。reloadAll() で取り直す。
+    const wasEmpty = isCellEmpty(cell)
+    const willBeEmpty = isCellEmpty({ text: params.text, image_path: params.image_path })
+    const emptyToNonEmpty = wasEmpty && !willBeEmpty
+
+    await updateCellLocal(cellId, params)
+
+    if (emptyToNonEmpty) {
+      reloadAll()
+    }
+
+    pushCellUndo(cellId, previous, params)
+  }
+
+  /**
+   * 指定グリッドが「空」なら削除する。判定基準は grid 種別で異なる:
+   *
+   * - **self-centered** (root grid / 独立並列グリッド、center cell が自グリッド所属):
+   *   中心セル **かつ** peripherals が全て空 → 削除。
+   *   独立並列は center cell 行を保持しているため、中心だけ見ていると peripherals に
+   *   内容があっても誤削除するバグがあった (migration 006 対応で修正)。
+   * - **非 self-centered** (X=C primary drilled / レガシー共有並列):
+   *   自グリッドの peripherals 8 個が全部空 → 削除。中心は親 X と共有なので
+   *   自グリッド側では消せない。
+   *   兄弟の有無に関わらず削除する (以前は「単独 drilled」は X 保持のため残していたが、
+   *   空グリッドの累積を招くだけで X 自体や UI には影響しないと判明したため廃止)。
+   *
+   * 加えて **`grid.memo` (サイドパネル記述) が非空なら、cells に関係なく保持する**。
+   * memo は cells と独立した内容で、中心セルだけ埋まっていなくても memo 単独で
+   * 「内容あり」とみなさないと drill-up / breadcrumb / 並列 / Home の各経路で
+   * grid レコードごと hard-delete されて memo が消える。判定本体は
+   * [`isGridContentEmpty`](src/lib/utils/grid.ts) (純関数) に委譲する。
+   *
+   * 判定は DB から再読み込みした merged cells で行う (state の部分更新で position
+   * override が崩れていても影響を受けないようにするため)。
+   */
+  async function cleanupGridIfEmpty(gridId: string): Promise<boolean> {
+    try {
+      const gridWithCells = await getGrid(gridId)
+      const centerCellId = gridWithCells.center_cell_id
+      const centerCell = gridWithCells.cells.find((c) => c.id === centerCellId)
+      const isSelfCentered = centerCell?.grid_id === gridWithCells.id
+
+      if (!isGridContentEmpty(gridWithCells, gridWithCells.cells, isSelfCentered)) {
+        return false
+      }
+      // 自動掃除は復元の意図がないので soft-delete ではなく local + cloud の hard-delete を使う
+      // (deleteGrid の soft-delete では cloud に deleted_at 付きゴミが永続的に残るため)
+      await permanentDeleteGrid(gridId)
+      return true
+    } catch (e) {
+      console.error('cleanup permanentDeleteGrid failed:', e)
+      return false
+    }
+  }
+
+  async function handleNavigateHome() {
+    if (!gridData) {
+      navigate('/dashboard')
+      return
+    }
+    // 唯一の root grid + 中心空 → マンダラート全体をハード削除する特殊パス。
+    // "self-centered な root" は center_cell_id が自グリッドに属する cell を指す。
+    // ユーザーが新規作成カード tap で開いて何も入力せず戻った場合に、ゴミ箱に積まずに
+    // 完全削除する (= "誤タップで作った空マンダラートはゴミ箱から復元するものではない"
+    // という UX 判断、iOS 版と挙動を揃える)。意図的な削除 (DashboardPage の delete アイコン
+    // 経由) は別経路 `deleteMandalart` でゴミ箱送りのままなので影響なし。
+    const center = gridData.cells.find((c) => c.position === CENTER_POSITION)
+    const centerEmpty = !center || isCellEmpty(center)
+    const isSoleRoot =
+      breadcrumb.length === 1 &&
+      parallelGrids.length === 1 &&
+      gridData.center_cell_id === center?.id
+    // 防御 (落とし穴 #24 / 同期データ損失防止): 「周辺入力あり → 中心非空」の不変則は *編集時* にしか
+    // enforce されず、pull (useVisibilityResync の保険同期) で中心が空表示になると破れ得る。その状態で
+    // hard delete すると、周辺に内容があるマンダラートを誤って全消ししてしまう (iOS 側 EditorView で
+    // 同型のデータ損失を確認・修正済)。中心が空でも周辺に内容があれば「空マンダラート」ではないので削除しない。
+    const willDelete = centerEmpty && isSoleRoot && !hasPeripheralContent(gridData.cells)
+    if (willDelete) {
+      await permanentDeleteMandalart(mandalartId)
+    } else {
+      // それ以外の "empty" は cleanupGridIfEmpty に判定を委譲
+      await cleanupGridIfEmpty(gridData.id)
+    }
+    // 削除されないケースは「中心セル → ダッシュボードカード」の収束アニメ用に
+    // 中心セルの矩形と表示内容を ConvergeOverlay 経由で伝達する。
+    // 削除されるケースは対象カードが無いので skip。
+    if (!willDelete && center) {
+      const centerEl = document.querySelector(`[data-cell-id="${center.id}"]`) as HTMLElement | null
+      if (centerEl) {
+        // 共通ユーティリティで rect / border / radius / inset / font を実測 (3×3 / 9×9 /
+        // checkbox / fontScale すべてに自動追従)。画像のみセルは text wrapper 不在で default fallback。
+        const m_ = captureCardLikeSource(centerEl, {
+          topInsetPx: 12,
+          sideInsetPx: 12,
+          fontPx: 28 * fontScale,
+        })
+        useConvergeStore.getState().setConverge(
+          'home',
+          mandalartId,
+          m_.rect,
+          {
+            text: center.text,
+            imagePath: center.image_path,
+            color: center.color,
+            fontPx: m_.fontPx,
+            topInsetPx: m_.topInsetPx,
+            sideInsetPx: m_.sideInsetPx,
+            borderPx: m_.borderPx,
+            radiusPx: m_.radiusPx,
+          },
+        )
+      }
+    }
+    // navigation state で mandalart id を渡す。Dashboard 側が `useLocation().state.fromMandalartId`
+    // から受取り、属する folder_id のタブを開く (削除済みなら Inbox にフォールバック)。
+    // convergeStore は morph アニメ用で lifecycle が短いため、folder 復帰用には使わない。
+    navigate('/dashboard', {
+      state: willDelete ? undefined : { fromMandalartId: mandalartId },
+    })
+  }
+
+  // パンくず項目クリックで階層を戻す際、現在地グリッドが空なら削除する
+  async function handleBreadcrumbNavigate(targetGridId: string) {
+    if (!gridData) {
+      popBreadcrumbTo(targetGridId)
+      return
+    }
+    const oldGridId = gridData.id
+
+    // 先に cleanup (DB 上のグリッド削除 + 必要なら親セルのクリア) を完了させてから
+    // popBreadcrumbTo を呼ぶ。
+    // 順序を逆にすると、popBreadcrumbTo で React が再レンダし useGrid が target grid
+    // を即座にフェッチしてしまい、cleanup による親セルクリアが反映される前のキャッシュで
+    // gridData が固定化される (= 画面上で変化が見えない) ため。
+    await cleanupGridIfEmpty(oldGridId)
+
+    // target 階層の並列兄弟を再取得して parallelGrids / parallelIndex を現在地に合わせる。
+    // これをやらないと、遷移元 (より下位) の parallelGrids が残ったまま target を表示
+    // してしまい、実在しない「＜」「＞」ボタンが出て、クリックすると別階層のグリッドに
+    // 飛んでしまう。
+    const targetEntry = breadcrumb.find((b) => b.gridId === targetGridId)
+    if (targetEntry) {
+      const siblings = targetEntry.cellId
+        ? await getChildGrids(targetEntry.cellId)
+        : await getRootGrids(mandalartId)
+      const idx = siblings.findIndex((g) => g.id === targetGridId)
+      setParallelGrids(siblings)
+      setParallelIndex(idx >= 0 ? idx : 0)
+    } else {
+      // 万一 target が breadcrumb 内に見つからない場合は安全側に倒してクリア
+      setParallelGrids([])
+      setParallelIndex(0)
+    }
+
+    popBreadcrumbTo(targetGridId)
+  }
+
+  // 並列ナビゲーション
+  async function handleParallelNav(dir: 'prev' | 'next') {
+    if (slide) return // アニメーション中は無視
+    const nextIdx = dir === 'prev' ? parallelIndex - 1 : parallelIndex + 1
+    if (nextIdx < 0 || nextIdx >= parallelGrids.length) return
+    const nextGridId = parallelGrids[nextIdx].id
+
+    // 切替先のセルを取得 (アニメーション中に描画するため)
+    const nextGridData = await getGrid(nextGridId)
+    const oldGridId = gridData?.id
+    const fromCells = gridData?.cells ?? []
+
+    // 状態更新 (breadcrumb 末尾 gridId / parallelIndex / currentGrid)
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (last) {
+      updateBreadcrumbItem(last.gridId, { gridId: nextGridId })
+    }
+    setParallelIndex(nextIdx)
+    setCurrentGrid(nextGridId)
+
+    // スライド描画を開始し、終了後に state クリア
+    setSlide({
+      fromCells,
+      toCells: nextGridData.cells,
+      direction: dir === 'next' ? 'forward' : 'backward',
+    })
+    await new Promise((r) => setTimeout(r, SLIDE_DURATION_MS))
+    setSlide(null)
+
+    // 旧グリッドの中心セルが空なら削除する
+    // (アニメーション終了後にまとめて片付けることで、スライド中の視覚には残っているが
+    //  データ的には存在しない、という整合を担保)
+    if (oldGridId) {
+      const deleted = await cleanupGridIfEmpty(oldGridId)
+      if (deleted) {
+        // parallelGrids から除去しつつ、現在地 (next) のインデックスを再計算する。
+        // 'next' 方向では old が next より前にあったので index が 1 減る。
+        // 'prev' 方向では old が next より後ろにあったので index は変わらない。
+        setParallelGrids((prev) => prev.filter((g) => g.id !== oldGridId))
+        setParallelIndex((prev) => (dir === 'next' ? Math.max(0, prev - 1) : prev))
+      }
+    }
+  }
+
+  async function handleAddParallel() {
+    if (slide) return
+    if (isLocked) return  // ロック中は並列追加 (新規 grid 作成) を block (migration 011)
+
+    // migration 006 以降: 並列グリッドは独立した center cell を持つ。
+    // parent_cell_id は現在 grid から継承し (root なら null、drilled なら drill 元 cell)、
+    // center は新 cell を空コンテンツで INSERT する (コピーしない)。
+    if (!gridData) return
+    const newGrid = await createGrid({
+      mandalartId,
+      parentCellId: gridData.parent_cell_id,
+      centerCellId: null,
+      sortOrder: parallelGrids.length,
+    })
+
+    // newGrid.cells は getGrid 経由で center merged な 9 要素を持つ
+    const toCells: Cell[] = newGrid.cells
+    const fromCells = gridData?.cells ?? []
+
+    // 並列追加直後はその新しいグリッドが currentGrid になるので、breadcrumb 末尾も追従させる
+    const last = breadcrumb[breadcrumb.length - 1]
+    if (last) {
+      updateBreadcrumbItem(last.gridId, { gridId: newGrid.id })
+    }
+    setParallelGrids((prev) => [...prev, newGrid])
+    setParallelIndex(parallelGrids.length)
+    setCurrentGrid(newGrid.id)
+
+    // スライドアニメーション (新グリッドが右から入ってきて元のグリッドが左へ)
+    setSlide({
+      fromCells,
+      toCells,
+      direction: 'forward',
+    })
+    await new Promise((r) => setTimeout(r, SLIDE_DURATION_MS))
+    setSlide(null)
+  }
+
+  // 兄弟セルナビゲーション (並列グリッドとは直交する別軸)
+  //
+  // 親グリッド G の周辺 8 セルを ORBIT_ORDER_PERIPHERAL (時計回り) で巡回し、隣の周辺セルの
+  // 子サブグリッドへ横移動する。並列グリッド (handleParallelNav) が「同一周辺セル配下の代替
+  // (parent_cell_id 同一)」を切替えるのに対し、こちらは「親 G の異なる周辺セル」を横断する。
+  // 深さは変わらないので breadcrumb は末尾エントリを差し替えるだけ (push しない)。
+  //
+  // 仕様 (確定): 中心以外の 8 セル全てを循環巡回し、子グリッド未作成の周辺セルは着地時に
+  // X=C モデルで作成する (空 position は cell 行も lazy 作成)。通過/離脱した空サブグリッドは
+  // 末尾で cleanupGridIfEmpty が回収する (並列ナビ / drill-up と同じ流儀)。
+  async function handleSiblingNav(dir: 'prev' | 'next') {
+    if (slide) return // アニメーション中は無視
+    if (viewMode !== '3x3') return // 3×3 限定 (9×9 は対象外)
+    if (breadcrumb.length < 2) return // ルートグリッド編集中は親がいない
+    if (!gridData) return
+
+    const lastEntry = breadcrumb[breadcrumb.length - 1]
+    const parentGridId = breadcrumb[breadcrumb.length - 2].gridId
+    const currentPos = lastEntry.highlightPosition
+    if (currentPos === null) return
+
+    const order = ORBIT_ORDER_PERIPHERAL
+    const startIdx = order.indexOf(currentPos)
+    if (startIdx < 0) return
+
+    // breadcrumb の cells は drill 時点のスナップショットで stale な可能性があるため
+    // 親グリッドを最新取得する (memory: denormalized field は信頼しない)。
+    const parentGrid = await getGrid(parentGridId)
+    const step = dir === 'next' ? 1 : order.length - 1
+
+    // 着地可能な次の周辺セルを探す。non-locked では直近の隣 (n=1) に必ず着地する
+    // (空でも materialize/作成する)。locked では新規作成できないので、既に子グリッドを
+    // 持つ周辺セルだけを巡回し、無ければ no-op になる。現在位置 (n=order.length) は除外。
+    let target: (Grid & { cells: Cell[] }) | null = null
+    let targetCell: Cell | null = null
+    let targetSiblings: Grid[] = []
+    for (let n = 1; n < order.length; n++) {
+      const pos = order[(startIdx + step * n) % order.length]
+      let q = parentGrid.cells.find((c) => c.position === pos) ?? null
+      if (!q) {
+        // 空 position: cell 行が無い。locked では作成不可なのでスキップ。
+        if (isLocked) continue
+        q = await upsertCellAt(parentGridId, pos, {})
+      }
+      const children = await getChildGrids(q.id)
+      if (children.length > 0) {
+        target = await getGrid(children[0].id)
+        targetSiblings = children
+        targetCell = q
+        break
+      }
+      if (!isLocked) {
+        const created = await createGrid({ mandalartId, parentCellId: q.id, centerCellId: q.id, sortOrder: 0 })
+        target = await getGrid(created.id)
+        targetSiblings = await getChildGrids(q.id)
+        targetCell = q
+        break
+      }
+      // locked かつ子グリッド無し → このセルには入れないので次の周辺セルへ
+    }
+    if (!target || !targetCell) return // 着地先なし (例: locked で子グリッドを持つ兄弟が皆無)
+
+    const oldGridId = gridData.id
+    if (oldGridId === target.id) return // 循環で自分自身に戻った場合は no-op
+
+    const fromCells = gridData.cells
+    const siblingIdx = targetSiblings.findIndex((g) => g.id === target!.id)
+
+    // breadcrumb 末尾エントリを差し替える (gridId / ドリル元 cell / ラベル / 強調位置)。
+    updateBreadcrumbItem(oldGridId, {
+      gridId: target.id,
+      cellId: targetCell.id,
+      label: targetCell.text,
+      imagePath: targetCell.image_path,
+      highlightPosition: targetCell.position,
+    })
+    setParallelGrids(targetSiblings.length > 0 ? targetSiblings : [target])
+    setParallelIndex(siblingIdx >= 0 ? siblingIdx : 0)
+    setCurrentGrid(target.id)
+
+    // スライド描画を開始し、終了後に state クリア
+    setSlide({
+      fromCells,
+      toCells: target.cells,
+      direction: dir === 'next' ? 'forward' : 'backward',
+    })
+    await new Promise((r) => setTimeout(r, SLIDE_DURATION_MS))
+    setSlide(null)
+
+    // 通過/離脱した旧グリッドが空 (memo も無し) なら hard-delete で回収する
+    await cleanupGridIfEmpty(oldGridId)
+  }
+
+  // 表示モード切替: 3×3 ↔ 9×9 をアニメーション付きで切替える
+  // - to-9x9: 現在の 3×3 を中央原点で scale(1)→scale(1/3) に縮小、同時に周辺 8 ブロックを
+  //   時計回り stagger で fade-in
+  // - to-3x3: 中央ブロック 9 セルを個別に 3×3 位置へ拡大 + 移動、周辺ブロックは fade-out
+  // viewMode 自体はアニメーション開始時に切替える (transition layer 内で表示を制御するので OK)。
+  async function handleViewModeSwitch(next: '3x3' | '9x9') {
+    if (next === viewMode) return
+    if (!gridData) {
+      setViewMode(next)
+      return
+    }
+    if (viewSwitch || slide || orbit || orbit9) return // 他アニメ中は多重起動しない
+
+    const [counts, subs] = await Promise.all([
+      fetchChildCountsFor(gridData.cells),
+      next === '9x9' ? fetchSubGridsFor(gridData.cells) : Promise.resolve(subGrids),
+    ])
+
+    if (next === '9x9') {
+      // 9×9 への切替: subGrids / childCounts を事前投入しておき、transition layer も
+      // 通常 render もすぐ正しい状態を見られるようにする
+      setSubGrids(subs)
+      setChildCounts(counts)
+      setViewSwitch({
+        direction: 'to-9x9',
+        rootCells: gridData.cells,
+        subGrids: subs,
+        childCountsByCellId: counts,
+      })
+      setViewMode('9x9')
+      await new Promise((r) => setTimeout(r, VIEW_SWITCH_TO_9_TOTAL_MS))
+      setViewSwitch(null)
+    } else {
+      setChildCounts(counts)
+      setViewSwitch({
+        direction: 'to-3x3',
+        rootCells: gridData.cells,
+        subGrids: subs,
+        childCountsByCellId: counts,
+      })
+      setViewMode('3x3')
+      await new Promise((r) => setTimeout(r, VIEW_SWITCH_TO_3_TOTAL_MS))
+      setViewSwitch(null)
+    }
+  }
+
+  // コンテキストメニュー
+  function handleContextMenu(e: React.MouseEvent, cell: Cell) {
+    setContextMenu({ x: e.clientX, y: e.clientY, kind: 'cell', cell })
+  }
+
+  // 空 slot (DB row 不在) 右クリック。
+  // 「中心セル空グリッドの周辺は disabled」「ロック中は不可」のガードは GridView3x3 内部
+  // の `isDisabled || isReadOnly` 判定 ([GridView3x3.tsx](./GridView3x3.tsx)) で先回り
+  // して preventDefault される。EditorLayout 側で再度 grid_id 一致で中心セルを引こうとすると、
+  // 子グリッド (X=C primary drilled、落とし穴 #10) では merge 済 center cell の grid_id が
+  // 親 grid の id のため見つからず誤って return してしまう。判定は呼出側 (= GridView3x3) に
+  // 一本化し、ここでは isLocked の保険のみ残す。
+  function handleContextMenuEmptySlot(e: React.MouseEvent, gridId: string, position: number) {
+    e.preventDefault()
+    if (isLocked) return
+    setContextMenu({ x: e.clientX, y: e.clientY, kind: 'slot', gridId, position })
+  }
+
+  async function handleContextAction(action: string) {
+    if (!contextMenu) return
+    const menu = contextMenu
+    setContextMenu(null)
+
+    if (action === 'clear-peripherals') {
+      // 中心セル限定。実行可否 (中心判定 / 周辺非空 / 非ロック) はメニュー表示条件で担保済みだが、
+      // ロック中は保険でここでも block する。実体クリアは確認ダイアログ確定後 (handleClearPeripheralsConfirm)。
+      if (isLocked) return
+      setClearPeripheralsConfirm(true)
+      return
+    }
+
+    if (action !== 'import') return
+    if (isLocked) return  // ロック中は import (cell 編集) を block
+
+    if (menu.kind === 'slot') {
+      // 空 slot は実 row を遅延作成してから import 経路に合流する
+      try {
+        const newCell = await upsertCellAt(menu.gridId, menu.position, {})
+        refreshCell(newCell)
+        setImportTarget({
+          cellId: newCell.id,
+          cellLabel: newCell.text || `セル ${newCell.position + 1}`,
+        })
+      } catch (err) {
+        setToast({ message: `操作失敗: ${(err as Error).message}`, type: 'error' })
+      }
+      return
+    }
+
+    const cell = menu.cell
+    // pending edit (空 slot をインライン編集中) の synthetic cell は DB に行が無く id が
+    // `pending:gridId:position` のため、そのまま importIntoCell に渡すと "Cell not found" になる。
+    // 右クリックで textarea が blur すると handleCellCommitInlineEdit が pendingEdit を null 化
+    // 済みなので、pendingEdit には依存せず synthetic cell 自身が保持する grid_id / position
+    // (cellsForRender で pendingEdit から設定済み) で upsertCellAt して実 row を作る。
+    if (cell.id.startsWith('pending:')) {
+      try {
+        const newCell = await upsertCellAt(cell.grid_id, cell.position, {})
+        refreshCell(newCell)
+        setPendingEdit(null)
+        setInlineEditingCellId(null)
+        setImportTarget({
+          cellId: newCell.id,
+          cellLabel: newCell.text || `セル ${newCell.position + 1}`,
+        })
+      } catch (err) {
+        setToast({ message: `操作失敗: ${(err as Error).message}`, type: 'error' })
+      }
+      return
+    }
+    setImportTarget({
+      cellId: cell.id,
+      cellLabel: cell.text || `セル ${cell.position + 1}`,
+    })
+  }
+
+  // 「周辺セルのクリア」確定: 表示中グリッドの周辺 8 セル + 配下を一括クリア (中心は保持)。Undo 非対象。
+  const handleClearPeripheralsConfirm = useCallback(async () => {
+    if (!currentGridId) { setClearPeripheralsConfirm(false); return }
+    try {
+      await clearGridPeripherals(currentGridId)
+      reloadAll()
+      setToast({ message: '周辺セルをクリアしました', type: 'success' })
+    } catch (e) {
+      setToast({ message: `クリア失敗: ${(e as Error).message}`, type: 'error' })
+    } finally {
+      setClearPeripheralsConfirm(false)
+    }
+  }, [currentGridId, reloadAll])
+
+  // セル左上チェックボックスのトグル。API 層が階層カスケード (親 → 子 / 子全 → 親) を担当。
+  // 完了後は reload して表示を反映。Undo スタックには積まない (仕様: シンプルなトグル扱い)。
+  async function handleToggleDone(cell: Cell) {
+    if (isLocked) return  // ロック中はチェックボックス state も変更させない (migration 011)
+    try {
+      await toggleCellDone(cell.id)
+      reloadAll()
+    } catch (e) {
+      setToast({ message: `チェック失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }
+
+  async function handleStockPaste(item: StockItem) {
+    if (isLocked) return  // ロック中はストックからの貼付けを block (migration 011)
+    // インライン編集中のセルを貼り付け先にする (詳細編集モーダル廃止後の動線)
+    let targetCellId = inlineEditingCellId
+    if (!targetCellId) {
+      setToast({ message: 'ペースト先のセルをインライン編集中にしてください (またはドラッグ&ドロップしてください)', type: 'info' })
+      return
+    }
+    // pending edit (空 slot) の場合、本物の cell をまず INSERT して target id を取り直す
+    if (targetCellId.startsWith('pending:') && pendingEdit) {
+      const newCell = await upsertCellAt(pendingEdit.gridId, pendingEdit.position, {})
+      refreshCell(newCell)
+      targetCellId = newCell.id
+      setInlineEditingCellId(newCell.id)
+      setPendingEdit(null)
+    }
+    // 中心セルが空のグリッドの周辺セルは disabled → ペースト不可 (drilled child は getCenterCell ベース判定)
+    const targetCell = dndCells.find((c) => c.id === targetCellId)
+    if (targetCell && !canPasteIntoPeripheral(targetCell, dndCells)) {
+      setToast({ message: '中心セルが空のため周辺セルには貼り付けできません', type: 'info' })
+      return
+    }
+    try {
+      await pasteFromStock(item.id, targetCellId)
+      reload()
+    } catch (e) {
+      setToast({ message: `ペースト失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }
+
+  // エクスポート (インポートと揃え、JSON / Markdown / インデントテキストに加え、視覚出力として PNG / PDF)。
+  // tauri-plugin-fs で $DOWNLOAD に直接書き、保存先ファイル名を toast で通知する
+  // (Tauri WebKit は <a download> の click による自動ダウンロードをサポートしないため)。
+  async function handleExport(format: 'png' | 'pdf' | 'json' | 'markdown' | 'indent') {
+    setExportMenu(false)
+    if (!currentGridId) return
+    try {
+      let filename: string | null = null
+      if (format === 'png' && gridRef.current) {
+        filename = await exportAsPNG(gridRef.current)
+      } else if (format === 'pdf' && gridRef.current) {
+        filename = await exportAsPDF(gridRef.current)
+      } else if (format === 'json') {
+        const data = await exportToJSON(currentGridId)
+        filename = await downloadJSON(data)
+      } else if (format === 'markdown') {
+        const md = await exportToMarkdown(currentGridId)
+        filename = await downloadText(md, 'md')
+      } else if (format === 'indent') {
+        const txt = await exportToIndentText(currentGridId)
+        filename = await downloadText(txt, 'txt')
+      }
+      if (filename) {
+        setToast({ message: `ダウンロードフォルダに保存しました: ${filename}`, type: 'success' })
+      }
+    } catch (e) {
+      console.error('[export] failed:', e)
+      setToast({ message: `エクスポートに失敗: ${(e as Error).message}`, type: 'error' })
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
+      {/* オフラインインジケーター。色は neutral 統一、状態は WarningIcon の形で識別 (Q3=A 方針)。 */}
+      {isOffline && (
+        <div className="bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 border-b border-neutral-300 dark:border-neutral-700 text-xs py-1 flex items-center justify-center gap-1.5">
+          <WarningIcon className="w-3.5 h-3.5 shrink-0" />
+          <span>オフライン — 変更はローカルに保存されます</span>
+        </div>
+      )}
+
+      {/* ヘッダー */}
+      <header className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-4 py-2 flex items-center gap-2 shrink-0">
+        <Breadcrumb onHome={handleNavigateHome} onNavigate={handleBreadcrumbNavigate} />
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <ThemeToggle />
+
+          {/* 文字サイズ (-10 〜 +10、各段 ×1.1) */}
+          <div className="flex items-stretch rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+            <button
+              onClick={() => bumpFontLevel(-1)}
+              className="px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 disabled:opacity-30"
+              disabled={fontLevel <= -10}
+              title="文字を小さく"
+            >
+              A−
+            </button>
+            <button
+              onClick={() => resetFontLevel()}
+              className="px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border-x border-neutral-200 dark:border-neutral-700 min-w-[3.5rem] text-center tabular-nums"
+              title={`100% にリセット (現在 level ${fontLevel >= 0 ? '+' : ''}${fontLevel})`}
+            >
+              {(fontScale * 100).toFixed(0)}%
+            </button>
+            <button
+              onClick={() => bumpFontLevel(1)}
+              className="px-2 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 disabled:opacity-30"
+              disabled={fontLevel >= 20}
+              title="文字を大きく"
+            >
+              A＋
+            </button>
+          </div>
+
+          {/* チェックボックス表示 ON/OFF (チェックボックス型ボタン) */}
+          <button
+            type="button"
+            onClick={handleToggleShowCheckbox}
+            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+              showCheckbox
+                ? 'bg-neutral-900 dark:bg-neutral-100 border-neutral-900 dark:border-neutral-100 text-white dark:text-neutral-900'
+                : 'bg-white dark:bg-neutral-900 border-neutral-400 dark:border-neutral-500 hover:border-neutral-700 dark:hover:border-neutral-300 text-transparent'
+            }`}
+            title={showCheckbox ? 'チェックボックス表示中 (クリックで非表示)' : 'チェックボックス非表示 (クリックで表示)'}
+            aria-label="toggle checkbox display"
+            aria-pressed={showCheckbox}
+          >
+            <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 8 7 12 13 4" />
+            </svg>
+          </button>
+
+          {/* 表示モード切替: **次に切り替わる先** のラベルだけを 1 ボタンで表示する。
+              3×3 モード時は `9x9` ボタン、9×9 モード時は `3x3` ボタンが見える。
+              「現状ハイライト + クリック対象」を分離していた旧 segmented control よりも
+              "押すと何が起きるか" が即座に伝わる (Welcome モーダルでもこの前提で説明する)。 */}
+          <button
+            onClick={() => handleViewModeSwitch(viewMode === '3x3' ? '9x9' : '3x3')}
+            disabled={viewSwitch != null}
+            className="px-3 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-60"
+            title={viewMode === '3x3' ? '9×9 表示に切替' : '3×3 表示に戻る'}
+            aria-label={viewMode === '3x3' ? '9×9 表示に切替' : '3×3 表示に戻る'}
+          >
+            {viewMode === '3x3' ? '9x9' : '3x3'}
+          </button>
+
+          {/* エクスポート */}
+          <div className="relative">
+            <Button variant="secondary" size="sm" onClick={() => setExportMenu((v) => !v)}>
+              エクスポート ▾
+            </Button>
+            {exportMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-20 min-w-[140px]">
+                {(
+                  [
+                    { fmt: 'png', label: 'PNG' },
+                    { fmt: 'pdf', label: 'PDF' },
+                    { fmt: 'json', label: 'JSON' },
+                    { fmt: 'markdown', label: 'Markdown' },
+                    { fmt: 'indent', label: 'インデントテキスト' },
+                  ] as const
+                ).map(({ fmt, label }) => (
+                  <button
+                    key={fmt}
+                    onClick={() => handleExport(fmt)}
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 first:rounded-t-xl last:rounded-b-xl"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ロックバナーは廃止 (画面を広く使うため)。ロック状態は Cell の枠線色 (薄いグレー) で表現する。
+          編集経路は EditorLayout 全 mutation handler が isLocked early-return ガード済みで挙動は不変。 */}
+
+      {/* メインエリア */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* グリッドエリア */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* グリッド表示（正方形・最大化） + 両脇に並列ナビボタン */}
+          <div ref={gridAreaRef} className="flex-1 flex items-center justify-center overflow-hidden p-4 gap-4">
+            {/* 左側スロット: 兄弟セルナビ「前のテーマ」(二重シェブロン) を並列ナビ「＜」(単一シェブロン)
+                の上に縦積み。兄弟ナビ = 親グリッドの隣の周辺セルのサブグリッドへ横移動 (iOS と共通配置)。
+                兄弟ナビ表示中は並列ナビが無くても 48px 枠を確保し、兄弟ボタンの縦位置を固定する。 */}
+            <div className="w-12 flex flex-col items-center justify-center gap-3 shrink-0">
+              {showSiblingNav && (
+                <button
+                  onClick={() => handleSiblingNav('prev')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                  title="前の周辺セルのサブグリッドへ（隣のテーマ）"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="13 17 8 12 13 7" />
+                    <polyline points="18 17 13 12 18 7" />
+                  </svg>
+                </button>
+              )}
+              {parallelIndex > 0 ? (
+                <button
+                  onClick={() => handleParallelNav('prev')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                  title="前の並列グリッドへ"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
+              ) : showSiblingNav ? (
+                <div className="w-12 h-12 shrink-0" aria-hidden="true" />
+              ) : null}
+            </div>
+
+            <div
+              ref={gridRef}
+              // ConvergeOverlay の direction='open' (ダッシュボード → エディタ拡大) で
+              // 中心セルを polling するときの起点。`[data-mandalart-id="X"] [data-position="4"]` で
+              // 自身配下の中心セル DOM を一意に解決する。
+              data-mandalart-id={mandalartId}
+              className="relative overflow-hidden"
+              // converging が設定されている間だけ transform / opacity を上書きして
+              // 「マンダラート → セルへ吸い込み」アニメを駆動する。null に戻すと
+              // transition: 'none' で瞬時復帰し、戻り用フェードは出さない設計
+              style={{
+                width: gridSize,
+                height: gridSize,
+                transition: converging
+                  ? `transform ${CONVERGE_DURATION_MS}ms cubic-bezier(0.4, 0, 1, 1), opacity ${CONVERGE_DURATION_MS}ms ease-in`
+                  : 'none',
+                transform: converging
+                  ? `translate(${converging.tx}px, ${converging.ty}px) scale(0.05)`
+                  : undefined,
+                opacity: converging ? 0 : 1,
+              }}
+            >
+              {viewSwitch && gridSize > 0 ? (
+                // 表示モード切替アニメーション (3×3 ↔ 9×9)
+                (() => {
+                  const FADE = VIEW_SWITCH_FADE_MS
+                  const STAGGER = VIEW_SWITCH_STAGGER_MS
+                  const GAP = OUTER_GRID_GAP_PX
+                  const B = (gridSize - 2 * GAP) / GRID_SIDE // 各ブロックの幅
+                  const rootCellMap = new Map(
+                    viewSwitch.rootCells.map((c) => [c.position, c]),
+                  )
+                  const rootCenter = viewSwitch.rootCells.find((c) => c.position === CENTER_POSITION)
+                  const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
+                  const innerWrapperBase =
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-neutral-300 dark:bg-neutral-700 rounded-xl overflow-hidden min-h-0 min-w-0'
+                  const innerEmptyCellClass = 'bg-white dark:bg-neutral-900'
+
+                  // 共通: 周辺 9×9 ブロックをレンダリングする関数 (fade-in / fade-out 用)
+                  function renderPeripheralBlock(outerPos: number, style: React.CSSProperties) {
+                    const rootCell = rootCellMap.get(outerPos) ?? null
+                    const sub =
+                      rootCell
+                        ? viewSwitch!.subGrids.get(rootCell.id) ?? null
+                        : null
+                    const hasMeaningfulSub = rootCell
+                      ? (viewSwitch!.childCountsByCellId.get(rootCell.id) ?? 0) > 0
+                      : false
+                    const blockBorder = hasMeaningfulSub
+                      ? 'border-2 border-black dark:border-neutral-300'
+                      : 'border-2 border-neutral-300 dark:border-neutral-700'
+
+                    // 子サブグリッドあり: 9 セルすべて描画
+                    if (sub) {
+                      const subCellMap = new Map(sub.cells.map((c) => [c.position, c]))
+                      const subCenter = sub.cells.find((c) => c.position === CENTER_POSITION)
+                      const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
+                      return (
+                        <div
+                          key={outerPos}
+                          style={style}
+                          className={`${innerWrapperBase} ${blockBorder}`}
+                        >
+                          {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                            const cell = subCellMap.get(innerPos)
+                            if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                            const isInnerCenter = isCenterPosition(innerPos)
+                            const isDisabled = !isInnerCenter && subCenterEmpty
+                            return (
+                              <CellComponent
+                                key={cell.id}
+                                cell={cell}
+                                isCenter={isInnerCenter}
+                                isDisabled={isDisabled}
+                                isDragSource={false}
+                                isDragOver={false}
+                                childCount={0}
+                                fontScale={fontScale}
+                                isInlineEditing={false}
+                                onStartInlineEdit={() => {}}
+                                onCommitInlineEdit={async () => {}}
+                                onInlineNavigate={() => {}}
+                                onDrill={() => {}}
+                                size="small"
+                              />
+                            )
+                          })}
+                        </div>
+                      )
+                    }
+
+                    // 子サブグリッドなし: rootCell を中央にだけ、他は空白
+                    return (
+                      <div
+                        key={outerPos}
+                        style={style}
+                        className={`${innerWrapperBase} ${blockBorder}`}
+                      >
+                        {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                          if (innerPos === CENTER_POSITION && rootCell) {
+                            return (
+                              <CellComponent
+                                key={rootCell.id + '-center'}
+                                cell={rootCell}
+                                isCenter={true}
+                                isDisabled={false}
+                                isDragSource={false}
+                                isDragOver={false}
+                                childCount={0}
+                                fontScale={fontScale}
+                                isInlineEditing={false}
+                                onStartInlineEdit={() => {}}
+                                onCommitInlineEdit={async () => {}}
+                                onInlineNavigate={() => {}}
+                                onDrill={() => {}}
+                                size="small"
+                              />
+                            )
+                          }
+                          return <div key={innerPos} className={innerEmptyCellClass} />
+                        })}
+                      </div>
+                    )
+                  }
+
+                  if (viewSwitch.direction === 'to-9x9') {
+                    // 3×3 → 9×9: 中央の 3×3 が縮小 + 終端の実 9×9 中央ブロックにクロスフェード。
+                    // 周辺ブロックは時計回り stagger で fade-in。
+                    //
+                    // 設計:
+                    //  - 縮小 3×3 (source): scale 1 → 1/3 (0〜FADE) + opacity 1 → 0 (FADE/2〜FADE)
+                    //  - 実 9×9 中央ブロック (target): 自然サイズで配置、opacity 0 → 1 (FADE/2〜FADE)
+                    //  - 2 者は FADE/2〜FADE の間にクロスフェードし、FADE 時点で完全に target に遷移
+                    //
+                    // これにより「transition layer 終了 (VIEW_SWITCH_TO_9_TOTAL_MS 時点) での
+                    // swap で text 位置がわずかに内側に動く」pop が消える。target 側は実 9×9
+                    // render と同じ構造 (bg-neutral-300 wrapper + 6px 外枠 + size='small' セル) を
+                    // 使っているのでピクセル一致する。
+                    const order = ORBIT_ORDER_PERIPHERAL
+                    const crossfadeDuration = FADE / 2
+                    const crossfadeDelay = FADE - crossfadeDuration
+                    return (
+                      <div className="relative w-full h-full pointer-events-none">
+                        {/* 9×9 周辺ブロック: 時計回り stagger で fade-in */}
+                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                          {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+                            if (isCenterPosition(outerPos)) return <div key={outerPos} />
+                            const idx = order.indexOf(outerPos)
+                            const delay =
+                              VIEW_SWITCH_TO_9_DELAY_MS + Math.max(0, idx) * STAGGER
+                            const style: React.CSSProperties = {
+                              animation: `orbit-fade-in ${FADE}ms ease-out ${delay}ms both`,
+                              willChange: 'opacity',
+                            }
+                            return renderPeripheralBlock(outerPos, style)
+                          })}
+                        </div>
+
+                        {/* source: 縮小 3×3 (中央原点で scale 1 → 1/3、後半で opacity 0) */}
+                        <div
+                          className="absolute inset-0"
+                          style={{
+                            transformOrigin: 'center center',
+                            animation: `view-shrink-to-center ${FADE}ms ease-out 0ms both, view-fade-out ${crossfadeDuration}ms linear ${crossfadeDelay}ms both`,
+                            willChange: 'transform, opacity',
+                          }}
+                        >
+                          <GridView3x3
+                            cells={viewSwitch.rootCells}
+                            gridId={viewSwitch.rootCells[0]?.grid_id ?? ''}
+                            childCounts={viewSwitch.childCountsByCellId}
+                            dragSourceId={null}
+                            dragOverId={null}
+                            fontScale={fontScale}
+                            inlineEditingCellId={null}
+                            onStartInlineEdit={() => {}}
+                            onCommitInlineEdit={async () => {}}
+                            onInlineNavigate={() => {}}
+                            onDrill={() => {}}
+                          />
+                        </div>
+
+                        {/* target: 実 9×9 中央ブロック (shrink 後半で fade-in)。
+                            通常 9×9 render と同一構造。 */}
+                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                          {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+                            if (outerPos !== 4) return <div key={outerPos} />
+                            return (
+                              <div
+                                key={outerPos}
+                                className={`${innerWrapperBase} border-[6px] border-black dark:border-white`}
+                                style={{
+                                  animation: `orbit-fade-in ${crossfadeDuration}ms ease-out ${crossfadeDelay}ms both`,
+                                  willChange: 'opacity',
+                                }}
+                              >
+                                {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                                  const cell = rootCellMap.get(innerPos)
+                                  if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                                  const isInnerCenter = isCenterPosition(innerPos)
+                                  const isDisabled = !isInnerCenter && rootCenterEmpty
+                                  return (
+                                    <CellComponent
+                                      key={cell.id}
+                                      cell={cell}
+                                      isCenter={isInnerCenter}
+                                      isDisabled={isDisabled}
+                                      isDragSource={false}
+                                      isDragOver={false}
+                                      childCount={viewSwitch!.childCountsByCellId.get(cell.id) ?? 0}
+                                      fontScale={fontScale}
+                                      isInlineEditing={false}
+                                      onStartInlineEdit={() => {}}
+                                      onCommitInlineEdit={async () => {}}
+                                      onInlineNavigate={() => {}}
+                                      onDrill={() => {}}
+                                      size="small"
+                                    />
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // 9×9 → 3×3: 中央ブロックの 9 セルを個別に 3×3 位置へ拡大展開、
+                  // 周辺ブロックは fade-out
+                  const cellOrder = ORBIT_ORDER_PERIPHERAL_THEN_CENTER
+                  return (
+                    <div className="relative w-full h-full pointer-events-none">
+                      {/* 9×9 周辺ブロック: 全体 fade-out (stagger なし) */}
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                        {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+                          if (isCenterPosition(outerPos)) return <div key={outerPos} />
+                          const style: React.CSSProperties = {
+                            animation: `view-fade-out ${FADE}ms ease-out 0ms both`,
+                            willChange: 'opacity',
+                          }
+                          return renderPeripheralBlock(outerPos, style)
+                        })}
+                      </div>
+
+                      {/* 中央ブロック 9 セル: 9×9 内側位置 → 3×3 外側位置へ transition */}
+                      {/* 各セルは最終 3×3 grid 配置で描画し、start 状態で scale(1/3) + translate
+                          により 9×9 中央ブロック内位置に寄せる。double rAF で phase を
+                          'start' → 'end' に切替えると transform transition が発火する。
+                          transform は Cell の wrapperStyle 経由でセル本体 (= grid item) に
+                          直接適用する。余分な div で囲むとセルが grid item としてサイズを
+                          得られず空になってしまうので注意。 */}
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-2">
+                        {Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
+                          const cell = rootCellMap.get(pos)
+                          const c = pos % GRID_SIDE
+                          const r = Math.floor(pos / GRID_SIDE)
+                          // 9×9 中央ブロック内位置 (global 座標、gridSize 原点から)
+                          //   top-left = (B+GAP) + c * (B/GRID_SIDE + 1), (B+GAP) + r * (B/GRID_SIDE + 1)
+                          // 3×3 natural 位置 (grid セルとしての top-left)
+                          //   = c * (B+GAP), r * (B+GAP)
+                          // transform: translate(tx, ty) scale(1/GRID_SIDE) with origin top-left
+                          //   の最終 top-left = (natural.x + tx, natural.y + ty)
+                          // これを 9×9 位置に合わせる
+                          const tx = (B + GAP) + c * (B / GRID_SIDE + 1) - c * (B + GAP)
+                          const ty = (B + GAP) + r * (B / GRID_SIDE + 1) - r * (B + GAP)
+                          const idx = cellOrder.indexOf(pos)
+                          const delay = Math.max(0, idx) * STAGGER
+                          const isCenter = isCenterPosition(pos)
+                          const isDisabled = !isCenter && rootCenterEmpty
+                          const transform =
+                            viewSwitchPhase === 'start'
+                              ? `translate(${tx}px, ${ty}px) scale(${1 / GRID_SIDE})`
+                              : 'translate(0, 0) scale(1)'
+                          const transition = `transform ${FADE}ms ease-out ${delay}ms`
+
+                          // 空 slot: 入力ありセルと同じ transform / transition で展開
+                          // (GridView3x3 の空 placeholder と同じ枠 / 背景に揃え、view-switch 終了 swap で
+                          // 見た目が pop しないようにする)
+                          if (!cell) {
+                            return (
+                              <div
+                                key={`empty-${pos}`}
+                                style={{
+                                  transform,
+                                  transition,
+                                  transformOrigin: 'top left',
+                                  willChange: 'transform',
+                                }}
+                                className={`
+                                  rounded-lg shadow-sm bg-white dark:bg-neutral-900
+                                  ${isCenter
+                                    ? 'border-[6px] border-black dark:border-white shadow-md'
+                                    : 'border border-neutral-300 dark:border-neutral-700'}
+                                `}
+                              />
+                            )
+                          }
+
+                          return (
+                            <CellComponent
+                              key={cell.id}
+                              cell={cell}
+                              isCenter={isCenter}
+                              isDisabled={isDisabled}
+                              isDragSource={false}
+                              isDragOver={false}
+                              childCount={
+                                viewSwitch.childCountsByCellId.get(cell.id) ?? 0
+                              }
+                              fontScale={fontScale}
+                              isInlineEditing={false}
+                              onStartInlineEdit={() => {}}
+                              onCommitInlineEdit={async () => {}}
+                              onInlineNavigate={() => {}}
+                              onDrill={() => {}}
+                              // pointer-events: none で click は飛ばないが、checkbox を
+                              // render させるため onToggleDone を渡す
+                              onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                              wrapperStyle={{
+                                transform,
+                                transition,
+                                transformOrigin: 'top left',
+                                willChange: 'transform',
+                              }}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()
+              ) : slide && gridSize > 0 ? (
+                // スライド中: from (現在) と to (切替先) を横並びに描画して
+                // translateX で動かす。アニメーション中は操作を無効化する。
+                <div
+                  className="flex absolute top-0 left-0"
+                  style={{
+                    width: gridSize * 2,
+                    height: gridSize,
+                    transform:
+                      slide.direction === 'forward' ? 'translateX(0)' : 'translateX(-50%)',
+                    animation: `${
+                      slide.direction === 'forward'
+                        ? 'parallel-slide-forward'
+                        : 'parallel-slide-backward'
+                    } ${SLIDE_DURATION_MS}ms ease-in-out forwards`,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {(slide.direction === 'forward'
+                    ? [slide.fromCells, slide.toCells]
+                    : [slide.toCells, slide.fromCells]
+                  ).map((cells, i) => (
+                    <div
+                      key={i}
+                      style={{ width: gridSize, height: gridSize, flexShrink: 0 }}
+                    >
+                      {viewMode === '3x3' ? (
+                        <GridView3x3
+                          cells={cells}
+                          gridId={cells[0]?.grid_id ?? ''}
+                          childCounts={childCounts}
+                          dragSourceId={null}
+                          dragOverId={null}
+                          fontScale={fontScale}
+                          inlineEditingCellId={null}
+                          onStartInlineEdit={handleCellStartInlineEdit}
+                          onCommitInlineEdit={handleCellCommitInlineEdit}
+                          onInlineNavigate={handleCellInlineNavigate}
+                          onDrill={handleCellDrill}
+                          onContextMenu={handleContextMenu}
+                          onContextMenuEmptySlot={handleContextMenuEmptySlot}
+                          // スライド中も checkbox を表示するため onToggleDone を渡す
+                          // (pointer-events: none で click は飛ばない)
+                          onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                        />
+                      ) : (
+                        <GridView9x9
+                          rootCells={cells}
+                          subGrids={subGrids}
+                          childCounts={childCounts}
+                          dragSourceId={null}
+                          dragOverId={null}
+                          fontScale={fontScale}
+                          inlineEditingCellId={null}
+                          onStartInlineEdit={handleCellStartInlineEdit}
+                          onCommitInlineEdit={handleCellCommitInlineEdit}
+                          onInlineNavigate={handleCellInlineNavigate}
+                          onDrill={handleCellDrill}
+                          onContextMenu={handleContextMenu}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : orbit && viewMode === '3x3' && gridSize > 0 ? (
+                // セル軌道アニメーション中: 遷移後のグリッドの 9 セルを描画しつつ、
+                // 時計回りに staggered fade-in。移動セルだけは CSS transition で
+                // 開始位置から自然位置へ動く。
+                <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
+                  {(() => {
+                    const stagger =
+                      orbit.direction === 'drill-up'
+                        ? ORBIT_STAGGER_UP_MS
+                        : orbit.direction === 'initial'
+                          ? ORBIT_STAGGER_INIT_MS
+                          : ORBIT_STAGGER_DOWN_MS
+                    const fade =
+                      orbit.direction === 'drill-up'
+                        ? ORBIT_FADE_UP_MS
+                        : orbit.direction === 'initial'
+                          ? ORBIT_FADE_INIT_MS
+                          : ORBIT_FADE_DOWN_MS
+                    // 時計回り順:
+                    //  drill-up は中心を含む 9 position (中心は最後)
+                    //  drill-down は 8 周辺のみ (中心は moving cell)
+                    //  initial は中心から始まる 9 position
+                    const order =
+                      orbit.direction === 'drill-up'
+                        ? ORBIT_ORDER_PERIPHERAL_THEN_CENTER
+                        : orbit.direction === 'initial'
+                          ? ORBIT_ORDER_CENTER_THEN_PERIPHERAL
+                          : ORBIT_ORDER_PERIPHERAL
+                    const center = orbit.targetCells.find((c) => c.position === CENTER_POSITION)
+                    const centerEmpty = !center || isCellEmpty(center)
+                    // ダッシュボード → エディタ拡大経由の初回 orbit (initialDelayMs > 0) では、
+                    // convergence overlay の morph (CONVERGE_DURATION_MS) が終わるまで全セルを
+                    // opacity 0 で隠す。`animation-fill-mode: both` の効果で delay 中は from フレーム
+                    // (opacity 0) で固定される。中心セルだけは「overlay 終端と同じ瞬間に instant snap で
+                    // opacity 1 になる」必要があるので、duration を 1ms にして delay = initialDelayMs と
+                    // 揃える (overlay clear ≒ 中心セル可視化が同時に起きて handoff が seamless)。
+                    // duration 1ms は事実上の snap (60fps の 1 frame = 16ms 内で完了) で、
+                    // 「フェードしないが overlay 中は隠す」を両立する。
+                    const initialDelayMs = orbit.initialDelayMs ?? 0
+                    const isFromDashboard =
+                      orbit.direction === 'initial' && initialDelayMs > 0
+                    return Array.from({ length: GRID_CELL_COUNT }).map((_, pos) => {
+                      const cell = orbit.targetCells.find((c) => c.position === pos)
+                      const isCenter = isCenterPosition(pos)
+                      const isDisabled = !isCenter && centerEmpty
+                      const staggerIdx = order.indexOf(pos)
+                      // drill-down で pos=4 (= 移動セル) は stagger に含まれないので delay 0
+                      const fadeDelay =
+                        staggerIdx >= 0 ? staggerIdx * stagger + initialDelayMs : 0
+                      // 中心セルのみ snap、それ以外は通常 fade
+                      const cellFade = isFromDashboard && isCenter ? 1 : fade
+
+                      // 空 slot: GridView3x3 の空 placeholder と同じ styling + orbit-fade-in
+                      // を適用して、入力ありセルと同じタイミングで「内容・背景・外枠」揃って
+                      // 表示されるようにする (orbit 終了 swap で見た目が pop しないよう className を一致させる)
+                      if (!cell) {
+                        return (
+                          <div
+                            key={`empty-${pos}`}
+                            style={{
+                              animation: `orbit-fade-in ${cellFade}ms ease-out ${fadeDelay}ms both`,
+                              willChange: 'opacity',
+                            }}
+                            className={`
+                              rounded-lg shadow-sm bg-white dark:bg-neutral-900
+                              ${isCenter
+                                ? 'border-[6px] border-black dark:border-white shadow-md'
+                                : 'border border-neutral-300 dark:border-neutral-700'}
+                            `}
+                          />
+                        )
+                      }
+
+                      const isMoving = cell.id === orbit.movingCellId
+
+                      // 移動セルの transform 遷移は方向別:
+                      //  drill-down: delay 0, duration = fade — 一気に中心へ寄る
+                      //  drill-up  : delay 0, duration = staggerIdx * stagger + fade
+                      //              (natural timing で周辺に到着するよう長くドリフト)
+                      let movingDuration = fade
+                      const movingDelay = 0
+                      if (isMoving && orbit.direction === 'drill-up') {
+                        const arrival = Math.max(0, staggerIdx) * stagger + fade
+                        movingDuration = Math.max(fade, arrival)
+                      }
+
+                      // 移動セル用の keyframe 名 (8 方向から選択)
+                      const moveAnimName = isMoving
+                        ? orbitMoveAnimationName(orbit.movingFromPosition, pos)
+                        : null
+
+                      // CSS keyframes + animation-fill-mode: both を使う。これにより
+                      // 各セルは delay 期間中は from フレームで固定され、時間が来たら
+                      // 再生され、終了後は to フレームで固定される。React の state flip
+                      // に依存しないので、タイミングのブレで「一瞬で終わる」問題を防げる。
+                      const wrapperStyle: React.CSSProperties =
+                        isMoving && moveAnimName
+                          ? {
+                              animation: `${moveAnimName} ${movingDuration}ms ease-out ${movingDelay}ms both`,
+                              willChange: 'transform',
+                            }
+                          : {
+                              animation: `orbit-fade-in ${cellFade}ms ease-out ${fadeDelay}ms both`,
+                              willChange: 'opacity',
+                            }
+                      return (
+                        <CellComponent
+                          key={cell.id}
+                          cell={cell}
+                          isCenter={isCenter}
+                          isDisabled={isDisabled}
+                          isDragSource={false}
+                          isDragOver={false}
+                          childCount={orbit.childCountsByCellId.get(cell.id) ?? 0}
+                          fontScale={fontScale}
+                          isInlineEditing={false}
+                          onStartInlineEdit={() => {}}
+                          onCommitInlineEdit={async () => {}}
+                          onInlineNavigate={() => {}}
+                          onDrill={() => {}}
+                          // pointer-events: none で click は飛ばないが、checkbox を render
+                          // させるため onToggleDone を渡す (現行 showCheckbox 状態を反映)
+                          onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                          wrapperStyle={wrapperStyle}
+                        />
+                      )
+                    })
+                  })()}
+                </div>
+              ) : orbit9 && viewMode === '9x9' && gridSize > 0 ? (
+                // 9×9 orbit: サブグリッドブロック単位で時計回りに現れる。
+                // 移動ブロック (クリックされた or 親セル対応) は対応 keyframes で translate。
+                (() => {
+                  const stagger =
+                    orbit9.direction === 'drill-up'
+                      ? ORBIT_STAGGER_UP_MS
+                      : orbit9.direction === 'initial'
+                        ? ORBIT_STAGGER_INIT_MS
+                        : ORBIT_STAGGER_DOWN_MS
+                  const fade =
+                    orbit9.direction === 'drill-up'
+                      ? ORBIT_FADE_UP_MS
+                      : orbit9.direction === 'initial'
+                        ? ORBIT_FADE_INIT_MS
+                        : ORBIT_FADE_DOWN_MS
+                  const order =
+                    orbit9.direction === 'drill-up'
+                      ? ORBIT_ORDER_PERIPHERAL_THEN_CENTER
+                      : orbit9.direction === 'initial'
+                        ? ORBIT_ORDER_CENTER_THEN_PERIPHERAL
+                        : ORBIT_ORDER_PERIPHERAL
+                  const rootCellMap = new Map(
+                    orbit9.targetRootCells.map((c) => [c.position, c]),
+                  )
+                  const rootCenter = orbit9.targetRootCells.find((c) => c.position === CENTER_POSITION)
+                  const rootCenterEmpty = !rootCenter || isCellEmpty(rootCenter)
+                  // 各ブロック内の小サブグリッドラッパー共通クラス
+                  const innerWrapperBase =
+                    'grid grid-cols-3 grid-rows-3 gap-px bg-neutral-300 dark:bg-neutral-700 rounded-xl overflow-hidden min-h-0 min-w-0'
+                  const innerEmptyCellClass = 'bg-white dark:bg-neutral-900'
+                  return (
+                    <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full h-full pointer-events-none">
+                      {Array.from({ length: GRID_CELL_COUNT }).map((_, outerPos) => {
+                        const isMoving = outerPos === orbit9.movingToPosition
+                        const staggerIdx = order.indexOf(outerPos)
+                        const fadeDelay =
+                          staggerIdx >= 0 ? staggerIdx * stagger : 0
+                        let movingDuration = fade
+                        if (isMoving && orbit9.direction === 'drill-up') {
+                          const arrival = Math.max(0, staggerIdx) * stagger + fade
+                          movingDuration = Math.max(fade, arrival)
+                        }
+                        const moveAnimName =
+                          isMoving && orbit9.movingToPosition !== null
+                            ? orbitMoveAnimationName(
+                                orbit9.movingFromPosition,
+                                orbit9.movingToPosition,
+                              )
+                            : null
+                        const blockStyle: React.CSSProperties =
+                          isMoving && moveAnimName
+                            ? {
+                                animation: `${moveAnimName} ${movingDuration}ms ease-out 0ms both`,
+                                willChange: 'transform',
+                              }
+                            : {
+                                animation: `orbit-fade-in ${fade}ms ease-out ${fadeDelay}ms both`,
+                                willChange: 'opacity',
+                              }
+
+                        const isCenterBlock = isCenterPosition(outerPos)
+                        // 中央ブロック = target のルートセル 9 つ、それ以外 = target の子サブグリッド
+                        const rootCell = isCenterBlock
+                          ? null
+                          : rootCellMap.get(outerPos) ?? null
+                        const sub =
+                          !isCenterBlock && rootCell
+                            ? orbit9.targetSubGrids.get(rootCell.id) ?? null
+                            : null
+                        // 周辺ブロック外枠の黒判定: 「意味のあるサブグリッド」
+                        // (= 周辺セルに入力がある) の場合のみ 2px 黒。
+                        const hasMeaningfulSub = rootCell
+                          ? (orbit9.childCountsByCellId.get(rootCell.id) ?? 0) > 0
+                          : false
+                        const blockBorder = isCenterBlock
+                          ? 'border-[6px] border-black dark:border-white'
+                          : hasMeaningfulSub
+                            ? 'border-2 border-black dark:border-neutral-300'
+                            : 'border-2 border-neutral-300 dark:border-neutral-700'
+
+                        // 中央ブロックの内側セル
+                        if (isCenterBlock) {
+                          return (
+                            <div
+                              key={outerPos}
+                              style={blockStyle}
+                              className={`${innerWrapperBase} ${blockBorder}`}
+                            >
+                              {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                                const cell = rootCellMap.get(innerPos)
+                                if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                                const isInnerCenter = isCenterPosition(innerPos)
+                                const isDisabled = !isInnerCenter && rootCenterEmpty
+                                return (
+                                  <CellComponent
+                                    key={cell.id}
+                                    cell={cell}
+                                    isCenter={isInnerCenter}
+                                    isDisabled={isDisabled}
+                                    isDragSource={false}
+                                    isDragOver={false}
+                                    childCount={orbit9.childCountsByCellId.get(cell.id) ?? 0}
+                                    fontScale={fontScale}
+                                    isInlineEditing={false}
+                                    onStartInlineEdit={() => {}}
+                                    onCommitInlineEdit={async () => {}}
+                                    onInlineNavigate={() => {}}
+                                    onDrill={() => {}}
+                                    size="small"
+                                  />
+                                )
+                              })}
+                            </div>
+                          )
+                        }
+
+                        // 周辺ブロック: 子サブグリッドがあれば 9 セル、なければ placeholder + root cell
+                        if (sub) {
+                          const subCellMap = new Map(sub.cells.map((c) => [c.position, c]))
+                          const subCenter = sub.cells.find((c) => c.position === CENTER_POSITION)
+                          const subCenterEmpty = !subCenter || isCellEmpty(subCenter)
+                          return (
+                            <div
+                              key={outerPos}
+                              style={blockStyle}
+                              className={`${innerWrapperBase} ${blockBorder}`}
+                            >
+                              {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                                const cell = subCellMap.get(innerPos)
+                                if (!cell) return <div key={innerPos} className={innerEmptyCellClass} />
+                                const isInnerCenter = isCenterPosition(innerPos)
+                                const isDisabled = !isInnerCenter && subCenterEmpty
+                                return (
+                                  <CellComponent
+                                    key={cell.id}
+                                    cell={cell}
+                                    isCenter={isInnerCenter}
+                                    isDisabled={isDisabled}
+                                    isDragSource={false}
+                                    isDragOver={false}
+                                    childCount={0}
+                                    fontScale={fontScale}
+                                    isInlineEditing={false}
+                                    onStartInlineEdit={() => {}}
+                                    onCommitInlineEdit={async () => {}}
+                                    onInlineNavigate={() => {}}
+                                    onDrill={() => {}}
+                                    size="small"
+                                  />
+                                )
+                              })}
+                            </div>
+                          )
+                        }
+
+                        // 子サブグリッドなし: rootCell 本体だけ中央に、周辺は白プレースホルダ
+                        return (
+                          <div
+                            key={outerPos}
+                            style={blockStyle}
+                            className={`${innerWrapperBase} ${blockBorder}`}
+                          >
+                            {Array.from({ length: GRID_CELL_COUNT }).map((_, innerPos) => {
+                              if (innerPos === CENTER_POSITION && rootCell) {
+                                return (
+                                  <CellComponent
+                                    key={rootCell.id + '-center'}
+                                    cell={rootCell}
+                                    isCenter={true}
+                                    isDisabled={false}
+                                    isDragSource={false}
+                                    isDragOver={false}
+                                    childCount={0}
+                                    fontScale={fontScale}
+                                    isInlineEditing={false}
+                                    onStartInlineEdit={() => {}}
+                                    onCommitInlineEdit={async () => {}}
+                                    onInlineNavigate={() => {}}
+                                    onDrill={() => {}}
+                                    size="small"
+                                  />
+                                )
+                              }
+                              return <div key={innerPos} className={innerEmptyCellClass} />
+                            })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()
+              ) : (
+                <>
+                  {gridData && viewMode === '3x3' && gridSize > 0 && (
+                    <GridView3x3
+                      cells={cellsForRender}
+                      gridId={gridData.id}
+                      childCounts={childCounts}
+                      dragSourceId={dragSourceId}
+                      dragOverId={dragOverId}
+                      fontScale={fontScale}
+                      inlineEditingCellId={inlineEditingCellId}
+                      userId={userId}
+                      mandalartId={mandalartId}
+                      onCellSave={handleSaveCell}
+                      onStartInlineEdit={handleCellStartInlineEdit}
+                      onCommitInlineEdit={handleCellCommitInlineEdit}
+                      onInlineNavigate={handleCellInlineNavigate}
+                      onStartEmptySlotEdit={handleStartEmptySlotEdit}
+                      onDrill={handleCellDrill}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                      dropProps={cellOrSlotDropProps}
+                      onContextMenu={handleContextMenu}
+                      onContextMenuEmptySlot={handleContextMenuEmptySlot}
+                      onToggleDone={showCheckbox ? handleToggleDone : undefined}
+                      isReadOnly={isLocked}
+                      isLocked={isLocked}
+                    />
+                  )}
+                  {gridData && viewMode === '9x9' && gridSize > 0 && (
+                    <GridView9x9
+                      rootCells={gridData.cells}
+                      subGrids={subGrids}
+                      childCounts={childCounts}
+                      // 9×9 はナビゲーション専用。cut 表示や drag 状態も伝えない
+                      // (そもそも drag / cut は 9×9 から開始できないので常に null だが、
+                      //  view 切替時に 3×3 の状態が残るのを防ぐために明示的に null)
+                      dragSourceId={null}
+                      dragOverId={null}
+                      fontScale={fontScale}
+                      inlineEditingCellId={null}
+                      userId={userId}
+                      mandalartId={mandalartId}
+                      // 編集 / D&D は全て無効化 (requirements.md: 9×9 は読み取り専用)。
+                      // onDragStart は **未指定** にして Cell の `draggable={!!onDragStart}`
+                      // 判定を false にし、ブラウザ native drag そのものを起動させない
+                      // (NOOP_EDIT を渡すと truthy で draggable=true になり、ロジックは
+                      //  no-op でも視覚的に cell が cursor 追従してしまう罠)。
+                      onCellSave={NOOP_EDIT_ASYNC}
+                      onStartInlineEdit={NOOP_EDIT}
+                      onCommitInlineEdit={NOOP_EDIT_ASYNC}
+                      onInlineNavigate={NOOP_EDIT}
+                      onDrill={handleCellDrill}
+                      onContextMenu={PREVENT_CONTEXT_MENU}
+                      isReadOnly={isLocked}
+                      isLocked={isLocked}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* 右側スロット: 兄弟セルナビ「次のテーマ」(二重シェブロン) を並列ナビ「＞」/「＋」
+                の上に縦積み (iOS と共通配置)。兄弟ナビ表示中は下段 (並列/＋) が無くても
+                48px 枠を確保し、兄弟ボタンの縦位置を固定する。 */}
+            <div className="w-12 flex flex-col items-center justify-center gap-3 shrink-0">
+              {showSiblingNav && (
+                <button
+                  onClick={() => handleSiblingNav('next')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                  title="次の周辺セルのサブグリッドへ（隣のテーマ）"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="11 17 16 12 11 7" />
+                    <polyline points="6 17 11 12 6 7" />
+                  </svg>
+                </button>
+              )}
+              {parallelIndex < parallelGrids.length - 1 ? (
+                <button
+                  onClick={() => handleParallelNav('next')}
+                  className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                  title="次の並列グリッドへ"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              ) : (() => {
+                // "+" は周辺セルに 1 つでも入力がある場合のみ表示する。
+                // (中心セルは X=C 統一モデルで drilled grid なら常に親 X の値が入っているため、
+                //  中心空チェックは実質常に通ってしまい、ボタンが常時表示される問題を避ける。
+                //  また "空の並列" を作れないようにすることで、自動削除ルールとも整合する)
+                // 9×9 モードは入力・D&D ができないので、並列作成も禁止して整合を取る。
+                // 兄弟ナビ表示中 (= 3×3) は下段が空でも 48px 枠を確保して兄弟ボタン位置を固定する。
+                const placeholder = showSiblingNav ? <div className="w-12 h-12 shrink-0" aria-hidden="true" /> : null
+                if (viewMode === '9x9') return placeholder
+                const peripherals = gridData?.cells.filter((c) => c.position !== CENTER_POSITION) ?? []
+                const hasAnyPeripheralInput = peripherals.some((c) => !isCellEmpty(c))
+                if (!hasAnyPeripheralInput) return placeholder
+                return (
+                  <button
+                    onClick={handleAddParallel}
+                    className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 hover:border-neutral-500 dark:hover:border-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 shadow-sm flex items-center justify-center"
+                    title="新しい並列グリッドを追加"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                )
+              })()}
+            </div>
+          </div>
+        </div>
+
+        {/* サイドパネル（デスクトップのみ）。
+            flex item の `min-width: auto` がコンテンツ intrinsic 幅 (長 URL / pre block 等) を
+            拾って w-72 を上書きしてしまう問題があるので `min-w-0` で抑止し、`overflow-hidden`
+            で内部の横方向 overflow を確実にクリップする。これで edit / preview / stock の
+            3 タブで panel 幅が一定になる。 */}
+        <div data-converge-target="stock" className="hidden lg:flex w-72 shrink-0 min-w-0 overflow-hidden">
+          <SidePanel
+            gridId={currentGridId}
+            gridMemo={gridData?.memo ?? null}
+            onStockPaste={handleStockPaste}
+            isDragging={isDragging}
+            hoveredAction={hoveredAction}
+            stockReloadKey={stockReloadKey}
+            onStockItemDragStart={handleStockItemDragStart}
+            onStockDragEnd={handleDragEnd}
+            getActionDropProps={getActionDropProps}
+            dragSourceId={dragSourceId}
+            isReadOnly={isLocked}
+          />
+        </div>
+      </div>
+
+      {/* コンテキストメニュー */}
+      {contextMenu && (() => {
+        // 中心セル判定 (落とし穴 #10 回避のため cell.position ではなく getCenterCell の id 一致 /
+        // 空 slot は display slot position で判定)。
+        const isCenter = contextMenu.kind === 'cell'
+          ? getCenterCell(dndCells)?.id === contextMenu.cell.id
+          : contextMenu.position === CENTER_POSITION
+        // 「周辺セルのクリア」は表示中グリッドの中心セル右クリック時のみ。周辺が全空 / ロック中は出さない。
+        const showClear = contextMenu.kind === 'cell'
+          && isCenter
+          && getPeripheralCells(dndCells).some((c) => !isCellEmpty(c))
+          && !isLocked
+        // 「ここにインポート」は周辺セル限定 (中心セルはそのグリッド自身のテーマなので drilled 子グリッドを
+        // 生やせない、importIntoCell が周辺セル専用ロジックのため)。
+        const showImport = !isCenter
+        // 表示できる項目が無い (= 周辺全空の中心セル) ときはメニュー枠自体を出さない。
+        if (!showClear && !showImport) return null
+        return (
+          <div
+            className="fixed bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-30 text-sm min-w-[140px]"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onMouseLeave={() => setContextMenu(null)}
+          >
+            {showClear && (
+              <button onClick={() => handleContextAction('clear-peripherals')} className={`w-full text-left px-4 py-2 text-red-600 dark:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${showImport ? 'rounded-t-xl' : 'rounded-xl'}`}>
+                周辺セルのクリア
+              </button>
+            )}
+            {showImport && (
+              <button onClick={() => handleContextAction('import')} className={`w-full text-left px-4 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${showClear ? 'rounded-b-xl' : 'rounded-xl'}`}>
+                ここにインポート
+              </button>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* インポートダイアログ（セル配下へ） */}
+      <ImportDialog
+        open={importTarget !== null}
+        mode={importTarget ? { kind: 'cell', cellId: importTarget.cellId, cellLabel: importTarget.cellLabel } : { kind: 'new' }}
+        onClose={() => setImportTarget(null)}
+        onComplete={() => {
+          setImportTarget(null)
+          reloadAll()
+          setToast({ message: 'インポートしました', type: 'success' })
+        }}
+      />
+
+      {/* ストック → 入力ありセル drop の置換確認 */}
+      <ReplaceConfirmDialog
+        open={replaceConfirm !== null}
+        targetText={replaceConfirm?.targetText}
+        onCancel={() => setReplaceConfirm(null)}
+        onConfirm={handleReplaceConfirm}
+      />
+
+      {/* シュレッダー drop 確認 */}
+      <ShredConfirmDialog
+        open={shredConfirm !== null}
+        targetText={shredConfirm?.targetText}
+        childrenCount={shredConfirm?.childrenCount}
+        isPrimaryRoot={shredConfirm?.isPrimaryRoot}
+        onCancel={() => setShredConfirm(null)}
+        onConfirm={handleShredConfirm}
+      />
+
+      {/* 周辺セルのクリア確認 */}
+      <ClearPeripheralsConfirmDialog
+        open={clearPeripheralsConfirm}
+        onCancel={() => setClearPeripheralsConfirm(false)}
+        onConfirm={handleClearPeripheralsConfirm}
+      />
+
+      {/* エクスポート形式選択 */}
+      <ExportFormatPicker
+        open={exportPicker !== null}
+        targetText={exportPicker?.targetText}
+        onCancel={() => setExportPicker(null)}
+        onPick={handleExportPick}
+      />
+
+      {/* トースト */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          action={toast.action}
+          onClose={() => setToast(null)}
+        />
+      )}
+    </div>
+  )
+}
