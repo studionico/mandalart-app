@@ -97,11 +97,11 @@ export async function pasteSnapshot(snapshot: CellSnapshot, targetCellId: string
   if (!mandalartId) return
 
   const ts = now()
-  await supabase.from('cells').update({ text: snapshot.cell.text, image_path: snapshot.cell.image_path, color: snapshot.cell.color, updated_at: ts }).eq('id', targetCellId)
+  await supabase.from('cells').update({ text: snapshot.cell.text, image_path: snapshot.cell.image_path, color: snapshot.cell.color, updated_at: ts, synced_at: ts }).eq('id', targetCellId)
 
   const { data: rootOwner } = await supabase.from('mandalarts').select('id').eq('root_cell_id', targetCellId).is('deleted_at', null).maybeSingle()
   if (rootOwner) {
-    await supabase.from('mandalarts').update({ title: snapshot.cell.text, updated_at: ts }).eq('id', (rootOwner as { id: string }).id)
+    await supabase.from('mandalarts').update({ title: snapshot.cell.text, updated_at: ts, synced_at: ts }).eq('id', (rootOwner as { id: string }).id)
   }
 
   const isCenterSnapshot = snapshot.position === CENTER_POSITION
@@ -127,7 +127,7 @@ async function expandGridSnapshotInto(gridSnap: GridSnapshot, targetGridId: stri
     const sc = snapByPos.get(pos)
     const existingId = cellIdByPos.get(pos)
     if (existingId) {
-      await supabase.from('cells').update({ text: sc?.text ?? '', image_path: sc?.image_path ?? null, color: sc?.color ?? null, updated_at: ts }).eq('id', existingId)
+      await supabase.from('cells').update({ text: sc?.text ?? '', image_path: sc?.image_path ?? null, color: sc?.color ?? null, updated_at: ts, synced_at: ts }).eq('id', existingId)
     } else if (sc && (sc.text !== '' || sc.image_path !== null || sc.color !== null)) {
       const newCellId = generateId()
       const s = synced()

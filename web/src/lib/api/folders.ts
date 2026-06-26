@@ -59,7 +59,7 @@ export async function deleteFolder(id: string): Promise<void> {
 
   const inboxId = await ensureInboxFolder()
   const ts = now()
-  await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts }).eq('folder_id', id)
+  await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts, synced_at: ts }).eq('folder_id', id)
 
   if (!isSupabaseConfigured) return
   const { data: { session } } = await supabase.auth.getSession()
@@ -111,7 +111,7 @@ export async function adoptOrphanMandalartsToInbox(): Promise<number> {
     .is('deleted_at', null)
   if (!orphans || orphans.length === 0) return 0
   const ts = now()
-  await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts }).is('folder_id', null).is('deleted_at', null)
+  await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts, synced_at: ts }).is('folder_id', null).is('deleted_at', null)
   return orphans.length
 }
 
@@ -131,7 +131,7 @@ async function doEnsureInboxFolder(): Promise<string> {
     if (systemFolders.length > 1) {
       const dupIds = systemFolders.slice(1).map((f) => f.id)
       const ts = now()
-      await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts }).in('folder_id', dupIds)
+      await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts, synced_at: ts }).in('folder_id', dupIds)
       await supabase.from('folders').delete().in('id', dupIds)
     }
   } else {
@@ -146,6 +146,6 @@ async function doEnsureInboxFolder(): Promise<string> {
   }
 
   const ts = now()
-  await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts }).is('folder_id', null).is('deleted_at', null)
+  await supabase.from('mandalarts').update({ folder_id: inboxId, updated_at: ts, synced_at: ts }).is('folder_id', null).is('deleted_at', null)
   return inboxId
 }

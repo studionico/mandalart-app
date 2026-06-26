@@ -169,10 +169,10 @@ export async function restoreMandalart(id: string): Promise<void> {
   const { data: grids } = await supabase.from('grids').select('id').eq('mandalart_id', id)
   const gridIds = ((grids ?? []) as { id: string }[]).map((g) => g.id)
   if (gridIds.length > 0) {
-    await supabase.from('cells').update({ deleted_at: null, updated_at: ts }).in('grid_id', gridIds)
+    await supabase.from('cells').update({ deleted_at: null, updated_at: ts, synced_at: ts }).in('grid_id', gridIds)
   }
-  await supabase.from('grids').update({ deleted_at: null, updated_at: ts }).eq('mandalart_id', id)
-  await supabase.from('mandalarts').update({ deleted_at: null, updated_at: ts }).eq('id', id)
+  await supabase.from('grids').update({ deleted_at: null, updated_at: ts, synced_at: ts }).eq('mandalart_id', id)
+  await supabase.from('mandalarts').update({ deleted_at: null, updated_at: ts, synced_at: ts }).eq('id', id)
 }
 
 export async function permanentDeleteMandalart(id: string): Promise<void> {

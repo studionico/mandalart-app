@@ -96,8 +96,8 @@ export async function swapCellContent(cellIdA: string, cellIdB: string): Promise
   const [ca, cb] = await Promise.all([fetchCell(cellIdA), fetchCell(cellIdB)])
   if (!ca || !cb) return
   const ts = now()
-  await supabase.from('cells').update({ text: cb.text, image_path: cb.image_path, color: cb.color, done: cb.done, updated_at: ts }).eq('id', cellIdA)
-  await supabase.from('cells').update({ text: ca.text, image_path: ca.image_path, color: ca.color, done: ca.done, updated_at: ts }).eq('id', cellIdB)
+  await supabase.from('cells').update({ text: cb.text, image_path: cb.image_path, color: cb.color, done: cb.done, updated_at: ts, synced_at: ts }).eq('id', cellIdA)
+  await supabase.from('cells').update({ text: ca.text, image_path: ca.image_path, color: ca.color, done: ca.done, updated_at: ts, synced_at: ts }).eq('id', cellIdB)
 }
 
 export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise<void> {
@@ -116,16 +116,16 @@ export async function swapCellSubtree(cellIdA: string, cellIdB: string): Promise
   ])
   const ts = now()
   for (const g of ((childrenOfA.data ?? []) as { id: string }[])) {
-    await supabase.from('grids').update({ parent_cell_id: cellIdB, updated_at: ts }).eq('id', g.id)
+    await supabase.from('grids').update({ parent_cell_id: cellIdB, updated_at: ts, synced_at: ts }).eq('id', g.id)
   }
   for (const g of ((childrenOfB.data ?? []) as { id: string }[])) {
-    await supabase.from('grids').update({ parent_cell_id: cellIdA, updated_at: ts }).eq('id', g.id)
+    await supabase.from('grids').update({ parent_cell_id: cellIdA, updated_at: ts, synced_at: ts }).eq('id', g.id)
   }
   for (const g of ((centeredOnA.data ?? []) as { id: string }[])) {
-    await supabase.from('grids').update({ center_cell_id: cellIdB, updated_at: ts }).eq('id', g.id)
+    await supabase.from('grids').update({ center_cell_id: cellIdB, updated_at: ts, synced_at: ts }).eq('id', g.id)
   }
   for (const g of ((centeredOnB.data ?? []) as { id: string }[])) {
-    await supabase.from('grids').update({ center_cell_id: cellIdA, updated_at: ts }).eq('id', g.id)
+    await supabase.from('grids').update({ center_cell_id: cellIdA, updated_at: ts, synced_at: ts }).eq('id', g.id)
   }
   await swapCellContent(cellIdA, cellIdB)
 }
@@ -167,7 +167,7 @@ export async function copyCellSubtree(sourceCellId: string, targetCellId: string
   const topLevelGrids = allGridsInMandalart.filter((g) => g.center_cell_id === sourceCellId)
   if (topLevelGrids.length === 0) {
     const ts = now()
-    await supabase.from('cells').update({ text: src.text, image_path: src.image_path, color: src.color, updated_at: ts }).eq('id', targetCellId)
+    await supabase.from('cells').update({ text: src.text, image_path: src.image_path, color: src.color, updated_at: ts, synced_at: ts }).eq('id', targetCellId)
     return
   }
 
@@ -272,7 +272,7 @@ export async function shredCellSubtree(cellId: string): Promise<void> {
     await deleteGrid(g.id)
   }
   const ts = now()
-  await supabase.from('cells').update({ text: '', image_path: null, color: null, done: false, updated_at: ts }).eq('id', cellId)
+  await supabase.from('cells').update({ text: '', image_path: null, color: null, done: false, updated_at: ts, synced_at: ts }).eq('id', cellId)
   await propagateDoneUp(cellId, ts)
 }
 
@@ -291,7 +291,7 @@ export async function clearGridPeripherals(gridId: string): Promise<void> {
 export async function setGridDone(gridId: string, done: boolean): Promise<void> {
   const ts = now()
   const q = supabase.from('cells')
-    .update({ done, updated_at: ts })
+    .update({ done, updated_at: ts, synced_at: ts })
     .eq('grid_id', gridId)
     .is('deleted_at', null)
     .neq('done', done)
@@ -316,7 +316,7 @@ async function markSubtreeDone(cellId: string, done: boolean, ts: string): Promi
   const cell = await fetchCell(cellId)
   if (!cell) return
   if (!isCellEmpty(cell)) {
-    await supabase.from('cells').update({ done, updated_at: ts }).eq('id', cellId).neq('done', done)
+    await supabase.from('cells').update({ done, updated_at: ts, synced_at: ts }).eq('id', cellId).neq('done', done)
   }
   const { data: centeringGrids } = await supabase
     .from('grids')
@@ -368,7 +368,7 @@ async function propagateDoneUp(cellId: string, ts: string): Promise<void> {
   const parent = await getParentCellInTree(cellId)
   if (!parent) return
   if (!(await areDescendantsAllDone(parent.id))) return
-  await supabase.from('cells').update({ done: true, updated_at: ts }).eq('id', parent.id).eq('done', false)
+  await supabase.from('cells').update({ done: true, updated_at: ts, synced_at: ts }).eq('id', parent.id).eq('done', false)
   await propagateDoneUp(parent.id, ts)
 }
 
@@ -377,7 +377,7 @@ async function propagateUndoneUp(cellId: string, ts: string): Promise<void> {
   if (!parent) return
   const parentCell = await fetchCell(parent.id)
   if (!parentCell || !parentCell.done) return
-  await supabase.from('cells').update({ done: false, updated_at: ts }).eq('id', parent.id)
+  await supabase.from('cells').update({ done: false, updated_at: ts, synced_at: ts }).eq('id', parent.id)
   await propagateUndoneUp(parent.id, ts)
 }
 
