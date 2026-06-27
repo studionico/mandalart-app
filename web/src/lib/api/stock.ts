@@ -23,15 +23,20 @@ export async function getStockItems(): Promise<StockItem[]> {
 }
 
 export async function addToStock(cellId: string): Promise<StockItem> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const userId = session?.user?.id
+  if (!userId) throw new Error('Not authenticated')
+
   const snapshot = await buildCellSnapshot(cellId)
   const id = generateId()
   const ts = now()
   const s = synced()
   const { error } = await supabase.from('stock_items').insert({
     id, snapshot: JSON.stringify(snapshot), created_at: ts, synced_at: s,
+    user_id: userId,
   })
   if (error) throw error
-  return { id, snapshot, created_at: ts, user_id: '' }
+  return { id, snapshot, created_at: ts, user_id: userId }
 }
 
 export async function deleteStockItem(id: string): Promise<void> {

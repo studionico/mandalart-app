@@ -50,6 +50,10 @@ export async function nextTopSortOrder(folderId: string): Promise<number> {
 }
 
 export async function createMandalart(title = '', folderId?: string | null): Promise<Mandalart> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const userId = session?.user?.id
+  if (!userId) throw new Error('Not authenticated')
+
   const mandalartId = generateId()
   const rootGridId = generateId()
   const rootCenterCellId = generateId()
@@ -62,6 +66,7 @@ export async function createMandalart(title = '', folderId?: string | null): Pro
     id: mandalartId, title, root_cell_id: rootCenterCellId,
     folder_id: folderId ?? null, sort_order: sortOrder,
     created_at: ts, updated_at: ts, synced_at: s,
+    user_id: userId,
   })
   if (eM) throw eM
 
@@ -82,7 +87,7 @@ export async function createMandalart(title = '', folderId?: string | null): Pro
     id: mandalartId, title, root_cell_id: rootCenterCellId,
     show_checkbox: false, last_grid_id: null, sort_order: sortOrder,
     pinned: false, folder_id: folderId ?? null, locked: false,
-    created_at: ts, updated_at: ts, user_id: '',
+    created_at: ts, updated_at: ts, user_id: userId,
   }
 }
 
@@ -209,6 +214,10 @@ export async function searchMandalarts(q: string): Promise<Mandalart[]> {
 }
 
 export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const userId = session?.user?.id
+  if (!userId) throw new Error('Not authenticated')
+
   const src = await getMandalart(sourceId)
   if (!src) throw new Error(`Mandalart not found: ${sourceId}`)
 
@@ -249,6 +258,7 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     show_checkbox: src.show_checkbox, folder_id: src.folder_id ?? null,
     sort_order: sortOrder, locked: src.locked,
     created_at: ts, updated_at: ts, synced_at: s,
+    user_id: userId,
   })
   if (eMErr) throw eMErr
 
@@ -291,6 +301,6 @@ export async function duplicateMandalart(sourceId: string): Promise<Mandalart> {
     id: newMandalartId, title: src.title, root_cell_id: newRootCellId,
     show_checkbox: src.show_checkbox, last_grid_id: null, sort_order: sortOrder,
     pinned: false, folder_id: src.folder_id ?? null, locked: src.locked,
-    created_at: ts, updated_at: ts, user_id: '',
+    created_at: ts, updated_at: ts, user_id: userId,
   }
 }

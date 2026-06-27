@@ -205,6 +205,10 @@ export async function importFromJSON(
   snapshot: GridSnapshot,
   targetFolderId?: string,
 ): Promise<Mandalart> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const userId = session?.user?.id
+  if (!userId) throw new Error('Not authenticated')
+
   const mandalartId = generateId()
   const ts = now()
   const centerText = snapshot.cells.find((c) => c.position === CENTER_POSITION)?.text ?? ''
@@ -216,6 +220,7 @@ export async function importFromJSON(
     id: mandalartId, title: centerText, root_cell_id: rootCenterCellId,
     folder_id: folderId, sort_order: sortOrder,
     created_at: ts, updated_at: ts, synced_at: ts,
+    user_id: userId,
   })
   if (mErr) throw mErr
 
@@ -223,7 +228,7 @@ export async function importFromJSON(
   return {
     id: mandalartId, title: centerText, root_cell_id: rootCenterCellId,
     show_checkbox: false, pinned: false, sort_order: sortOrder,
-    folder_id: folderId, locked: false, created_at: ts, updated_at: ts, user_id: '',
+    folder_id: folderId, locked: false, created_at: ts, updated_at: ts, user_id: userId,
   }
 }
 
